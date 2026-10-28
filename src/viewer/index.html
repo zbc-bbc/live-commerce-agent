@@ -1,0 +1,1677 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
+<title>直播间 · 观众端</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Segoe UI',Roboto,'Microsoft YaHei',sans-serif;background:#eef0f4;color:#1e293b;overflow:hidden}
+button{font-family:inherit;cursor:pointer;border:none;background:none}
+.app{max-width:480px;margin:0 auto;height:100vh;height:100dvh;display:flex;flex-direction:column;background:#f3f4f6;position:relative;box-shadow:0 0 24px rgba(15,23,42,.08)}
+
+/* ===== 顶栏 ===== */
+.top{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#fff;border-bottom:1px solid #eef1f6;flex-shrink:0;z-index:5}
+.top .back{font-size:24px;color:#334155;width:30px;height:30px;line-height:28px;text-align:center}
+.room{flex:1;min-width:0}
+.room-name{font-size:15px;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:6px}
+.live-dot{width:8px;height:8px;border-radius:50%;background:#94a3b8;display:inline-block;flex-shrink:0;position:relative}
+.live-dot.on{background:#ef4444;animation:lcPulse 1.2s infinite}
+.live-dot.on::after{content:'';position:absolute;inset:0;border-radius:50%;pointer-events:none}
+@keyframes lcPulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.45)}50%{box-shadow:0 0 0 5px rgba(239,68,68,0)}}
+.room-sub{font-size:11px;color:#94a3b8;margin-top:1px;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.top .share-btn{font-size:19px;color:#475569;padding:2px 6px}
+
+/* ===== 直播舞台 16:9 ===== */
+.stage{position:relative;aspect-ratio:16/9;background:#0f1220;overflow:hidden;flex-shrink:0;background:radial-gradient(120% 120% at 50% 0%,#1e2a4a 0%,#10131f 60%,#0b0d16 100%)}
+.stage:after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(10,12,20,.25) 0%,rgba(10,12,20,0) 18%,rgba(10,12,20,0) 62%,rgba(10,12,20,.55) 100%);pointer-events:none}
+.stage-art{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+.stage-art img{max-width:58%;max-height:66%;object-fit:contain;filter:drop-shadow(0 10px 26px rgba(0,0,0,.5));border-radius:12px}
+.stage-art .emoji{font-size:118px;filter:drop-shadow(0 12px 30px rgba(0,0,0,.55));animation:floaty 3.4s ease-in-out infinite}
+@keyframes floaty{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-8px) scale(1.03)}}
+.stage-badge{position:absolute;top:10px;left:10px;display:flex;gap:6px;align-items:center;z-index:2}
+.stage-badge .pill{font-size:11px;font-weight:700;padding:3px 9px;border-radius:12px;color:#fff;display:inline-flex;align-items:center;gap:4px}
+.pill.live{background:linear-gradient(90deg,#ff2d55,#ff4d4f);box-shadow:0 2px 8px rgba(255,45,85,.4)}
+.pill.live .rd{width:6px;height:6px;border-radius:50%;background:#fff;animation:blink 1s infinite}
+.pill.off{background:rgba(148,163,184,.9)}
+.pill.lag{background:rgba(15,23,42,.55);backdrop-filter:blur(2px)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+.stage-viewers{position:absolute;top:10px;right:10px;z-index:2;background:rgba(15,23,42,.45);color:#fff;font-size:11px;padding:3px 9px;border-radius:12px;backdrop-filter:blur(2px)}
+.stage-banner{position:absolute;left:10px;right:10px;top:44px;z-index:2;text-align:center;color:#cbd5e1;font-size:12px;display:none;line-height:1.5}
+/* 底部商品信息条（叠加在舞台下沿） */
+.stage-cta{position:absolute;left:10px;right:10px;bottom:10px;z-index:3;display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.97);border-radius:12px;padding:8px 10px;box-shadow:0 6px 18px rgba(0,0,0,.25);animation:slideUp .3s}
+@keyframes slideUp{from{transform:translateY(14px);opacity:0}to{transform:translateY(0);opacity:1}}
+.stage-thumb{width:52px;height:52px;border-radius:9px;overflow:hidden;flex-shrink:0;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-size:30px}
+.stage-thumb img{width:100%;height:100%;object-fit:cover}
+.stage-pinfo{flex:1;min-width:0}
+.stage-pname{font-size:13px;font-weight:600;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage-pprice{font-size:16px;font-weight:700;color:#ef4444;line-height:1.1}
+.stage-pprice .op{font-size:11px;color:#94a3b8;font-weight:400;text-decoration:line-through;margin-left:4px}
+.stage-buy{padding:7px 16px;background:linear-gradient(90deg,#ff2d55,#ef4444);color:#fff;font-size:13px;font-weight:700;border-radius:18px;flex-shrink:0;box-shadow:0 3px 8px rgba(239,68,68,.35)}
+.stage-buy:active{transform:scale(.96)}
+.stage-buy[disabled]{background:#cbd5e1;box-shadow:none;color:#fff}
+.stage-off{position:absolute;inset:0;z-index:3;display:none;align-items:center;justify-content:center;flex-direction:column;background:rgba(10,12,20,.72);backdrop-filter:blur(2px);color:#e2e8f0;font-size:14px;gap:6px}
+.stage-off .ic{font-size:42px}
+.stage-off .tip{font-size:11px;color:#94a3b8}
+
+/* ===== 商品横条 ===== */
+.rail-sec{flex-shrink:0;background:#fff;padding:10px 0 8px;border-bottom:1px solid #eef1f6}
+.rail-hdr{display:flex;align-items:center;justify-content:space-between;padding:0 12px 8px}
+.rail-hdr b{font-size:13px;color:#0f172a}
+.rail-hdr span.tip{font-size:10px;color:#94a3b8}
+.rail{display:flex;gap:8px;overflow-x:auto;padding:0 12px 2px;scrollbar-width:none}
+.rail::-webkit-scrollbar{display:none}
+.p-card{flex-shrink:0;width:120px;background:#fff;border:1px solid #eef1f6;border-radius:10px;overflow:hidden;cursor:pointer;position:relative;transition:.15s}
+.p-card:active{transform:scale(.97)}
+.p-card.cd{border-color:#2563eb;box-shadow:0 0 0 1px #2563eb}
+.p-card.cd:after{content:'讲解中';position:absolute;top:0;left:0;background:#2563eb;color:#fff;font-size:9px;padding:1px 6px;border-radius:0 0 8px 0;z-index:2}
+.p-thumb{width:120px;height:86px;display:flex;align-items:center;justify-content:center;font-size:44px;background:#f1f5f9;overflow:hidden}
+.p-thumb img{width:100%;height:100%;object-fit:cover}
+.p-body{padding:6px 8px 8px}
+.p-name{font-size:11px;color:#1e293b;line-height:1.3;height:28px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.p-price{font-size:14px;font-weight:700;color:#ef4444;margin-top:3px}
+.p-price .op{font-size:10px;color:#94a3b8;font-weight:400;text-decoration:line-through;margin-left:3px}
+.p-foot{display:flex;align-items:center;justify-content:space-between;margin-top:4px}
+.p-sold{font-size:9px;color:#94a3b8}
+.p-buy{font-size:11px;font-weight:700;color:#fff;background:#ef4444;border-radius:12px;padding:2px 10px}
+.p-buy:active{opacity:.8}
+
+/* ===== 弹幕 / 聊天 ===== */
+.chat{flex:1;min-height:0;overflow-y:auto;padding:10px 12px 6px;overscroll-behavior:contain}
+.chat::-webkit-scrollbar{width:0}
+.chat-hdr{display:flex;align-items:center;gap:8px;font-size:11px;color:#94a3b8;padding-bottom:6px;flex-wrap:wrap}
+.chat-hdr .act{color:#2563eb;cursor:pointer}
+.chat-hdr .act.gray{color:#94a3b8}
+.ch-row{margin-bottom:7px;animation:rowIn .18s ease-out}
+@keyframes rowIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.ch-bubble{display:flex;gap:7px;align-items:flex-start}
+.ch-av{position:relative;overflow:hidden;width:24px;height:24px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;font-weight:600;margin-top:1px}
+.ch-main{max-width:78%;background:#fff;border-radius:4px 10px 10px 10px;padding:6px 9px;box-shadow:0 1px 2px rgba(15,23,42,.05)}
+.ch-name{font-size:10px;color:#94a3b8;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px}
+.ch-text{font-size:13px;color:#1e293b;line-height:1.45;word-break:break-word;white-space:pre-wrap}
+.ch-main.self{background:#eaf1ff;border-radius:10px 4px 10px 10px}
+.ch-main.self .ch-text{color:#1e3a8a}
+.ch-host{background:#fef3f2;border:1px solid #ffe0de}
+.ch-host .ch-text{color:#9f1e1e}
+.host-tag{font-size:9px;background:#ffd7d5;color:#c0342f;padding:0 5px;border-radius:6px;margin-right:5px;font-weight:600}
+.sys-row{display:flex;justify-content:center;margin:7px 0}
+.sys-tag{font-size:10px;color:#7c8aa5;background:#eef1f6;border-radius:9px;padding:2px 9px}
+/* 回复提示内联在主句后 */
+.rep{display:block;margin-top:4px;padding-top:4px;border-top:1px dashed #e6ecf5;font-size:12px;color:#2563eb;line-height:1.4}
+
+/* ===== 底部操作栏 ===== */
+.dock{flex-shrink:0;display:flex;align-items:center;gap:8px;padding:9px 12px calc(9px + env(safe-area-inset-bottom));background:#fff;border-top:1px solid #eef1f6}
+.dock-input{flex:1;background:#f1f5f9;border-radius:18px;padding:9px 14px;font-size:13px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dock-btn{width:42px;height:42px;border-radius:50%;background:#fff;border:1px solid #eef1f6;font-size:19px;display:flex;align-items:center;justify-content:center;position:relative;flex-shrink:0}
+.dock-btn:active{transform:scale(.92)}
+.like-num{position:absolute;top:-3px;right:-3px;font-size:9px;color:#ef4444;font-weight:700;background:#fff;border:1px solid #ffe0de;border-radius:8px;padding:0 4px;font-style:normal}
+.dock-send{padding:9px 15px;background:linear-gradient(90deg,#2563eb,#3b82f6);color:#fff;font-size:13px;font-weight:600;border-radius:18px;flex-shrink:0}
+.hearts-fly{position:fixed;pointer-events:none;z-index:60}
+.hearts-fly span{position:fixed;font-size:20px;animation:flyUp .9s ease-out forwards}
+@keyframes flyUp{0%{transform:translateY(0) scale(.8);opacity:1}100%{transform:translateY(-150px) scale(1.15);opacity:0}}
+
+/* ===== 底部输入条（点击后弹出） ===== */
+.inputbar{position:absolute;left:0;right:0;bottom:0;z-index:40;display:flex;gap:8px;align-items:center;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:#fff;border-top:1px solid #e2e8f0;box-shadow:0 -4px 20px rgba(15,23,42,.08)}
+.inputbar input{flex:1;border:1px solid #e2e8f0;border-radius:18px;padding:9px 14px;font-size:14px;outline:none;background:#f8fafc}
+.inputbar input:focus{border-color:#2563eb}
+.inputbar .send{padding:8px 16px;background:#2563eb;color:#fff;border-radius:18px;font-size:13px;font-weight:600}
+.nick-chip{font-size:11px;color:#475569;background:#f1f5f9;border-radius:12px;padding:4px 9px;cursor:pointer;white-space:nowrap;max-width:92px;overflow:hidden;text-overflow:ellipsis}
+
+/* ===== 底部弹层 (sheet) ===== */
+.mask{position:absolute;inset:0;background:rgba(15,23,42,.45);z-index:50;display:none;align-items:flex-end}
+.mask.open{display:flex}
+.sheet{width:100%;max-width:480px;margin:0 auto;background:#fff;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));animation:sheetIn .25s ease-out;max-height:82%;overflow-y:auto}
+@keyframes sheetIn{from{transform:translateY(40px);opacity:.4}to{transform:translateY(0);opacity:1}}
+.sheet .hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.sheet .hd b{font-size:15px;color:#0f172a}
+.sheet .hd .x{font-size:20px;color:#94a3b8;padding:0 4px}
+.sheet-prod{display:flex;gap:12px}
+.sheet-img{width:104px;height:104px;border-radius:12px;overflow:hidden;flex-shrink:0;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-size:58px}
+.sheet-img img{width:100%;height:100%;object-fit:cover}
+.sheet-name{font-size:14px;font-weight:600;color:#0f172a;line-height:1.4}
+.sheet-cat{font-size:11px;color:#2563eb;background:#eff6ff;border-radius:8px;padding:1px 7px;display:inline-block;margin-top:5px}
+.sheet-meta{font-size:11px;color:#94a3b8;margin-top:6px;display:flex;gap:8px;flex-wrap:wrap}
+.sheet-price{font-size:22px;font-weight:700;color:#ef4444;margin:8px 0 2px}
+.sheet-price .op{font-size:13px;font-weight:400;text-decoration:line-through;color:#94a3b8;margin-left:6px}
+.sheet-price .cnt{font-size:12px;color:#94a3b8;font-weight:400;margin-left:8px}
+.sheet-desc{background:#f8fafc;border-radius:10px;padding:10px 12px;font-size:12px;color:#475569;line-height:1.7;margin:12px 0}
+.sheet-specs{margin:8px 0}
+.sheet-specs .si{display:flex;gap:8px;font-size:12px;padding:5px 0;border-bottom:1px dashed #eef1f6;color:#475569}
+.sheet-specs .si b{width:64px;color:#94a3b8;font-weight:500;flex-shrink:0}
+.big-buy{width:100%;margin-top:14px;padding:13px;border-radius:24px;background:linear-gradient(90deg,#ff2d55,#ef4444);color:#fff;font-size:16px;font-weight:700;box-shadow:0 6px 16px rgba(239,68,68,.3)}
+.big-buy:disabled{background:linear-gradient(90deg,#cbd5e1,#e2e8f0);box-shadow:none;color:#fff}
+.big-buy.blue{background:linear-gradient(90deg,#2563eb,#3b82f6);box-shadow:0 6px 16px rgba(37,99,235,.3)}
+.sheet-ok{text-align:center;padding:18px 0 4px}
+.sheet-ok .ok-ic{font-size:52px}
+.sheet-ok .ok-t{font-size:17px;font-weight:700;color:#0f172a;margin-top:6px}
+.sheet-ok .ok-s{font-size:12px;color:#94a3b8;margin-top:6px;line-height:1.7}
+.ok-no{font-size:11px;color:#2563eb;margin-top:12px;display:inline-block;padding:7px 20px;border:1px solid #bfdbfe;border-radius:18px}
+/* ===== 编辑资料（昵称/头像） ===== */
+.pe-head{display:flex;gap:14px;align-items:center}
+.pe-av{position:relative;width:58px;height:58px;border-radius:50%;background:#eff6ff;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:25px;color:#2563eb;font-weight:700;flex-shrink:0}
+.pe-av span{line-height:1}
+.pe-av img{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover;border-radius:50%}
+.pe-lbl{font-size:12px;color:#64748b;margin-bottom:5px;margin-top:14px}
+.pe-name-inp{width:100%;box-sizing:border-box;border:1px solid #e2e8f0;border-radius:10px;padding:9px 11px;font-size:14px;outline:none;font-family:inherit}
+.pe-name-inp:focus{border-color:#2563eb}
+.pe-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:8px;max-height:170px;overflow-y:auto}
+.pe-grid button{aspect-ratio:1/1;border-radius:10px;background:#f8fafc;border:2px solid transparent;display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer}
+.pe-grid button img{width:100%;height:100%;border-radius:50%;object-fit:cover}
+.pe-grid button.on{border-color:#2563eb;background:#eff6ff}
+.pe-upload-row{display:flex;gap:10px;align-items:center;margin-top:12px}
+.pe-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+
+/* 礼物 */
+.gift-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:4px}
+.gift-cell{text-align:center;padding:12px 4px;border-radius:12px;border:1px solid #f1f5f9;cursor:pointer}
+.gift-cell:active{background:#f1f5f9}
+.gift-cell .g{font-size:30px}
+.gift-cell .gn{font-size:11px;color:#64748b;margin-top:4px}
+
+/* toast */
+#toastWrap{position:absolute;top:16px;left:0;right:0;z-index:80;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none}
+.toast{background:rgba(15,23,42,.85);color:#fff;font-size:12px;padding:7px 16px;border-radius:16px;animation:toastIn .2s;max-width:84%}
+.toast.ok{background:rgba(5,150,105,.92)}
+.toast.err{background:rgba(220,38,38,.92)}
+@keyframes toastIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+
+/* ===== 摄像头画面帧（全屏覆盖舞台） ===== */
+#stageCam{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;display:none;background:#0f1220}
+#stageCam.live{display:block}
+
+/* 顶栏钱包 */
+.wallet-pill{cursor:pointer;color:#2563eb;font-weight:700;font-size:11px}
+
+/* ===== 我的 / 订单 / 钱包 ===== */
+.me-head{display:flex;align-items:center;gap:12px;background:linear-gradient(120deg,#1e3a8a,#2563eb);color:#fff;border-radius:14px;padding:14px}
+.me-av{position:relative;width:46px;height:46px;border-radius:50%;background:rgba(255,255,255,.22);overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:700;flex-shrink:0}
+.me-av img{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover;border-radius:50%}
+.me-name{font-size:15px;font-weight:700}
+.me-uid{font-size:10px;opacity:.75;margin-top:1px}
+.me-bal{font-size:12px;opacity:.92;margin-top:4px}
+.me-bal b{font-size:19px;color:#ffd76a}
+.me-balbtns{display:flex;gap:8px;margin-top:9px;flex-wrap:wrap}
+.re-btn{font-size:12px;padding:5px 13px;border-radius:14px;background:rgba(255,255,255,.16);color:#fff}
+.re-btn:active{background:rgba(255,255,255,.32)}
+.re-btn.ghost{background:transparent;border:1px solid rgba(255,255,255,.5)}
+.tabbar{display:flex;gap:2px;margin:13px 0 6px;border-bottom:1px solid #eef1f6;overflow-x:auto;scrollbar-width:none}
+.tabbar::-webkit-scrollbar{display:none}
+.tab{font-size:13px;padding:8px 0;color:#64748b;border-bottom:2px solid transparent;white-space:nowrap;margin-right:15px;flex-shrink:0}
+.tab.on{color:#2563eb;font-weight:700;border-color:#2563eb}
+.tab .cnt{font-size:10px;background:#ffe4e6;color:#ef4444;border-radius:8px;padding:0 5px;margin-left:3px}
+.oc{background:#fafbfc;border:1px solid #eef1f6;border-radius:12px;padding:10px;margin-bottom:10px}
+.oc-top{display:flex;gap:10px}
+.oc-img{width:56px;height:56px;border-radius:9px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-size:28px;overflow:hidden;flex-shrink:0}
+.oc-img img{width:100%;height:100%;object-fit:cover}
+.oc-info{flex:1;min-width:0}
+.oc-pname{font-size:13px;font-weight:600;color:#0f172a}
+.oc-amt{font-size:12px;color:#ef4444;font-weight:700;margin-top:3px}
+.oc-meta{font-size:10px;color:#94a3b8;margin-top:4px;line-height:1.7}
+.oc-status{font-size:10px;font-weight:700;padding:1px 7px;border-radius:9px}
+.oc-foot{display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:8px;flex-wrap:wrap}
+.b-ghost{font-size:12px;color:#475569;border:1px solid #d1d5db;border-radius:14px;padding:5px 12px}
+.b-blue{font-size:12px;color:#fff;background:#2563eb;border-radius:14px;padding:5px 14px;font-weight:600}
+.b-red{font-size:12px;color:#fff;background:#ef4444;border-radius:14px;padding:5px 14px;font-weight:600}
+.oc-empty{text-align:center;color:#94a3b8;font-size:12px;padding:28px 0}
+.oc-tip{text-align:center;color:#94a3b8;font-size:11px;padding:4px 0 18px}
+
+/* ===== 账号 / 私信 ===== */
+.auth-body{padding:2px 2px 6px}
+.auth-err{color:#ef4444;font-size:12px;min-height:18px;padding:6px 0 2px}
+.auth-tip{font-size:11px;color:#94a3b8;line-height:1.6;margin-top:12px;text-align:center}
+.msg-badge{position:absolute;top:-5px;right:-5px;background:#ef4444;color:#fff;font-size:10px;font-weight:700;border-radius:9px;padding:0 5px;min-width:15px;height:15px;line-height:15px;text-align:center;box-shadow:0 0 0 2px #fff}
+.msg-list{max-height:52vh;overflow-y:auto;padding:4px 2px 8px}
+.msg-row{margin:10px 0;display:flex;flex-direction:column;align-items:flex-start}
+.msg-row.mine{align-items:flex-end}
+.msg-meta{font-size:10px;color:#94a3b8;margin-bottom:3px;padding:0 4px}
+.msg-bubble{max-width:78%;font-size:13px;line-height:1.5;color:#0f172a;background:#f1f5f9;border-radius:12px;padding:8px 11px;word-break:break-word}
+.msg-bubble.mine{background:#2563eb;color:#fff}
+/* 私信输入条：与底部弹幕输入条同构，但嵌在弹层内，所以不复用 .inputbar（那是 absolute 吸底） */
+.pm-bar{display:flex;gap:8px;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid #eef2f7}
+.pm-inp{flex:1;min-width:0;box-sizing:border-box;border:1px solid #e2e8f0;border-radius:18px;padding:9px 14px;font-size:13px;outline:none;background:#f8fafc;font-family:inherit}
+.pm-inp:focus{border-color:#2563eb}
+.pm-send{padding:8px 16px;background:#2563eb;color:#fff;border:none;border-radius:18px;font-size:13px;font-weight:600;font-family:inherit;flex-shrink:0;cursor:pointer}
+.pm-send:disabled{background:#cbd5e1;cursor:default}
+
+/* ===== 收银台 ===== */
+.cash-prod{display:flex;gap:12px;align-items:center;padding:12px;background:#f8fafc;border-radius:12px;margin-bottom:12px}
+.cash-img{width:62px;height:62px;border-radius:9px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-size:32px;overflow:hidden;flex-shrink:0}
+.cash-img img{width:100%;height:100%;object-fit:cover}
+.cash-pn{font-size:13px;font-weight:600;color:#0f172a;line-height:1.35}
+.cash-row{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#64748b;padding:6px 0}
+.cash-row b{color:#2563eb}
+.cash-row .v{color:#ef4444;font-weight:700}
+.cash-price{display:flex;justify-content:space-between;align-items:center;font-size:16px;font-weight:700;color:#0f172a;border-top:1px dashed #e2e8f0;margin-top:10px;padding-top:12px}
+.cash-price .v{font-size:22px;color:#ef4444}
+.cash-pay{width:100%;margin-top:14px;padding:13px;border-radius:24px;background:linear-gradient(90deg,#2563eb,#3b82f6);color:#fff;font-size:16px;font-weight:700;box-shadow:0 6px 16px rgba(37,99,235,.3)}
+.cash-pay:disabled{background:linear-gradient(90deg,#cbd5e1,#e2e8f0);box-shadow:none}
+.cash-later{width:100%;margin-top:8px;padding:11px;border-radius:22px;border:1px solid #d1d5db;color:#475569;font-size:14px}
+.insuf{color:#ef4444;font-size:12px;text-align:center;margin-top:10px}
+
+/* 评价 */
+.stars{font-size:30px;letter-spacing:8px;text-align:center;color:#fbbf24;cursor:pointer;margin:4px 0 10px;user-select:none}
+.rev-ta{width:100%;border:1px solid #e2e8f0;border-radius:10px;padding:10px;font-size:13px;min-height:76px;resize:none;outline:none;font-family:inherit;box-sizing:border-box}
+.rev-ta:focus{border-color:#2563eb}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- 顶栏 -->
+  <header class="top">
+    <button class="back" onclick="goBack()">‹</button>
+    <div class="room">
+      <div class="room-name"><span class="live-dot" id="liveDot"></span><span id="roomName">AI 好物直播间</span></div>
+      <div class="room-sub"><span id="onlineNum">0</span> 人在看 · <span id="stageLabel">等待开播</span> · <span class="wallet-pill" id="walletPill" onclick="onWalletTap()">💰 ¥<b id="walletVal">0</b></span><span class="wallet-pill" id="msgPill" onclick="openMessages()" style="position:relative;margin-left:6px;display:none">✉️<span id="msgBadge" class="msg-badge" style="display:none">0</span></span></div>
+    </div>
+    <button class="share-btn" onclick="shareRoom()">↗</button>
+  </header>
+
+  <!-- 舞台 -->
+  <section class="stage" id="stage">
+    <img id="stageCam" class="stage-cam" alt="" onerror="this.classList.remove('live')">
+    <div class="stage-art" id="stageArt"><div class="emoji">🎥</div></div>
+    <div class="stage-badge" id="stageBadge"></div>
+    <div class="stage-viewers" id="stageViewers">👥 0</div>
+    <div class="stage-banner" id="stageBanner"></div>
+    <div class="stage-off" id="stageOff">
+      <div class="ic" id="stageOffIc">📺</div>
+      <div id="stageOffT">直播间暂未开播</div>
+      <div class="tip">商品可先浏览下单，主播开播后将实时直播</div>
+    </div>
+    <div class="stage-cta" id="stageCta" style="display:none">
+      <div class="stage-thumb" id="stageThumb"></div>
+      <div class="stage-pinfo">
+        <div class="stage-pname" id="stagePname"></div>
+        <div class="stage-pprice"><span id="stagePprice"></span><s class="op" id="stagePorig"></s></div>
+      </div>
+      <button class="stage-buy" id="stageBuy" onclick="buyCurrent()">立即购买</button>
+    </div>
+  </section>
+
+  <!-- 商品横条 -->
+  <section class="rail-sec">
+    <div class="rail-hdr"><b>🎁 直播间好物</b><span class="tip">左右滑动 · 点击下单</span></div>
+    <div class="rail" id="rail"></div>
+  </section>
+
+  <!-- 弹幕 / 聊天 -->
+  <section class="chat" id="chat">
+    <div class="chat-hdr">
+      <span>💬 弹幕</span>
+      <span style="flex:1"></span>
+      <span class="act" id="nickChip" onclick="renameNick()"></span>
+      <span class="act gray" onclick="clearChat()">清屏</span>
+    </div>
+  </section>
+
+  <!-- 底部操作栏 -->
+  <footer class="dock">
+    <button class="dock-btn" id="likeBtn" onclick="addLike(event)">❤️<n class="like-num" id="likeNum">0</n></button>
+    <div class="dock-input" id="dockInput" onclick="openInput()">说点什么… 参与互动</div>
+    <button class="dock-btn" onclick="openGift()">🎁</button>
+    <button class="dock-btn" onclick="openMe()">🛍</button>
+    <button class="dock-send" id="dockSend" onclick="onDockSend()">发送</button>
+  </footer>
+
+  <!-- 底部输入条 -->
+  <div class="inputbar" id="inputbar" style="display:none">
+    <span class="nick-chip" onclick="renameNick()" id="chipNick"></span>
+    <input id="msgInput" maxlength="60" placeholder="发弹幕聊两句…" autocomplete="off">
+    <button class="send" onclick="sendMsg()">发送</button>
+  </div>
+
+  <!-- 弹层 -->
+  <div class="mask" id="mask"><div class="sheet" id="sheet"></div></div>
+  <div id="toastWrap"></div>
+  <div class="hearts-fly" id="heartsFly"></div>
+</div>
+
+<script>
+// ============================================================
+// 观众端 · 直播间 H5 —— 与「直播电商运营台」同一后端 /ws/live-commerce
+// ============================================================
+
+// ============================================================
+// 观众端配置 —— 独立部署时只需要改这一处
+// ------------------------------------------------------------
+// 观众端可脱离后端单独部署（nginx / OSS / CDN 纯静态托管），因此后端地址必须可配，
+// 不能再依赖同源。留空 '' = 与页面同源：本地由 FastAPI 在 /viewer 托管，行为与改造前一致。
+//
+// 独立部署时两种改法，任选其一（查询参数优先）：
+//   1) 直接改下面的 ''，例如 'https://api.example.com'
+//   2) 页面地址后带参数：https://cdn.example.com/lc-viewer/?api=https://api.example.com
+//      适合同一份静态文件同时连测试/生产两套后端，也方便临时排查线上问题。
+//
+// 注意：写成「协议 + 主机 [+ 端口] [+ 可选路径前缀]」，不要带结尾斜杠。
+//       HTTPS 页面只能连 https/wss 后端（浏览器会拦混合内容）；
+//       页面必须经 http(s) 打开，直接双击本地文件（file://）连不上后端。
+// ============================================================
+window.LC_API = '';
+
+// ?api= 优先于页面内常量；去掉结尾斜杠方便后面直接拼路径。
+// 没写协议时补当前页面的协议（运营/实施同学常常只填一个裸域名）。
+var API_BASE = (function(){
+  var q = '';
+  try { q = new URLSearchParams(location.search).get('api') || ''; } catch(e){ q = ''; }
+  var v = (q || window.LC_API || '').trim().replace(/\/+$/, '');
+  if (v && !/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) v = location.protocol + '//' + v;
+  return v;   // '' = 同源
+})();
+
+var S = {
+  live: null,            // liveStatus dict {status, onlineCount, currentStage, ...}
+  current: null,         // current product dict
+  pendingCurrent: null,  // 讲解广播先到、列表还没回来时暂存 productId，见 get_products_result
+  products: [],          // product list (with salesQty 等聚合)
+  danmaku: [],           // 本端弹幕展示数组
+  nick: '', userId: '', avatar: '', avatarSeed: 0,
+  host: {hostName:'主播', hostAvatar:''},   // 主播对外资料（后端 init_state.hostProfile / host_profile）
+  likes: 0,
+  bought: [],            // 本观众在本会话已买下的商品 orderNo 列表（local）
+  // ---- 购物闭环：账户 / 订单 / 摄像头 / 评价 ----
+  acc: {userId:'', userName:'', avatar:'', balance:0},   // 后端钱包账户（余额）
+  myOrders: [],          // 我的订单（来自后端 get_user_orders）
+  myOrdersLoaded: false,
+  meTab: 'all',          // 我的-订单 tab：all/pending_pay/paid/shipped/await_review
+  sheetMode: 'none',     // none/product/gift/checkout/me/review/ok/profile —— 决定事件是否重绘当前弹层
+  cam: null,             // {src, ts} 摄像头最近一帧
+  reviewed: {},          // 已评价的 orderId -> 1（本地防重复展示）
+  payCtx: null,          // 收银台上下文 {order}
+  payAfterRecharge: null,// 收银台余额不足 → 自动补差额充值后待结算的订单
+  placing: null,         // place_order 请求上下文 {p}
+  reviewCtx: null,       // 正在评价的订单
+  rvRate: 5,             // 当前评价星级
+  // ---- 账号：身份由服务端凭据提供，客户端只持 token ----
+  token: '',             // 观众 JWT（localStorage 'lc_viewer_token'）
+  authMode: 'login',     // 账号弹层当前页签：login/register
+  messages: [],          // 我的私信（只读，来自后端）
+  lastRead: 0,           // 上次查看私信的时间戳，用于未读红点（不引入服务端已读字段）
+  guestHinted: false     // 游客提示只弹一次，避免刷屏
+};
+function isLoggedIn(){ return !!(S.token && S.acc && S.acc.userId); }
+function saveToken(t){ S.token=t||''; try{ if(t) localStorage.setItem('lc_viewer_token', t); else localStorage.removeItem('lc_viewer_token'); }catch(e){} }
+
+var MYPREFIX = ['星辰大海','爱吃瓜','奶茶三分甜','快乐星球','小鱼儿','布丁','追风少年','西瓜冰','半糖主义','芋泥啵啵','元气满满','白日梦想家','软软糯糯','晚风轻抚','摸鱼大师','幸运锦鲤','人间烟火','海绵宝宝','柠檬不酸','一口奶油'];
+function randNick(){ return MYPREFIX[Math.floor(Math.random()*MYPREFIX.length)] + (100+Math.floor(Math.random()*900)); }
+function loadNick(){
+  var n = '';
+  try { n = localStorage.getItem('lc_viewer_nick') || ''; } catch(e){}
+  if (!n) { n = randNick(); try{ localStorage.setItem('lc_viewer_nick', n); }catch(e){} }
+  S.nick = n;
+  // 身份不再由客户端生成：userId 一律来自服务端登录结果（S.acc.userId），
+  // 本地只保存登录 token。游客没有任何持久身份，也就不会再往服务端写垃圾账号
+  // （旧实现自动生成 viewer_xxx 建档，清缓存/换设备即丢余额与订单）。
+  try { S.token = localStorage.getItem('lc_viewer_token') || ''; } catch(e){ S.token=''; }
+  S.userId = '';
+  S.avatarSeed = Math.floor(Math.random()*1000);
+  try { S.avatar = localStorage.getItem('lc_viewer_avatar') || ''; } catch(e){ S.avatar=''; }
+  try { S.lastRead = Number(localStorage.getItem('lc_viewer_lastread')||0)||0; } catch(e){ S.lastRead=0; }
+}
+function saveNick(){ try{ localStorage.setItem('lc_viewer_nick', S.nick); }catch(e){} }
+function saveAvatar(){ try{ localStorage.setItem('lc_viewer_avatar', S.avatar||''); }catch(e){} }
+// 我的当前头像：优先后端账户已保存的，其次本地待同步的
+function myAvatarVal(){ return (S.acc && S.acc.avatar) || S.avatar || ''; }
+function refreshNickChips(){
+  var c1=$('nickChip'); if(c1) c1.textContent='昵称：'+S.nick;
+  var c2=$('chipNick'); if(c2) c2.textContent=S.nick;
+}
+
+// ============================================================
+// Helpers
+// ============================================================
+function $(id){ return document.getElementById(id); }
+function esc(s){ if(s===null||s===undefined)return''; var d=document.createElement('div'); d.textContent=String(s); return d.innerHTML; }
+function fmtNum(n){ return (n===null||n===undefined||isNaN(n))?'0':Number(n).toLocaleString(); }
+function fmtPrice(p){ p=Number(p||0); return p===Math.floor(p)? p.toFixed(0) : (Math.round(p*100)/100).toFixed(2); }
+function toast(msg, type){
+  var el=document.createElement('div'); el.className='toast '+(type||'');
+  el.textContent=msg; $('toastWrap').appendChild(el);
+  setTimeout(function(){ el.style.opacity='0'; el.style.transition='opacity .3s'; setTimeout(function(){ el.remove(); },300); }, 2200);
+}
+function catMeta(cat){
+  var m={ '美妆护肤':['💄','#ec4899'], '个护电器':['💇','#6366f1'], '食品生鲜':['🍓','#f59e0b'],
+    '数码3C':['📱','#0ea5e9'], '家居生活':['🛋️','#8b5cf6'], '母婴用品':['🍼','#f97316'],
+    '服饰穿搭':['👗','#f43f5e'], '水果':['🍑','#fb923c'], '其他':['📦','#64748b'] };
+  var r=m[cat]||m['其他']; return {emoji:r[0], color:r[1]};
+}
+function avColor(seed){ var cs=['#2563eb','#7c3aed','#db2777','#ea580c','#0d9488','#dc2626','#4f46e5','#d97706']; return cs[(seed||0)%cs.length]; }
+function avText(name){ name=String(name||'友'); return name.slice(0,1).toUpperCase(); }
+function escAttr(s){ return esc(s).replace(/"/g,'&quot;'); }
+
+// 后端 HTTP 接口地址：同源时返回原样的根相对路径，跨域时补上 API_BASE
+function apiUrl(p){ return API_BASE ? API_BASE + p : p; }
+
+// 后端回包里的图片地址有四种写法，跨域部署时只有「根相对」那种会指错地方：
+//   data: / blob:    内联图片（商品图、摄像头帧）→ 原样
+//   http(s)://       绝对地址（虚拟观众头像走 dicebear）→ 原样
+//   //host/path      协议相对 → 原样
+//   /uploads/x.png   根相对（头像上传接口的返回值）→ 跨域必须补 API_BASE，
+//                    否则浏览器会去静态站上找图，观众看到的是裂图。
+// 同源部署（API_BASE === ''）时本函数是恒等变换，本地行为与改造前逐字节一致。
+// 约定：调用处一律写成 esc(assetUrl(x)) —— 先补地址再转义。
+//
+// ⚠ 只用于渲染，绝不能用于要发回服务端的值：头像会经 send_danmaku /
+//   viewer_register / update_viewer_profile 落库，在前面加前缀会把部署相关的
+//   绝对地址写进 viewers_data.json，污染所有客户端的显示。
+function assetUrl(u){
+  u = (u === null || u === undefined) ? '' : String(u);
+  if (!u) return '';
+  if (/^(data:|blob:|https?:|\/\/)/i.test(u)) return u;
+  if (u.charAt(0) === '/') return API_BASE + u;
+  return u;
+}
+
+function prodImg(p){
+  var img = (p.images && p.images.length && p.images[0]) || p.imageUrl || '';
+  if (img) return '<img src="'+esc(assetUrl(img))+'" onerror="this.outerHTML=\'\'">';
+  var cm=catMeta(p.category); return '<div style="background:linear-gradient(135deg,'+cm.color+'33,'+cm.color+'1a)">'+cm.emoji+'</div>';
+}
+function prodImgWrap(p, tag){
+  // tag 为 img 或 .emoji 容器 className 前缀 -> 返回可放入容器 innerHTML 的内容
+  var img = (p.images && p.images.length && p.images[0]) || p.imageUrl || '';
+  if (img) return '<img src="'+esc(assetUrl(img))+'" alt="" onerror="this.style.display=\'none\'">';
+  var cm=catMeta(p.category); return '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:inherit;background:linear-gradient(135deg,'+cm.color+'26,'+cm.color+'12)">'+cm.emoji+'</div>';
+}
+function prodSales(p){
+  var qty = (p.salesQty!=null)? p.salesQty : (p.soldCount||0);
+  var today = (p.todayQty!=null)? p.todayQty : 0;
+  return {qty:qty, today:today};
+}
+function sortProducts(list){
+  list = list.slice();
+  // 三层排序：当前讲解 > 已上架 > 其它，同层按上架时间旧的在前面
+  // 原来写的是 a.productId===S.current —— 拿 id 比对象，恒为 false，「讲解商品浮到
+  // 首位」一直是死逻辑，只是靠 addedTime 兜底看不出问题。现在观众端只下发已上架
+  // 商品（isOnSale 恒为 true），单层排序的话所有商品都并列，这个意图就彻底没了，
+  // 所以拆成两层：当前商品 2 分，普通在售 1 分。
+  var curId = S.current && S.current.productId;
+  list.sort(function(a,b){
+    var av = (a.productId===curId) ? 2 : (a.isOnSale ? 1 : 0);
+    var bv = (b.productId===curId) ? 2 : (b.isOnSale ? 1 : 0);
+    if (av!==bv) return bv-av;
+    return (a.addedTime||'').localeCompare(b.addedTime||''); // 旧的在前面按序
+  });
+  return list;
+}
+function isLive(){ return S.live && S.live.status==='live'; }
+function isPaused(){ return S.live && S.live.status==='paused'; }
+
+// ============================================================
+// WebSocket
+// ============================================================
+var ws=null, wsR=null, wsA=0, wsInit=false, wsQ=[];
+function wsUrl(){
+  // 同源：沿用改造前的 (wss|ws)://当前host；跨域：由配置的 http(s) 推出 ws(s)。
+  // 用字符串替换而不是拼协议，顺带支持 API_BASE 带路径前缀
+  // （https://host/backend → wss://host/backend/ws/live-commerce）。
+  var abs = API_BASE || (location.protocol + '//' + location.host);
+  var u = abs.replace(/^http/, 'ws') + '/ws/live-commerce?role=viewer';
+  // 握手时把观众 JWT 交给服务端校验：有效 → 连接直接绑定账号；无效 → 1008 拒绝。
+  if (S.token) u += '&token=' + encodeURIComponent(S.token);
+  return u;
+}
+function wsConn(){
+  if (ws && ws.readyState===1) return;
+  try{ ws=new WebSocket(wsUrl()); }catch(e){ scheduleReconnect(); return; }
+  ws.onopen=function(){
+    wsA=0; wsInit=true; setConnPill(true);
+    while(wsQ.length && ws.readyState===1){ ws.send(wsQ.shift()); }
+    // 有 token 就静默续登（游客不登录，只能看）；不再自报 userId 建档
+    if(S.token) wsSend('viewer_login',{token:S.token});
+  };
+  ws.onmessage=function(e){ try{ var m=JSON.parse(e.data); handle(m); }catch(ex){} };
+  ws.onclose=function(e){
+    setConnPill(false);
+    if(e && e.code===1008){
+      // 服务端握手校验失败（token 过期/伪造）→ 清本地 token，按游客重连。
+      // 不清的话会带着同一个坏 token 无限重连。
+      saveToken(''); S.acc={userId:'',userName:'',avatar:'',balance:0};
+      onLogoutUI(); toast('登录已过期，请重新登录','err');
+    }
+    if(e && (e.code===1000||e.code===1001)) return;
+    scheduleReconnect();
+  };
+  ws.onerror=function(){ setConnPill(false); };
+}
+function scheduleReconnect(){ setConnPill(false); clearTimeout(wsR); var d= wsInit? Math.min(1000*Math.pow(1.3,wsA),8000) : 300; wsR=setTimeout(wsConn, d); wsA++; }
+function wsSend(t,d){ var s=JSON.stringify({type:t,data:d||{},timestamp:new Date().toISOString()}); if(ws&&ws.readyState===1){ ws.send(s); } else { wsQ.push(s); } }
+function setConnPill(ok){
+  var dot=$('liveDot'); if(!dot)return;
+  if (ok){ dot.classList.add('on'); } else { dot.classList.remove('on'); }
+}
+
+// ============================================================
+// 渲染：舞台 / 商品 / 顶栏 / 弹幕
+// ============================================================
+function stageDesc(){
+  if (isLive()) return {txt:'直播中', cls:'live', dot:true};
+  if (isPaused()) return {txt:'直播暂停', cls:'off', dot:false};
+  if (S.live && S.live.status==='ended') return {txt:'直播已结束', cls:'off', dot:false};
+  return {txt:'未开播', cls:'off', dot:false};
+}
+function renderTop(){
+  var st=S.live||{status:'idle',onlineCount:0,currentStage:''};
+  var live=st.status==='live';
+  var online=st.onlineCount||0;
+  $('roomName').textContent = live? '直播中 · '+ (S.current? S.current.name : 'AI 好物直播间') : 'AI 好物直播间';
+  $('onlineNum').textContent = fmtNum(online);
+  $('stageViewers').textContent = '👥 '+fmtNum(online);
+  var stageNames={'warmup':'预热介绍','flash_sale':'福利秒杀','deep_dive':'深度讲解','interact':'互动促单','closing':'收尾下播'};
+  $('stageLabel').textContent = live ? (stageNames[st.currentStage]||'直播中') : (st.status==='ended'?'直播已结束':(st.status==='paused'?'直播暂停':'等待开播'));
+}
+function renderStageBadge(){
+  var d=stageDesc(); var el=$('stageBadge');
+  el.innerHTML='<span class="pill '+d.cls+'">'+(d.dot?'<span class="rd"></span>':'')+d.txt+'</span><span class="pill lag">连接'+(ws&&ws.readyState===1?'正常':'重连中')+'</span>';
+  var off=$('stageOff');
+  if (!isLive() && !isPaused()){
+    off.style.display='flex';
+    if (S.live && S.live.status==='ended'){ $('stageOffIc').textContent='👋'; $('stageOffT').textContent='本场直播已结束'; $('stageOff').querySelector('.tip').textContent='已下单商品可在运营端查看，感谢观看'; }
+    else if (S.live && S.live.status==='paused'){ $('stageOffIc').textContent='⏸️'; $('stageOffT').textContent='主播休息一下，马上回来'; $('stageOff').querySelector('.tip').textContent='商品可先浏览下单'; }
+    else { $('stageOffIc').textContent='📺'; $('stageOffT').textContent='直播间暂未开播'; $('stageOff').querySelector('.tip').textContent='去运营端点「开始直播」后，这里将实时同步'; }
+  } else off.style.display='none';
+  applyCam();
+}
+function applyCam(){
+  // 摄像头画面帧：仅在直播中 + 帧新鲜(<3.5s) 时覆盖舞台，否则回落商品图
+  var img=$('stageCam'); if(!img) return;
+  var fresh = S.cam && (Date.now()-S.cam.ts<3500);
+  var show = isLive() && fresh && !!S.cam.src;
+  if(show && img.src!==assetUrl(S.cam.src)) img.src=assetUrl(S.cam.src);
+  img.classList.toggle('live', show);
+}
+function renderStage(){
+  renderTop(); renderStageBadge();
+  var p = S.current || S.products.filter(function(x){return x.isOnSale}).sort(function(a,b){return a.addedTime<b.addedTime?-1:1})[0] || S.products[0] || null;
+  var art=$('stageArt'), cta=$('stageCta');
+  if (!p){
+    art.innerHTML='<div class="emoji">🎥</div>';
+    cta.style.display='none';
+    return;
+  }
+  var cm=catMeta(p.category);
+  var img=(p.images&&p.images.length&&p.images[0])||p.imageUrl||'';
+  if (img){ art.innerHTML='<img src="'+esc(assetUrl(img))+'" onerror="this.outerHTML=\'<div class=\\\'emoji\\\'>'+cm.emoji+'</div>\'">'; }
+  else { art.innerHTML='<div class="emoji">'+cm.emoji+'</div>'; }
+  // 下方商品条
+  $('stageThumb').innerHTML = prodImgWrap(p,'stage');
+  $('stagePname').textContent = p.name||'';
+  $('stagePprice').textContent = '¥'+fmtPrice(p.price);
+  $('stagePorig').style.display = (p.originalPrice && Number(p.originalPrice)>Number(p.price)) ? '' : 'none';
+  $('stagePorig').textContent = '¥'+fmtPrice(p.originalPrice);
+  var btn=$('stageBuy'); btn.disabled = (p.stock!=null && p.stock<=0);
+  btn.textContent = (p.stock!=null && p.stock<=0)? '已售罄' : '立即购买';
+  cta.style.display='flex';
+}
+function renderRail(){
+  var list=sortProducts(S.products); var el=$('rail'); el.innerHTML='';
+  if (!list.length){ el.innerHTML='<div style="font-size:12px;color:#94a3b8;padding:10px 0">暂无在售商品</div>'; return; }
+  list.forEach(function(p){
+    var cm=catMeta(p.category); var sl=prodSales(p);
+    var soldTxt = sl.qty>0 ? '已售'+fmtNum(sl.qty) : (p.stock>0?'在售':'售罄');
+    var card=document.createElement('div'); card.className='p-card'; card.onclick=function(){ openProduct(p); };
+    if (S.current && p.productId===S.current.productId) card.classList.add('cd');
+    var img=(p.images&&p.images.length&&p.images[0])||p.imageUrl||'';
+    card.innerHTML =
+      '<div class="p-thumb">'+(img?'<img src="'+esc(assetUrl(img))+'" onerror="this.outerHTML=\'<div style=\\\'width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,'+cm.color+'26,'+cm.color+'12)\\\'>'+cm.emoji+'</div>\'">':'<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,'+cm.color+'26,'+cm.color+'12)">'+cm.emoji+'</div>')+
+      '</div>'+
+      '<div class="p-body">'+
+        '<div class="p-name">'+esc(p.name)+'</div>'+
+        '<div class="p-price">¥'+fmtPrice(p.price)+(p.originalPrice&&Number(p.originalPrice)>Number(p.price)?'<s class="op">¥'+fmtPrice(p.originalPrice)+'</s>':'')+'</div>'+
+        '<div class="p-foot"><span class="p-sold">'+soldTxt+'</span><span class="p-buy">购买</span></div>'+
+      '</div>';
+    el.appendChild(card);
+  });
+}
+
+// ---- 弹幕 / 聊天 ----
+// 主播识别与头像统一逻辑（对外昵称 = S.host.hostName，默认「主播」）
+function hostName(){ return (S.host && S.host.hostName) || '主播'; }
+function hostAvatar(){ return (S.host && S.host.hostAvatar) || ''; }
+function isHostDm(dm){ return !!(dm && (dm.userId==='host_001' || dm.userName===hostName() || dm.userName==='主播')); }
+function chatAvatarStyle(dm){
+  // 头像优先：弹幕自带 > 主播头像兜底；否则首字底色（主播红 / 观众按种子色）
+  if (dm.avatar || (isHostDm(dm) && hostAvatar())) return 'background:#cbd5e1';
+  return 'background:'+(isHostDm(dm)?'#ef4444':avColor(S.avatarSeed+((dm.danmakuId||'').length||0)));
+}
+function chatAvatarHtml(dm){
+  var av = dm.avatar || (isHostDm(dm)? hostAvatar() : '');
+  if (av) return '<img src="'+esc(assetUrl(av))+'" alt="" onerror="this.remove()">';
+  return '<span>'+avText(dm.userName||'友')+'</span>';
+}
+function chatNameHtml(dm){
+  var isSelf = dm.userId && dm.userId===S.userId;
+  var name = dm.userName || '';
+  if (isHostDm(dm)){
+    // 主播：host-tag 即对外昵称；若消息名与此相同/默认则不重复打印
+    var dup = (name===hostName()) || name==='主播' || !name;
+    return '<span class="host-tag">'+esc(hostName())+'</span>'+(dup?'':esc(name))+(isSelf?' (我)':'');
+  }
+  return esc(name)+(isSelf?' (我)':'');
+}
+function sysRow(txt){ addChatRow(null, txt, 'sys'); }
+function addChatRow(dm, sysText, mode){
+  var chat=$('chat'); var wrap=document.createElement('div');
+  if (mode==='sys'){
+    wrap.className='sys-row'; var tag=document.createElement('span'); tag.className='sys-tag';
+    tag.textContent=sysText; wrap.appendChild(tag);
+  } else if (dm){
+    var isSelf = (dm.userId && dm.userId===S.userId);
+    var isHost = isHostDm(dm);
+    wrap.className='ch-row';
+    var bubbleClass='ch-main'+(isSelf?' self':'')+(isHost?' ch-host':'');
+    var html =
+      '<div class="ch-bubble">'+
+        '<div class="ch-av" style="'+chatAvatarStyle(dm)+'">'+chatAvatarHtml(dm)+'</div>'+
+        '<div class="'+bubbleClass+'">'+
+          '<div class="ch-name">'+chatNameHtml(dm)+'</div>'+
+          '<div class="ch-text">'+esc(dm.content)+'</div>'+
+        '</div>'+
+      '</div>';
+    wrap.innerHTML=html;
+    // 关联 AI/主播回复（若本条本身带回复）
+    if (dm.isReplied && dm.replyContent){ attachReply(wrap, dm.danmakuId, dm.replyContent, dm.replyTime); }
+  }
+  chat.appendChild(wrap);
+  // 保留最近 220 条
+  while (chat.children.length>221) chat.removeChild(chat.children[1]||chat.children[0]);
+  chat.scrollTop = chat.scrollHeight;
+}
+function attachReply(rowEl, danmakuId, text, t){
+  // 若该行还没有回复条，追加回复（独立成行的主播回复）
+  if (rowEl.dataset.replied) return;
+  rowEl.dataset.replied='1';
+  var hostWrap=document.createElement('div'); hostWrap.className='ch-row'; hostWrap.style.marginLeft='31px';
+  hostWrap.innerHTML='<div class="ch-main ch-host">'+
+    '<div class="ch-name"><span class="host-tag">'+esc(hostName())+'</span>回复</div>'+
+    '<div class="ch-text">'+esc(text||'')+'</div></div>';
+  // 插到对应消息行之后
+  rowEl.parentNode.insertBefore(hostWrap, rowEl.nextSibling);
+}
+function addDanmaku(dm){
+  if(!dm || !dm.content) return;
+  // 去重
+  for (var i=0;i<S.danmaku.length;i++){ if(S.danmaku[i]===dm.danmakuId) return; }
+  S.danmaku.push(dm.danmakuId); if(S.danmaku.length>500) S.danmaku.shift();
+  // 从屏幕上找该行
+  var rows=$('chat').querySelectorAll('.ch-row');
+  for (var j=0;j<rows.length;j++){ if(rows[j].dataset.dmId===dm.danmakuId) return; }
+  var wrap=document.createElement('div'); wrap.className='ch-row'; wrap.dataset.dmId=dm.danmakuId;
+  var isSelf = dm.userId && dm.userId===S.userId;
+  var isHost = isHostDm(dm);
+  wrap.innerHTML =
+    '<div class="ch-bubble">'+
+      '<div class="ch-av" style="'+chatAvatarStyle(dm)+'">'+chatAvatarHtml(dm)+'</div>'+
+      '<div class="ch-main'+(isSelf?' self':'')+(isHost?' ch-host':'')+'">'+
+        '<div class="ch-name">'+chatNameHtml(dm)+'</div>'+
+        '<div class="ch-text">'+esc(dm.content)+'</div>'+
+      '</div>'+
+    '</div>';
+  $('chat').appendChild(wrap);
+  if (dm.isReplied && dm.replyContent){ attachReply(wrap, dm.danmakuId, dm.replyContent, dm.replyTime); }
+  // 控制条数：保留 header + 最近 220 条
+  var chat=$('chat'); while(chat.children.length>221){ chat.removeChild(chat.children[1]); }
+  chat.scrollTop = chat.scrollHeight;
+}
+function applyReply(danmakuId, content){
+  var chat=$('chat');
+  var rows=chat.querySelectorAll('.ch-row[data-dm-id="'+danmakuId+'"]');
+  var row = rows && rows[0];
+  if (row){ attachReply(row, danmakuId, content, ''); return; }
+  // 旧消息不在列表：补一条独立回复
+  sysRow(hostName()+'回复：'+content);
+}
+
+// ============================================================
+// 事件处理（来自后端 /ws/live-commerce 的广播）
+// ============================================================
+function handle(m){
+  var t=m.type, d=m.data||{};
+  try{
+    if (t==='init_state'){
+      S.live = d.liveStatus||null;
+      S.current = d.currentProduct||null;
+      S.products = d.products||[];
+      if (d.hostProfile) S.host={hostName:(d.hostProfile.hostName||'主播'),hostAvatar:(d.hostProfile.hostAvatar||'')};
+      initWall(d.allDanmaku||[]);
+      onLoginUI();
+      renderAll();
+      if (isLive()) sysRow('你进入了直播间 · 欢迎互动');
+      if (S.current) sysRow('主播正在讲解「'+S.current.name+'」');
+    }
+    else if (t==='host_profile'){
+      if (d){ S.host={hostName:(d.hostName||'主播'),hostAvatar:(d.hostAvatar||'')}; toast('主播资料已更新'); }
+    }
+    else if (t==='status_update'){ S.live = d; renderTop(); renderStageBadge(); renderStage(); }  // d 即完整 live status dict
+    else if (t==='live_started'){ S.live = d.liveStatus||S.live; renderAll(); sysRow('📢 主播开播啦，欢迎进入直播间'); }
+    else if (t==='live_resumed'){ if(S.live) S.live.status='live'; renderAll(); sysRow('📢 直播继续，欢迎回来'); }
+    else if (t==='live_paused'){ if(S.live) S.live.status='paused'; renderAll(); sysRow('⏸️ 主播暂时离开，稍等片刻'); }
+    else if (t==='live_ended'){ if(S.live) S.live.status='ended'; renderAll(); sysRow('📢 本场直播已结束，感谢观看'); }
+    else if (t==='new_danmaku'){ addDanmaku(d); }
+    else if (t==='danmaku_reply'){ applyReply(d.danmakuId, d.replyContent); }
+    else if (t==='product_on_sale'){
+      if (d.productId){
+        var p=findProd(d.productId);
+        if(p){ S.current=p; renderAll(); toast('主播正在讲解：'+(d.name||p.name),'ok'); }
+        // 竞态：运营台「上架 → 立刻讲解」连点时，上架广播触发的拉取可能还没回来，
+        // 商品不在本地列表里。记下 id 再拉一次，由 get_products_result 认领。
+        else { S.pendingCurrent=d.productId; fetchProducts(); }
+      }
+      else { fetchProducts(); }
+    }
+    else if (t==='product_updated'){ fetchProducts(); }
+    else if (t==='order_new'){
+      fetchProducts();
+      if(meOrder(d)) resyncMe(true);        // 我的新订单（含待支付）→ 静默刷新订单与余额
+    }
+    else if (t==='order_updated'){
+      fetchProducts();
+      if(meOrder(d)) resyncMe(true);        // 主播发货/收货/退款等 → 静默刷新，见 resyncMe()
+    }
+    else if (t==='get_products_result'){
+      S.products = d.products||[];
+      // 唯一的 S.current 失效清空点。放在这里而不是 product_on_sale：后者的广播发生在
+      // 下拉包**之前**，那一刻手上还没有新列表，判断不了。放这里一条路径覆盖全部失效
+      // 场景（下架、删除、以及以后任何新的过滤规则），舞台由 renderStage 的回退链接住。
+      if (S.current && !findProd(S.current.productId)) S.current=null;
+      // 认领或放弃 product_on_sale 留下的竞态暂存。这次列表是广播之后拉的，以它为准，
+      // 所以找不到也要清掉，不能留着当幽灵引用。
+      if (S.pendingCurrent){
+        var pc=findProd(S.pendingCurrent);
+        if (pc) S.current=pc;
+        S.pendingCurrent=null;
+      }
+      renderAll();
+    }
+    else if (t==='buy_product_result'){ onBuyResult(d); }        // 兼容旧一键购买（新流程已不用）
+    // ---- 观众端账户 / 钱包 / 订单 / 评价 ----
+    else if (t==='viewer_login_result'){ onLoginResult(d); if(!d.success) authFail(d.message); }
+    else if (t==='viewer_register_result'){
+      if(d.success){ onLoginResult(d); }
+      else { authFail(d.message||'注册失败'); toast(d.message||'注册失败','err'); }
+    }
+    else if (t==='viewer_logout_result'){ /* 本地已清态，无需处理 */ }
+    else if (t==='viewer_auth_required'){
+      // 服务端拒绝：本地状态过期（如 token 失效）→ 清态并弹登录
+      if(S.token){ saveToken(''); S.acc={userId:'',userName:'',avatar:'',balance:0}; S.userId=''; onLogoutUI(); }
+      _pendingAction=null;
+      if(d.message) toast(d.message,'err');
+      openAuth('login');
+    }
+    else if (t==='new_private_msg'){
+      // 定向私信：服务端只发给本人与运营台，这里再按 userId 兜一次
+      if(!isLoggedIn() || d.userId!==S.userId) return;
+      S.messages=(S.messages||[]).concat([d]);
+      updateMsgBadge();
+      if(S.sheetMode==='messages') openMessages();
+      // 自己刚发出去的那条也会经这里回推（服务端把消息投给本人），
+      // 不能提示成「收到主播私信」——只有 isFromUser=false 才是主播发来的。
+      else if(!d.isFromUser) toast('收到主播私信','ok');
+    }
+    else if (t==='send_host_msg_result'){
+      // 成功才清空输入框：失败（限流/超长）时保住观众已经打好的字
+      var pbtn=$('pmSend'); if(pbtn) pbtn.disabled=false;
+      if(!d || !d.success){ toast((d&&d.message)||'发送失败','err'); return; }
+      var pinp=$('pmInput'); if(pinp) pinp.value='';
+    }
+    else if (t==='get_my_messages_result'){ S.messages=d.messages||[]; updateMsgBadge(); if(S.sheetMode==='messages') openMessages(); }
+    else if (t==='product_sales_changed'){
+      // 别人下单引起的库存/销量变化（订单事件已定向化，这条是公开的刷新信号）
+      var pp=findProd(d.productId);
+      if(pp){ if(d.stock!=null) pp.stock=d.stock; if(d.soldCount!=null) pp.soldCount=d.soldCount; renderAll(); }
+    }
+    else if (t==='update_viewer_profile_result'){ onProfileResult(d); }
+    else if (t==='recharge_result'){ onRechargeResult(d); }
+    else if (t==='place_order_result'){ onPlaceOrderResult(d); }
+    else if (t==='pay_order_result'){ onPayOrderResult(d); }
+    else if (t==='confirm_receipt_result'){ onConfirmResult(d); }
+    else if (t==='cancel_order_result'){ onCancelResult(d); }
+    else if (t==='submit_review_result'){ onReviewResult(d); }
+    else if (t==='get_user_orders_result'){
+      S.myOrders=d.orders||[]; S.myOrdersLoaded=true;
+      if(S.sheetMode==='me') renderMe();
+    }
+    else if (t==='cam_frame'){ S.cam={src:d.frame||'', ts:Date.now()}; applyCam(); }
+    else if (t==='error'){ toast((d.message||'操作失败'),'err'); }
+  }catch(ex){ /* 单条消息异常不影响其它 */ }
+}
+function findProd(id){ for(var i=0;i<S.products.length;i++){ if(S.products[i].productId===id) return S.products[i]; } return null; }
+function fetchProducts(){ wsSend('get_products',{}); }
+function renderAll(){ renderStage(); renderRail(); renderTop(); renderStageBadge(); }
+function initWall(all){
+  // 一次性载入最近弹幕（纯流水，不渲染旧主播回复行的重复）
+  var chat=$('chat');
+  while (chat.children.length>1) chat.removeChild(chat.lastChild);
+  S.danmaku=[];
+  (all||[]).slice(-40).forEach(function(dm){ addDanmaku(dm); });
+  chat.scrollTop = chat.scrollHeight;
+}
+
+// ============================================================
+// 交互：弹幕发送 / 点赞 / 礼物 / 改名
+// ============================================================
+function openInput(){
+  $('inputbar').style.display='flex';
+  $('chipNick').textContent=S.nick;
+  var inp=$('msgInput'); setTimeout(function(){ try{ inp.focus(); }catch(e){} },60);
+}
+function closeInput(){ var ib=$('inputbar'); if(ib) ib.style.display='none'; }
+function onDockSend(){
+  if ($('inputbar').style.display!=='none'){ sendMsg(); }   // 已弹输入条 -> 直接发送
+  else { openInput(); }
+}
+function sendMsg(){
+  var inp=$('msgInput'); var v=inp.value.trim();
+  if(!v){ toast('先输入点什么吧'); return; }
+  // 身份由服务端按连接绑定决定，这里不再上报 userId/userName
+  requireLogin(function(){
+    wsSend('send_danmaku',{ content:v, avatar:myAvatarVal() });
+    var i=$('msgInput'); if(i) i.value='';
+  }, '发弹幕');
+}
+function renameNick(){
+  closeInput();
+  openProfile();
+}
+function clearChat(){
+  var chat=$('chat'); while(chat.children.length>1) chat.removeChild(chat.lastChild); S.danmaku=[];
+}
+S.danmakuIdName=function(id){ return ''; }; // 回复行不再点名，避免改名查找成本
+
+// 点赞（本地装饰：屏幕飞出爱心，计数本地累计）
+function addLike(ev){
+  S.likes++; $('likeNum').textContent=fmtNum(S.likes);
+  var fly=$('heartsFly');
+  for (var i=0;i<3;i++){
+    var sp=document.createElement('span'); sp.textContent=['❤️','💖','✨'][Math.floor(Math.random()*3)];
+    sp.style.left=(ev.clientX-20)+'px'; sp.style.bottom='96px'; fly.appendChild(sp);
+    (function(el){ setTimeout(function(){ el.remove(); }, 950); })(sp);
+  }
+}
+// 礼物
+var GIFTS=[['🎁','盲盒'],['🌹','玫瑰'],['🎂','蛋糕'],['🚀','火箭'],['🍬','糖果'],['🏆','奖杯'],['💎','钻石'],['🐟','小鱼']];
+function openGift(){
+  var sheet=$('sheet'); var mask=$('mask');
+  var h='<div class="hd"><b>送个小礼物</b><button class="x" onclick="closeSheet()">✕</button></div><div class="gift-grid">';
+  GIFTS.forEach(function(g){ h+='<div class="gift-cell" onclick="sendGift(\''+g[1]+'\',\''+g[0]+'\')"><div class="g">'+g[0]+'</div><div class="gn">'+g[1]+'</div></div>'; });
+  h+='</div><div style="font-size:11px;color:#94a3b8;margin-top:12px;text-align:center">礼物仅本端演示展示（可同步发一条弹幕感谢）</div>';
+  sheet.innerHTML=h; openMask();
+}
+function sendGift(name,emoji){
+  closeSheet(); addLocalSys('你送出了 '+emoji+' '+name+'，感谢打赏~'); addLike({clientX:window.innerWidth/2});
+  if(!isLoggedIn()) return;   // 礼物只是本端展示 + 一条弹幕，未登录就不发弹幕
+  wsSend('send_danmaku',{ content:'我送出了一个'+name+emoji, avatar:myAvatarVal() });
+}
+function addLocalSys(t){ sysRow(t); }
+
+// ============================================================
+// 弹层
+// ============================================================
+function openMask(){ $('mask').classList.add('open'); }
+function closeSheet(){ $('mask').classList.remove('open'); $('sheet').innerHTML=''; S.sheetMode='none'; S.payCtx=null; S.payAfterRecharge=null; }
+
+// ============================================================
+// 账号：注册 / 登录 / 登出（游客可看直播，互动与交易须登录）
+// ============================================================
+var _pendingAction = null;   // 登录成功后要自动续做的动作（如「下单」被打断）
+
+// 需要登录才能做的事统一经此包装：未登录先弹登录框，登录成功后自动续做
+function requireLogin(fn, label){
+  if (isLoggedIn()){ fn(); return; }
+  _pendingAction = fn;
+  if (!S.guestHinted){ S.guestHinted = true; toast((label||'该操作')+'需要先登录','err'); }
+  openAuth('login');
+}
+function onWalletTap(){
+  if (isLoggedIn()) openMe();
+  else { _pendingAction=null; openAuth('login'); }
+}
+function openAuth(mode){
+  S.authMode = mode||'login';
+  renderAuth();
+}
+function renderAuth(){
+  var isLogin = S.authMode!=='register';
+  S.sheetMode='auth';
+  var h='<div class="hd"><b>'+(isLogin?'登录':'注册')+'观众账号</b><button class="x" onclick="closeSheet()">✕</button></div>'+
+    '<div class="tabbar">'+
+      '<button class="tab'+(isLogin?' on':'')+'" onclick="openAuth(\'login\')">登录</button>'+
+      '<button class="tab'+(!isLogin?' on':'')+'" onclick="openAuth(\'register\')">注册</button>'+
+    '</div>'+
+    '<div class="auth-body">'+
+      '<div class="pe-lbl" style="margin-top:0">昵称（同时作为登录账号，3~20 字）</div>'+
+      '<input id="authName" class="pe-name-inp" maxlength="20" autocomplete="username" placeholder="给自己取个名字">'+
+      '<div class="pe-lbl">密码（至少 6 位）</div>'+
+      '<input id="authPwd" class="pe-name-inp" type="password" maxlength="64" autocomplete="'+(isLogin?'current-password':'new-password')+'" placeholder="'+(isLogin?'请输入密码':'设置一个密码')+'">'+
+      '<div id="authErr" class="auth-err"></div>'+
+      '<button class="big-buy" id="authBtn">'+(isLogin?'登录':'注册并登录')+'</button>'+
+      '<div class="auth-tip">登录后余额与订单会保存在账号里，换设备、清缓存都不丢。<br>游客可正常看直播，但发弹幕、下单、充值需要登录。</div>'+
+      '<button class="b-ghost" style="width:100%;margin-top:10px" onclick="closeSheet()">先随便看看</button>'+
+    '</div>';
+  $('sheet').innerHTML=h;
+  openMask();
+  $('authBtn').onclick=doAuth;
+  var pwd=$('authPwd');
+  if(pwd) pwd.addEventListener('keydown', function(e){ if(e.key==='Enter') doAuth(); });
+  setTimeout(function(){ var i=$('authName'); if(i) i.focus(); },80);
+}
+function doAuth(){
+  var nm=(($('authName')&&$('authName').value)||'').trim();
+  var pw=($('authPwd')&&$('authPwd').value)||'';
+  var err=$('authErr');
+  if(err) err.textContent='';
+  if(nm.length<3){ if(err) err.textContent='昵称至少 3 个字'; return; }
+  if(pw.length<6){ if(err) err.textContent='密码至少 6 位'; return; }
+  var btn=$('authBtn');
+  if(btn){ btn.disabled=true; btn.textContent=(S.authMode==='register'?'注册中…':'登录中…'); }
+  if(S.authMode==='register') wsSend('viewer_register',{nickname:nm, password:pw, avatar:S.avatar||''});
+  else wsSend('viewer_login',{nickname:nm, password:pw});
+}
+function authFail(msg){
+  var err=$('authErr'); if(err) err.textContent=msg||'操作失败';
+  var btn=$('authBtn'); if(btn){ btn.disabled=false; btn.textContent=(S.authMode==='register'?'注册并登录':'登录'); }
+}
+function doLogout(){
+  wsSend('viewer_logout',{});
+  saveToken('');
+  S.acc={userId:'', userName:'', avatar:'', balance:0};
+  S.userId=''; S.myOrders=[]; S.myOrdersLoaded=false; S.messages=[];
+  closeSheet(); onLogoutUI();
+  toast('已退出登录','ok');
+}
+function onLogoutUI(){
+  var w=$('walletPill'); if(w) w.innerHTML='👤 登录';
+  var m=$('msgPill'); if(m) m.style.display='none';
+  renderWallet();
+}
+function onLoginUI(){
+  var w=$('walletPill'); if(w) w.innerHTML='💰 ¥<b id="walletVal">0</b>';
+  var m=$('msgPill'); if(m) m.style.display='';
+  renderWallet();
+}
+function onLoginResult(d){
+  // 标志必须在函数最开头取走并清掉：下面的失败分支会提前 return，
+  // 如果留到成功路径才清，一次失败的后台同步就会污染下一次真正的登录。
+  var silent=S._silentResync; S._silentResync=false;
+  if(!d || !d.success){
+    if (d && d.message) toast(d.message,'err');
+    return;
+  }
+  if(d.token) saveToken(d.token);
+  if(d.user){
+    S.acc.userId=d.user.userId; S.acc.userName=d.user.userName;
+    S.userId=d.user.userId;
+    if(d.user.avatar!==undefined) S.acc.avatar=d.user.avatar||'';
+    S.acc.balance=Number(d.user.balance)||0;
+    S.nick=d.user.userName||S.nick; saveNick();
+  }
+  S.myOrders=d.orders||[]; S.myOrdersLoaded=true;
+  S.messages=d.messages||[];
+  onLoginUI();
+  refreshNickChips();
+  updateMsgBadge();
+  // silent = 这次不是「用户登录」，而是服务端推送触发的后台重新同步（见 resyncMe）。
+  // 那种情况下关弹窗+弹「欢迎」非常突兀：主播一点发货，观众正看着的「我的」面板
+  // 就被关掉并弹一句欢迎语。（silent 在上面已取出）
+  if(!silent){
+    closeSheet();
+    toast('欢迎，'+S.acc.userName,'ok');
+  }
+  var act=_pendingAction; _pendingAction=null;
+  if(act){ setTimeout(function(){ try{ act(); }catch(e){} },120); }
+}
+
+// ---- 私信（只读）：红点 + 列表弹层 ----
+function updateMsgBadge(){
+  var unread=0, badge=$('msgBadge');
+  if(isLoggedIn()){
+    unread=(S.messages||[]).filter(function(m){ return !m.isFromUser && (Date.parse(m.timestamp)||0) > S.lastRead; }).length;
+  }
+  if(badge){ if(unread>0){ badge.style.display=''; badge.textContent=unread>99?'99+':String(unread); } else { badge.style.display='none'; } }
+}
+function openMessages(){
+  if(!isLoggedIn()){ _pendingAction=null; openAuth('login'); return; }
+  S.sheetMode='messages';
+  // 重绘前先留住草稿与焦点：这个弹层会被实时重绘（收到主播回复、以及自己那条
+  // 服务端回推都会走 new_private_msg -> openMessages），不保住的话观众打到一半的字就没了。
+  var pv0=$('pmInput');
+  var draft = pv0 ? pv0.value : '';
+  var hadFocus = !!pv0 && document.activeElement===pv0;
+  var list=S.messages||[];
+  var h='<div class="hd"><b>✉️ 我的消息</b><button class="x" onclick="closeSheet()">✕</button></div>';
+  if(!list.length){
+    h+='<div style="padding:28px 12px;text-align:center;color:#94a3b8;font-size:13px">还没有消息<br><span style="font-size:11px">给主播留言，主播看到后会亲自回复你</span></div>';
+  } else {
+    // 服务端下发的是**时间正序**（data_manager 里私信一路 append，见 get_user_messages），
+    // 所以这里不要再 reverse：自上而下按时间排，最新一条落在底部，符合聊天习惯。
+    h+='<div class="msg-list" id="msgList">';
+    list.forEach(function(m){
+      var mine=!!m.isFromUser;
+      // 对方一律显示主播昵称：私信的 userName 字段两个方向存的都是**观众**昵称
+      // （会话归属人），直接用它会把主播的回复标成观众自己的名字。
+      h+='<div class="msg-row'+(mine?' mine':'')+'">'+
+           '<div class="msg-meta">'+(mine?'我':'<span class="host-tag">'+esc(hostName())+'</span>')+' · '+esc(fmtDT(m.timestamp))+'</div>'+
+           '<div class="msg-bubble'+(mine?' mine':'')+'">'+esc(m.content||'')+'</div>'+
+         '</div>';
+    });
+    h+='</div>';
+  }
+  h+='<div class="pm-bar">'+
+       '<input class="pm-inp" id="pmInput" maxlength="300" autocomplete="off" '+
+         'placeholder="给主播留言…（主播会亲自回复）" '+
+         'onkeydown="if(event.key===\'Enter\'){event.preventDefault();sendHostMsg();}">'+
+       '<button class="pm-send" id="pmSend" onclick="sendHostMsg()">发送</button>'+
+     '</div>';
+  $('sheet').innerHTML=h;
+  openMask();
+  // 正序排列后最新消息在底部，不滚到底就会被 max-height 截在可视区外
+  var ml=$('msgList'); if(ml) ml.scrollTop=ml.scrollHeight;
+  var pv1=$('pmInput');
+  if(pv1){
+    if(draft) pv1.value=draft;
+    if(hadFocus){ try{ pv1.focus(); }catch(e){} }
+  }
+  // 打开即视为已读
+  S.lastRead=Date.now();
+  try{ localStorage.setItem('lc_viewer_lastread', String(S.lastRead)); }catch(e){}
+  updateMsgBadge();
+}
+// 观众 → 主播私信。人工链路：服务端不调 AI，回复由主播在运营台收件箱亲自发出。
+function sendHostMsg(){
+  var inp=$('pmInput'); if(!inp) return;
+  var v=(inp.value||'').trim();
+  if(!v){ toast('先输入点什么吧'); return; }
+  var btn=$('pmSend');
+  if(btn && btn.disabled) return;         // 防连点（sendMsg 没做这一步，这里补上）
+  if(btn) btn.disabled=true;              // 由 send_host_msg_result 负责复位
+  // 不在发送前清空：限流/超长被拒时观众的字还在
+  wsSend('send_host_msg',{content:v});
+}
+
+// ============================================================
+// 账户 / 我的订单 / 钱包
+// ============================================================
+function meOrder(d){ return !!(d && d.userId && isLoggedIn() && d.userId===S.userId); }
+// 重新拉一次账号态（订单 + 余额）。为什么要绕 viewer_login 而不是 get_user_orders：
+// 退款会经服务端 _credit_viewer 改动余额，而 get_user_orders_result 只刷订单列表、
+// 不刷钱包；复用登录响应能一次把两者都刷新。
+// silent=true 用于服务端推送触发的后台同步 —— 结果仍走 onLoginResult，但会跳过
+// closeSheet()/欢迎 toast，避免主播每次发货都关掉观众正在看的面板。
+function resyncMe(silent){
+  if(!S.token) return;            // 没登录就没什么可同步，也别留下 silent 标记污染下次登录
+  S._silentResync = !!silent;
+  wsSend('viewer_login',{token:S.token});
+}
+function renderWallet(){
+  var w=$('walletPill');
+  if(w){ w.innerHTML = isLoggedIn()? ('💰 ¥<b id="walletVal">'+fmtPrice(S.acc.balance)+'</b>') : '👤 登录'; }
+  else { var el=$('walletVal'); if(el) el.textContent=fmtPrice(S.acc.balance); }
+}
+function fmtDT(t){ if(!t)return'--'; try{ var d=new Date(t); function p(x){return('0'+x).slice(-2)} return (d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes()); }catch(e){ return t; } }
+function onProfileResult(d){
+  if(d && d.user){
+    S.acc.userId=d.user.userId||S.acc.userId;
+    S.acc.userName=d.user.userName||S.acc.userName;
+    if(d.user.avatar!==undefined) S.acc.avatar=d.user.avatar||'';
+    if(d.user.balance!=null) S.acc.balance=Number(d.user.balance)||0;
+  }
+  if(d && d.success){ toast(d.message||'资料已更新','ok'); }
+  else { toast((d && d.message)||'资料保存失败','err'); }
+  if(S.sheetMode==='me') renderMe();
+}
+function upsertMyOrder(o){
+  if(!o) return;
+  var l=S.myOrders||[]; for(var i=0;i<l.length;i++){ if(l[i].orderId===o.orderId){ l[i]=o; return; } }
+  l.push(o);
+}
+function findMyOrder(id){ var l=S.myOrders||[]; for(var i=0;i<l.length;i++){ if(l[i].orderId===id) return l[i]; } return null; }
+
+function openMe(tab){
+  if(!isLoggedIn()){ _pendingAction=null; openAuth('login'); return; }
+  if(tab) S.meTab=tab;
+  S.sheetMode='me';
+  var sheet=$('sheet');
+  sheet.innerHTML='<div class="hd"><b>🛍 我的</b><button class="x" onclick="closeSheet()">✕</button></div>'+
+    meHeadHtml()+meTabHtml()+meListHtml();
+  openMask();
+}
+function renderMe(){ openMe(); }
+function setMeTab(t){
+  S.meTab=t;
+  var sh=$('sheet'); if(!sh || S.sheetMode!=='me') return;
+  sh.innerHTML='<div class="hd"><b>🛍 我的</b><button class="x" onclick="closeSheet()">✕</button></div>'+
+    meHeadHtml()+meTabHtml()+meListHtml();
+}
+function meHeadHtml(){
+  var a=S.acc;
+  var nm=(a.userName||S.nick||'观众');
+  var av=myAvatarVal();
+  var avHtml = av? '<span>'+esc(nm.slice(0,1))+'</span><img src="'+esc(assetUrl(av))+'" alt="" onerror="this.remove()">' : esc(nm.slice(0,1));
+  return '<div class="me-head">'+
+    '<div class="me-av">'+avHtml+'</div>'+
+    '<div style="flex:1;min-width:0">'+
+      '<div class="me-name">'+esc(nm)+'</div>'+
+      '<div class="me-uid">'+esc(a.userId||S.userId)+'</div>'+
+      '<div style="margin-top:6px"><button class="re-btn ghost" onclick="openProfile()">✎ 编辑昵称/头像</button></div>'+
+      '<div class="me-bal">钱包余额 <b>¥'+fmtPrice(a.balance)+'</b></div>'+
+      '<div class="me-balbtns">'+
+        '<button class="re-btn" onclick="doRecharge(100)">+¥100</button>'+
+        '<button class="re-btn" onclick="doRecharge(500)">+¥500</button>'+
+        '<button class="re-btn" onclick="doRecharge(1000)">+¥1000</button>'+
+        '<button class="re-btn ghost" onclick="doLogout()">退出登录</button>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+// ---- 编辑资料（昵称 / 头像）：emoji 预设 + 上传图片 ----
+var PE_EMOJIS=['😀','😄','😆','😎','🤩','🥳','😇','🤠','😺','🐶','🐱','🐼','🦊','🐯','🐸','🐮','🐷','🐨','🐙','🦁','🦄','🐬','🌸','🌻','🌈','🍎','🍓','🍉','🥑','🍩','⭐','🌙','⚡','🔥','🎯','🎁'];
+var _peAv='', _peFileWired=false;
+function emojiAvatarURI(em){
+  var svg='<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96">'
+    +'<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">'
+    +'<stop offset="0" stop-color="#4f46e5"/><stop offset="0.55" stop-color="#ec4899"/><stop offset="1" stop-color="#f97316"/>'
+    +'</linearGradient></defs>'
+    +'<circle cx="48" cy="48" r="48" fill="url(#g)"/>'
+    +'<text x="48" y="52" font-size="42" text-anchor="middle" dominant-baseline="central">'+em+'</text></svg>';
+  return 'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+}
+function profileFbChar(){ var nm=(S.acc&&S.acc.userName)||S.nick||''; return (nm.slice(0,1))||'友'; }
+function syncPeAv(){
+  var el=$('peAv'); if(!el) return;
+  var fb=profileFbChar();
+  el.innerHTML = _peAv? '<span>'+esc(fb)+'</span><img src="'+esc(assetUrl(_peAv))+'" alt="" onerror="this.remove()">' : '<span>'+esc(fb)+'</span>';
+}
+function buildPeGrid(){
+  var g=$('peGrid'); if(!g) return;
+  g.innerHTML='';
+  PE_EMOJIS.forEach(function(em){
+    var b=document.createElement('button'); b.type='button';
+    var im=document.createElement('img'); im.src=assetUrl(emojiAvatarURI(em)); im.alt='';
+    b.appendChild(im);
+    if(im.src===_peAv) b.className='on';
+    b.onclick=function(){
+      _peAv=im.src;
+      var arr=g.children; for(var i=0;i<arr.length;i++) arr[i].classList.remove('on');
+      b.className='on'; syncPeAv();
+      var h=$('peHint'); if(h) h.textContent='';
+    };
+    g.appendChild(b);
+  });
+}
+function wirePeUpload(){
+  var fi=$('peFile'); if(!fi||_peFileWired) return;
+  _peFileWired=true;
+  fi.addEventListener('change',function(){
+    var f=fi.files&&fi.files[0]; if(!f) return;
+    var hint=$('peHint');
+    if(f.size>3*1024*1024){ if(hint)hint.textContent='图片过大（上限 3MB）'; fi.value=''; return; }
+    if(hint)hint.textContent='上传中…';
+    var fd=new FormData(); fd.append('file',f);
+    // 全局 JWT 中间件要求 /api/* 携带有效 token（主播或观众）
+    var uh={}; if(S.token) uh['Authorization']='Bearer '+S.token;
+    fetch(apiUrl('/api/avatar/upload'),{method:'POST',headers:uh,body:fd})
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(j){
+        if(j&&j.url){
+          _peAv=j.url; syncPeAv();
+          var g=$('peGrid'); if(g){ var arr=g.children; for(var i=0;i<arr.length;i++) arr[i].classList.remove('on'); }
+          if(hint)hint.textContent='上传成功 ✓';
+        } else if(hint) hint.textContent='上传失败，请重试';
+      })
+      .catch(function(){ if(hint)hint.textContent='上传失败，请重试'; })
+      .then(function(){ fi.value=''; });
+  });
+}
+function openProfile(){
+  S.sheetMode='profile';
+  _peAv=myAvatarVal();
+  var nm=(S.acc&&S.acc.userName)||S.nick||'';
+  $('sheet').innerHTML=
+    '<div class="hd"><b>编辑昵称 / 头像</b><button class="x" onclick="closeSheet()">✕</button></div>'+
+    '<div class="pe-head">'+
+      '<div id="peAv" class="pe-av"><span>'+esc(nm.slice(0,1)||'友')+'</span>'+( _peAv? '<img src="'+esc(assetUrl(_peAv))+'" alt="" onerror="this.remove()">':'')+'</div>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div class="pe-lbl" style="margin-top:0">昵称（≤12 字，展示给主播 / 观众）</div>'+
+        '<input id="peName" class="pe-name-inp" maxlength="12" value="'+escAttr(nm)+'">'+
+      '</div>'+
+    '</div>'+
+    '<div class="pe-lbl">Emoji 头像</div>'+
+    '<div class="pe-grid" id="peGrid"></div>'+
+    '<div class="pe-upload-row">'+
+      '<button class="b-blue" onclick="document.getElementById(\'peFile\').click()">⬆ 上传图片</button>'+
+      '<input type="file" id="peFile" accept="image/*" style="display:none">'+
+      '<span id="peHint" style="font-size:11px;color:#94a3b8"></span>'+
+    '</div>'+
+    '<div class="pe-foot">'+
+      '<button class="b-ghost" onclick="closeSheet()">取消</button>'+
+      '<button class="b-blue" onclick="saveProfile()">✅ 保存资料</button>'+
+    '</div>';
+  openMask();
+  buildPeGrid();
+  wirePeUpload();
+  setTimeout(function(){ var i=$('peName'); if(i) i.focus(); },80);
+}
+function saveProfile(){
+  var inp=$('peName');
+  var nm=((inp&&inp.value)||'').trim();
+  if(!nm){ toast('昵称不能为空'); return; }
+  S.nick=nm.slice(0,12); saveNick();
+  S.avatar=_peAv||''; saveAvatar();
+  // 乐观同步展示，随后以后端 update_viewer_profile_result 为准
+  S.acc.userName=S.nick; S.acc.avatar=S.avatar;
+  refreshNickChips();
+  closeSheet();
+  wsSend('update_viewer_profile',{userName:S.nick, avatar:S.avatar});
+}
+
+function meTabHtml(){
+  var list=S.myOrders||[];
+  function cnt(st){ return list.filter(function(o){return o.status===st}).length; }
+  var awaitRv=list.filter(function(o){return o.status==='completed' && !S.reviewed[o.orderId]}).length;
+  var tabs=[['all','全部',list.length],['pending_pay','待支付',cnt('pending_pay')],['paid','待发货',cnt('paid')],['shipped','待收货',cnt('shipped')],['await_review','待评价',awaitRv]];
+  var html='<div class="tabbar">';
+  tabs.forEach(function(tb){
+    html+='<button class="tab'+(S.meTab===tb[0]?' on':'')+'" onclick="setMeTab(\''+tb[0]+'\')">'+tb[1]+(tb[2]>0?'<span class="cnt">'+tb[2]+'</span>':'')+'</button>';
+  });
+  return html+'</div>';
+}
+function meOrdersByTab(){
+  var t=S.meTab, list=S.myOrders||[];
+  if(t==='pending_pay') return list.filter(function(o){return o.status==='pending_pay'});
+  if(t==='paid') return list.filter(function(o){return o.status==='paid'});
+  if(t==='shipped') return list.filter(function(o){return o.status==='shipped'});
+  if(t==='await_review') return list.filter(function(o){return o.status==='completed' && !S.reviewed[o.orderId]});
+  return list;
+}
+function oStLabel(s){ return ({pending_pay:'待支付',paid:'待发货',shipped:'待收货',completed:'已完成',refunded:'已退款',canceled:'已取消'})[s]||s; }
+function oStColor(s){ return ({pending_pay:'#d97706',paid:'#2563eb',shipped:'#4f46e5',completed:'#059669',refunded:'#dc2626',canceled:'#94a3b8'})[s]||'#64748b'; }
+function oShipTxt(o){
+  if(o.status==='paid') return '🏭 商家备货中，等待发货…';
+  if(o.status==='shipped') return '📦 已发货 · 发货 '+fmtDT(o.shipTime)+'<br>运单号 '+esc(o.orderNo||o.orderId);
+  if(o.status==='completed') return '✅ 已签收 · 交易完成'+(o.shipTime?(' · 发货 '+fmtDT(o.shipTime)):'');
+  if(o.status==='refunded') return '↩️ 款项已退回钱包';
+  return '';
+}
+function orderCard(o){
+  var act='';
+  if(o.status==='pending_pay'){ act='<button class="b-red" onclick="goPay(\''+esc(o.orderId)+'\')">立即支付</button><button class="b-ghost" onclick="cancelMy(\''+esc(o.orderId)+'\')">取消订单</button>'; }
+  else if(o.status==='shipped'){ act='<button class="b-blue" onclick="confirmMy(\''+esc(o.orderId)+'\')">确认收货</button>'; }
+  else if(o.status==='completed' && !S.reviewed[o.orderId]){ act='<button class="b-blue" onclick="reviewOrder(\''+esc(o.orderId)+'\')">去评价</button>'; }
+  var img=o.productImage?'<img src="'+esc(assetUrl(o.productImage))+'" onerror="this.style.display=\'none\'">':'';
+  return '<div class="oc">'+
+    '<div class="oc-top">'+
+      '<div class="oc-img">'+(img||'📦')+'</div>'+
+      '<div class="oc-info">'+
+        '<div class="oc-pname">'+esc(o.productName)+'</div>'+
+        '<div class="oc-amt">¥'+fmtPrice(o.totalAmount)+' <span style="font-weight:400;color:#94a3b8;font-size:10px">×'+o.quantity+'</span></div>'+
+        '<div class="oc-meta">单号 '+esc(o.orderNo||o.orderId)+' · '+fmtDT(o.createTime)+(oShipTxt(o)?'<br>'+oShipTxt(o):'')+'</div>'+
+      '</div>'+
+      '<div class="oc-status" style="color:'+oStColor(o.status)+'">'+oStLabel(o.status)+'</div>'+
+    '</div>'+
+    (act?'<div class="oc-foot">'+act+'</div>':'')+
+  '</div>';
+}
+function meListHtml(){
+  if(!S.myOrdersLoaded) return '<div class="oc-empty">订单加载中…</div>';
+  var list=meOrdersByTab();
+  if(!list.length){
+    var tips={all:'还没有订单，去直播间逛逛吧 🛒',pending_pay:'暂无待支付订单',paid:'暂无待发货订单',shipped:'暂无待收货订单',await_review:'暂无待评价订单'};
+    return '<div class="oc-empty">'+(tips[S.meTab]||'暂无订单')+'</div>';
+  }
+  return list.slice(0,60).map(orderCard).join('')+
+    '<div class="oc-tip">共 '+list.length+' 笔 · 发货/收货状态实时同步</div>';
+}
+
+// ============================================================
+// 两步下单：place_order(待支付) → pay_order(钱包付款)
+// ============================================================
+function openProduct(p){
+  if(!p) return;
+  S.sheetMode='product';
+  var cm=catMeta(p.category); var sl=prodSales(p);
+  var specsHtml='';
+  (p.specs||[]).forEach(function(s){ var i=s.indexOf(':'); if(i>0){ specsHtml+='<div class="si"><b>'+esc(s.slice(0,i))+'</b><span>'+esc(s.slice(i+1))+'</span></div>'; } });
+  var stockTxt = p.stock==null? '' : (p.stock<=0?'<span style="color:#ef4444">已售罄</span>':'库存 '+fmtNum(p.stock));
+  var sheet=$('sheet');
+  sheet.innerHTML =
+    '<div class="hd"><b>商品详情</b><button class="x" onclick="closeSheet()">✕</button></div>'+
+    '<div class="sheet-prod">'+
+      '<div class="sheet-img">'+prodImgWrap(p,'detail')+'</div>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div class="sheet-name">'+esc(p.name)+'</div>'+
+        (p.category?'<span class="sheet-cat">'+cm.emoji+' '+esc(p.category)+'</span>':'')+
+        '<div class="sheet-meta"><span>🔥 已售 '+fmtNum(sl.qty)+'</span>'+(sl.today>0?'<span>今日+'+fmtNum(sl.today)+'</span>':'')+'<span>⭐ 评分 '+(p.rating!=null?p.rating:'5.0')+'</span></div>'+
+        '<div class="sheet-price">¥'+fmtPrice(p.price)+(p.originalPrice&&Number(p.originalPrice)>Number(p.price)?'<s class="op">¥'+fmtPrice(p.originalPrice)+'</s>':'')+'<span class="cnt">'+stockTxt+'</span></div>'+
+      '</div>'+
+    '</div>'+
+    (p.description?'<div class="sheet-desc">'+esc(p.description)+'</div>':'')+
+    (specsHtml?'<div class="sheet-specs">'+specsHtml+'</div>':'')+
+    '<div style="font-size:11px;color:#94a3b8;margin:10px 0 4px;text-align:center">下单后先用「钱包余额」付款，再等商家发货</div>'+
+    '<button class="big-buy" id="bigBuyBtn" '+(p.stock!=null&&p.stock<=0?'disabled':'')+'>'+(p.stock!=null&&p.stock<=0?'已售罄':'去下单 ¥'+fmtPrice(p.price))+'</button>';
+  openMask();
+  $('bigBuyBtn').onclick=function(){ buy(p); };
+}
+function buyCurrent(){
+  var p = S.current || (S.products.filter(function(x){return x.isOnSale})[0]) || null;
+  if(!p){ toast('当前没有可购买的商品'); return; }
+  if (p.stock!=null && p.stock<=0){ toast('该商品已售罄','err'); return; }
+  openProduct(p);
+}
+function buy(p){
+  // 未登录先弹登录框，登录成功后自动续做这笔下单（续做不依赖弹层 DOM）
+  if(!isLoggedIn()){
+    _pendingAction=function(){ doPlaceOrder(p); };
+    toast('下单需要先登录','err');
+    openAuth('login');
+    return;
+  }
+  doPlaceOrder(p);
+}
+function doPlaceOrder(p){
+  var btn=$('bigBuyBtn');
+  if(btn){ btn.disabled=true; btn.textContent='下单中…'; }
+  wsSend('place_order',{ productId:p.productId, quantity:1 });
+  S.placing={p:p};
+}
+function onPlaceOrderResult(d){
+  var btn=$('bigBuyBtn');
+  if(!d.success){
+    toast(d.message||'下单失败','err');
+    if(btn && S.sheetMode==='product'){ btn.disabled=false; btn.textContent='去下单'; }
+    fetchProducts(); return;
+  }
+  var order=d.order||{};
+  if(meOrder(order)) upsertMyOrder(order);
+  toast('下单成功，去收银台付款吧','ok');
+  showCashier(order);
+}
+function showCashier(o){
+  if(!o) return;
+  S.sheetMode='checkout'; S.payCtx={order:o};
+  var bal=Number(S.acc.balance)||0;
+  var amt=Number(o.totalAmount)||0;
+  var enough = bal>=amt;
+  var img=o.productImage?'<img src="'+esc(assetUrl(o.productImage))+'" onerror="this.style.display=\'none\'">':'';
+  var sheet=$('sheet');
+  sheet.innerHTML=
+    '<div class="hd"><b>收银台</b><button class="x" onclick="closeSheet()">✕</button></div>'+
+    '<div class="cash-prod">'+
+      '<div class="cash-img">'+(img||'📦')+'</div>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div class="cash-pn">'+esc(o.productName)+'</div>'+
+        '<div style="font-size:11px;color:#94a3b8;margin-top:4px">数量 ×'+o.quantity+' · 单号 '+esc(o.orderNo||o.orderId)+'</div>'+
+      '</div>'+
+    '</div>'+
+    '<div class="cash-row"><span>订单金额</span><span class="v">¥'+fmtPrice(amt)+'</span></div>'+
+    '<div class="cash-row"><span>我的余额</span><b>¥'+fmtPrice(bal)+'</b></div>'+
+    '<div class="cash-row" style="border-bottom:1px solid #eef1f6;padding-bottom:10px"><span>支付方式</span><span style="color:#059669">💰 钱包余额支付</span></div>'+
+    '<div class="cash-price"><span>实付</span><span class="v">¥'+fmtPrice(amt)+'</span></div>'+
+    (enough?'':'<div class="insuf">⚠️ 余额不足，将自动补差额充值后支付</div>')+
+    '<button class="cash-pay" id="cashPayBtn">'+(enough?'立即支付 ¥'+fmtPrice(amt):'一键补足并支付')+'</button>'+
+    '<button class="cash-later" onclick="laterPay()">稍后支付（保留到「待支付」）</button>';
+  openMask();
+  $('cashPayBtn').onclick=function(){
+    if(!enough){
+      // 一键补齐差额
+      var need=Math.max(1, Math.ceil((amt-bal)*100)/100);
+      var b=$('cashPayBtn'); b.disabled=true; b.textContent='充值中 +¥'+fmtPrice(need)+'…';
+      S.payAfterRecharge=o;
+      wsSend('recharge',{ amount:need });
+      return;
+    }
+    var btn=$('cashPayBtn'); btn.disabled=true; btn.textContent='支付中…';
+    wsSend('pay_order',{orderId:o.orderId});
+  };
+}
+function laterPay(){
+  toast('已保留在「我的-待支付」，可随时去支付');
+  S.payAfterRecharge=null;
+  closeSheet();
+}
+function onPayOrderResult(d){
+  var order=d.order||null;
+  if(d.success){
+    if(order) upsertMyOrder(order);
+    if(d.balance!=null){ S.acc.balance=Number(d.balance)||0; }
+    renderWallet();
+    if(order && order.orderId) S.bought.push(order.orderId);
+    showPayOk(order);
+    fetchProducts();
+  } else {
+    if(d.balance!=null){ S.acc.balance=Number(d.balance)||0; renderWallet(); }
+    toast(d.message||'支付失败','err');
+    // 商品被下架后重绘收银台，等于给观众一个「看着正常、怎么点都失败」的按钮。
+    // 逃生通道本来就有（待付款可取消），所以直接关掉弹层把人送到我的-待支付，
+    // 让 TA 自己决定改买别的还是取消这笔。
+    if((d.message||'').indexOf('已下架')>=0){ closeSheet(); openMe('pending_pay'); }
+    else if(S.sheetMode==='checkout' && S.payCtx){ showCashier(S.payCtx.order); }
+    else fetchProducts();
+  }
+}
+function showPayOk(order){
+  S.sheetMode='ok';
+  var sheet=$('sheet');
+  sheet.innerHTML=
+    '<div class="sheet-ok">'+
+      '<div class="ok-ic">✅</div>'+
+      '<div class="ok-t">支付成功</div>'+
+      '<div class="ok-s">已购买「'+esc(order?order.productName:'')+'」×'+(order?order.quantity:1)+'<br>实付 <b style="color:#ef4444;font-size:15px">¥'+fmtPrice(order?order.totalAmount:0)+'</b><br><span style="color:#94a3b8">订单号 '+esc(order?order.orderNo||order.orderId:'')+' · 等待商家发货</span></div>'+
+      '<div style="display:flex;justify-content:center;gap:10px;margin-top:14px">'+
+        '<button class="ok-no" onclick="closeSheet()">继续逛逛</button>'+
+        '<button class="ok-no" style="background:#2563eb;color:#fff;border-color:#2563eb" onclick="openMe(\'paid\')">查看订单</button>'+
+      '</div>'+
+    '</div>';
+  toast('支付成功 ¥'+fmtPrice(order?order.totalAmount:0),'ok');
+}
+function goPay(orderId){
+  var o=findMyOrder(orderId);
+  if(!o){ toast('订单不存在或已变化','err'); resyncMe(); return; }
+  showCashier(o);
+}
+function confirmMy(orderId){
+  var o=findMyOrder(orderId); if(!o) return;
+  toast('提交确认收货…');
+  wsSend('confirm_receipt',{orderId:o.orderId});
+}
+function cancelMy(orderId){
+  var o=findMyOrder(orderId); if(!o) return;
+  if(!confirm('确定取消这笔待支付订单？')) return;
+  wsSend('cancel_order',{orderId:o.orderId});
+}
+function onConfirmResult(d){
+  if(d.order) upsertMyOrder(d.order);
+  if(d.success){
+    toast('已确认收货，交易完成！','ok');
+    if(S.sheetMode==='me') renderMe();
+  } else toast(d.message||'操作失败','err');
+}
+function onCancelResult(d){
+  if(d.order) upsertMyOrder(d.order);
+  if(d.success){ toast('订单已取消','ok'); if(S.sheetMode==='me') renderMe(); }
+  else toast(d.message||'取消失败','err');
+}
+
+// ============================================================
+// 充值
+// ============================================================
+function doRecharge(amount){
+  if(!amount || amount<=0){ toast('金额无效'); return; }
+  if(!isLoggedIn()){ _pendingAction=null; openAuth('login'); return; }
+  wsSend('recharge',{ amount:amount });
+}
+function onRechargeResult(d){
+  if(d.success!==false && d.balance!=null){
+    S.acc.balance=Number(d.balance)||0; renderWallet();
+    if(S.payAfterRecharge){
+      var o=S.payAfterRecharge; S.payAfterRecharge=null;
+      toast('充值成功，继续支付','ok');
+      showCashier(o);
+      return;
+    }
+    toast('充值成功，余额 ¥'+fmtPrice(d.balance),'ok');
+    if(S.sheetMode==='me') renderMe();
+    else if(S.sheetMode==='checkout' && S.payCtx) showCashier(S.payCtx.order);
+  } else toast(d.message||'充值失败','err');
+}
+
+// ============================================================
+// 评价
+// ============================================================
+function reviewOrder(orderId){
+  var o=findMyOrder(orderId); if(!o) return;
+  S.sheetMode='review'; S.reviewCtx=o; S.rvRate=5;
+  var img=o.productImage?'<img src="'+esc(assetUrl(o.productImage))+'" onerror="this.style.display=\'none\'">':'';
+  var sheet=$('sheet');
+  sheet.innerHTML=
+    '<div class="hd"><b>评价晒单</b><button class="x" onclick="closeSheet()">✕</button></div>'+
+    '<div class="cash-prod">'+
+      '<div class="cash-img">'+(img||'📦')+'</div>'+
+      '<div style="flex:1;min-width:0"><div class="cash-pn">'+esc(o.productName)+'</div>'+
+      '<div style="font-size:11px;color:#94a3b8;margin-top:4px">¥'+fmtPrice(o.totalAmount)+' ×'+o.quantity+' · 订单已完成</div></div>'+
+    '</div>'+
+    '<div style="text-align:center;font-size:13px;color:#475569;margin:2px 0">商品和物流体验如何？打个分吧</div>'+
+    '<div class="stars" id="rvStars">★★★★★</div>'+
+    '<textarea class="rev-ta" id="rvText" maxlength="200" placeholder="说说质量、物流、主播讲解…（写满 5 字即可）"></textarea>'+
+    '<button class="big-buy blue" id="rvBtn" style="margin-top:12px">提交评价</button>';
+  openMask();
+  // 星级点选
+  (function(){
+    var st=$('rvStars'); var txt=['','差评','失望','一般','满意','超赞'];
+    function paint(){
+      var s=''; for(var i=1;i<=5;i++){ s+='<span data-v="'+i+'">'+(i<=S.rvRate?'★':'☆')+'</span>'; }
+      st.innerHTML=s; var t=$('rvHint'); if(t) t.textContent=txt[S.rvRate]||'';
+    }
+    paint();
+    st.onclick=function(e){
+      var sp=e.target; if(!sp||!sp.dataset) return;
+      var v=parseInt(sp.dataset.v,10); if(!v) return;
+      S.rvRate=v; paint();
+    };
+  })();
+  $('rvBtn').onclick=function(){ submitReview(o); };
+}
+function submitReview(o){
+  var text=$('rvText').value.trim();
+  if(!text){ toast('写点评价内容吧'); return; }
+  var btn=$('rvBtn'); btn.disabled=true; btn.textContent='提交中…';
+  wsSend('submit_review',{ productId:o.productId, orderId:o.orderId, content:text, rating:S.rvRate||5 });
+}
+function onReviewResult(d){
+  if(d.success){
+    var o=S.reviewCtx; if(o && o.orderId) S.reviewed[o.orderId]=1;
+    S.sheetMode='none'; closeSheet();
+    toast('评价成功，感谢分享！','ok');
+    fetchProducts();
+    openMe('await_review');
+  } else {
+    toast(d.message||'评价失败','err');
+    var btn=$('rvBtn'); if(btn){ btn.disabled=false; btn.textContent='提交评价'; }
+  }
+}
+
+// 兼容旧一键购买（若历史消息仍触发 buy_product_result）
+function onBuyResult(d){
+  var btn=$('bigBuyBtn');
+  if (!d.success){
+    toast(d.message||'下单失败','err');
+    if(btn && S.sheetMode==='product'){ btn.disabled=false; btn.textContent='去下单'; }
+    fetchProducts(); return;
+  }
+  var order=d.order||{};
+  if(meOrder(order)) upsertMyOrder(order);
+  S.bought.push(order.orderId||('order_'+Date.now()));
+  showPayOk(order);
+  fetchProducts();
+}
+
+// 分享
+function shareRoom(){
+  // 直接拷 location.href，两种部署模式下都天然正确：同源时链接自带同源语义；
+  // 独立部署且用 ?api= 配置时，拷走的链接里带着参数，对方打开也是自配置的。
+  // 不要改成用 location.pathname 拼 —— 那会把这个性质弄丢。
+  var url=window.location.href;
+  var txt='来「AI 好物直播间」看看，我在看主播带货～ '+url;
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(function(){ toast('链接已复制，可以发给朋友啦','ok'); },function(){ toast(url,'ok'); });
+  } else { toast(url,'ok'); }
+}
+function goBack(){ try{ history.length>1? history.back(): window.close(); }catch(e){} }
+
+// ---- 商品横条：给鼠标补上「左右滑动」 ----
+// 触摸端本来就滑得动（.rail 有 overflow-x:auto，实测 scrollLeft 会变），这里只为鼠标兜底：
+// 滚动条被 CSS 藏了（scrollbar-width:none + ::-webkit-scrollbar{display:none}），
+// 而普通竖向滚轮不会让 overflow-x:auto 的元素横滚，桌面端等于完全没法滑。
+// 约束：只接管 pointerType==='mouse'，绝不碰触摸，免得把原生惯性滚动搞坏。
+function wireRailDrag(){
+  var rail=$('rail'); if(!rail || rail._dragWired) return;
+  rail._dragWired=true;
+  var down=false, startX=0, startLeft=0, moved=false;
+
+  rail.addEventListener('pointerdown', function(e){
+    if(e.pointerType!=='mouse' || e.button!==0) return;   // 触摸 / 中右键放行
+    down=true; moved=false; startX=e.clientX; startLeft=rail.scrollLeft;
+    // 注意：这里**不能** setPointerCapture。指针捕获会把随后派生的 click 重定向到
+    // rail 自己，卡片上的 onclick 就再也收不到 —— 表现为「点商品没反应」。
+    // 捕获改到下面确认真的在拖拽之后再设。
+  });
+  rail.addEventListener('pointermove', function(e){
+    if(!down) return;
+    var dx=e.clientX-startX;
+    if(!moved && Math.abs(dx)>4){                             // 4px 死区，避免手抖吞掉点击
+      moved=true;
+      try{ rail.setPointerCapture(e.pointerId); }catch(err){}  // 拖出横条外也不断，此时才捕获
+    }
+    if(moved){ rail.scrollLeft = startLeft - dx; e.preventDefault(); }  // 顺带挡掉拖拽选中文字
+  });
+  function endDrag(){ down=false; }
+  rail.addEventListener('pointerup', endDrag);
+  rail.addEventListener('pointercancel', endDrag);
+
+  // 拖完那一次 click 必须吃掉：卡片带 onclick=openProduct，
+  // 否则每拖一下就弹出商品弹层。capture 阶段拦在卡片处理器之前。
+  rail.addEventListener('click', function(e){
+    if(moved){ e.stopPropagation(); e.preventDefault(); moved=false; }
+  }, true);
+
+  // 滚轮竖向分量改成横向滚动。只有真的滚动了才 preventDefault，
+  // 滚到两端就把事件放行，不劫持页面。
+  rail.addEventListener('wheel', function(e){
+    var d = Math.abs(e.deltaX)>Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    if(!d) return;
+    if(rail.scrollWidth - rail.clientWidth <= 0) return;
+    var before = rail.scrollLeft;
+    rail.scrollLeft = before + d;
+    if(rail.scrollLeft !== before) e.preventDefault();
+  }, {passive:false});
+}
+
+// ============================================================
+// 启动
+// ============================================================
+loadNick();
+refreshNickChips();
+(function tick(){
+  // 每 8s 若无连接则重连
+  if (!ws || ws.readyState!==1){ /* 已在 onclose 调度 */ }
+  setTimeout(tick, 20000);
+})();
+// 键盘弹出时输入条吸底
+document.addEventListener('keydown', function(e){
+  if(e.key!=='Enter') return;
+  var ib=$('inputbar'); if(!ib || ib.style.display==='none') return;
+  // 必须确认焦点就在弹幕输入条内。旧写法不看 e.target —— 只要输入条可见，
+  // 在私信弹层里按回车会连带发出一条弹幕。
+  if(!ib.contains(e.target)) return;
+  sendMsg();
+});
+document.addEventListener('click', function(e){
+  var ib=$('inputbar'); if(!ib || ib.style.display==='none') return;
+  if (ib.contains(e.target)) return;
+  if (e.target.closest && e.target.closest('.dock')) return;   // 底部操作栏内的点赞/礼物保持输入条
+  ib.style.display='none';
+});
+wireRailDrag();
+wsConn();
+</script>
+</body>
+</html>

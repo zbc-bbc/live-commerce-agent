@@ -1,0 +1,3537 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>直播电商管理后台</title>
+<script src="/live-commerce/echarts.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f3f4f6;overflow:hidden;height:100vh;min-width:1200px;color:#1e293b}
+.lc-app{display:flex;height:100vh;width:100%}
+.lc-sidebar{width:220px;min-width:220px;background:#fff;border-right:1px solid #e5e7eb;display:flex;flex-direction:column;box-shadow:2px 0 8px rgba(0,0,0,.04)}
+.lc-sb-header{padding:18px 16px 12px;border-bottom:1px solid #f1f5f9}
+.lc-sb-title{font-size:15px;font-weight:700;color:#1e40af;letter-spacing:.02em}
+.lc-sb-sub{font-size:11px;color:#94a3b8;margin-top:2px}
+.lc-sb-menu{flex:1;overflow-y:auto;padding:8px 0}
+.lc-sb-item{padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#475569;font-size:13px;transition:all .15s;border-left:3px solid transparent}
+.lc-sb-item:hover{background:#f1f5f9;color:#1e293b}
+.lc-sb-item.active{background:#eff6ff;color:#2563eb;border-left-color:#2563eb;font-weight:600}
+.lc-sb-item .icon{font-size:16px;width:20px;text-align:center}
+.lc-sb-footer{padding:12px 16px;border-top:1px solid #f1f5f9}
+#wsStatus{font-size:11px;color:#94a3b8;display:flex;align-items:center;gap:6px}
+#acctRow{display:flex;align-items:center;gap:6px;font-size:12px;color:#334155;font-weight:600;margin-bottom:8px}
+#acctRow .acct-ico{font-size:14px;flex-shrink:0}
+#acctName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.lc-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.lc-dot.live{background:#22c55e;animation:lcPulse 1.5s infinite}
+.lc-dot.idle{background:#94a3b8}
+.lc-dot.err{background:#ef4444}
+@keyframes lcPulse{0%,100%{opacity:1}50%{opacity:.4}}
+.lc-main{flex:1;overflow-y:auto;padding:24px;background:#f3f4f6}
+.lc-inner{max-width:1500px;margin:0 auto;display:none}
+.lc-inner.active{display:block}
+.lc-page-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:8px}
+.lc-page-hdr h2{font-size:18px;font-weight:700;color:#0f172a}
+.lc-page-hdr .sub{font-size:12px;color:#94a3b8;margin-top:2px}
+.lc-card{background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;margin-bottom:16px}
+.lc-card-title{font-size:13px;font-weight:600;color:#1e293b;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:6px}
+.lc-btn{padding:7px 16px;border-radius:6px;font-size:13px;cursor:pointer;border:none;transition:all .15s;display:inline-flex;align-items:center;gap:6px;font-weight:500}
+.lc-btn-primary{background:#2563eb;color:#fff}.lc-btn-primary:hover{background:#1d4ed8}
+.lc-btn-success{background:#10b981;color:#fff}.lc-btn-success:hover{background:#059669}
+.lc-btn-warning{background:#f59e0b;color:#fff}.lc-btn-warning:hover{background:#d97706}
+.lc-btn-danger{background:#ef4444;color:#fff}.lc-btn-danger:hover{background:#dc2626}
+.lc-btn-outline{background:transparent;color:#475569;border:1px solid #d1d5db}.lc-btn-outline:hover{background:#f1f5f9}
+.lc-btn-sm{padding:4px 10px;font-size:12px}
+.lc-inp{width:100%;padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;outline:none;transition:.2s;background:#fff}
+.lc-inp:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+.lc-sel{width:100%;padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:#fff;cursor:pointer;outline:none}
+.lc-sel:focus{border-color:#2563eb}
+.lc-tag{display:inline-flex;align-items:center;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:500;margin:2px}
+.lc-tag-blue{background:#eff6ff;color:#2563eb}
+.lc-tag-green{background:#ecfdf5;color:#059669}
+.lc-tag-red{background:#fef2f2;color:#dc2626}
+.lc-tag-yellow{background:#fffbeb;color:#d97706}
+.lc-stat{text-align:center;padding:12px}
+.lc-stat .nv{font-size:22px;font-weight:700;color:#0f172a;line-height:1.2}
+.lc-stat .lb{font-size:11px;color:#94a3b8;margin-top:2px}
+.lc-badge{padding:3px 12px;border-radius:20px;font-size:11px;font-weight:600}
+.lc-badge-live{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}
+.lc-badge-stage{background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe}
+.lc-badge-idle{background:#f1f5f9;color:#94a3b8;border:1px solid #e2e8f0}
+.lc-scroll{max-height:320px;overflow-y:auto}
+.lc-scroll::-webkit-scrollbar{width:4px}
+.lc-scroll::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:2px}
+.lc-scroll::-webkit-scrollbar-track{background:transparent}
+.lc-grid{display:grid;gap:16px}
+.lc-grid-2{grid-template-columns:1fr 1fr}
+.lc-grid-3{grid-template-columns:1fr 1fr 1fr}
+.lc-grid-4{grid-template-columns:1fr 1fr 1fr 1fr}
+.lc-modal{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:1000;display:none;align-items:center;justify-content:center}
+.lc-modal.open{display:flex}
+/* 主播资料头像 */
+.host-av-prev{position:relative;width:60px;height:60px;border-radius:50%;overflow:hidden;flex-shrink:0;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;color:#fff;background:linear-gradient(135deg,#4f46e5,#ec4899);border:2px solid #fff;box-shadow:0 3px 10px rgba(15,23,42,.18)}
+.host-av-prev img{width:100%;height:100%;object-fit:cover}
+.av-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:8px;max-height:220px;overflow-y:auto}
+.av-grid button{aspect-ratio:1/1;border-radius:10px;background:#f8fafc;border:2px solid transparent;font-size:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0}
+.av-grid button img{width:100%;height:100%;object-fit:cover;border-radius:50%}
+.av-grid button:hover{border-color:#2563eb}
+.av-grid button.on{border-color:#2563eb;background:#eff6ff}
+.lc-modal-bd{background:#fff;border-radius:8px;width:720px;max-height:80vh;overflow-y:auto;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.15)}
+.lc-tbl{width:100%;border-collapse:collapse;font-size:12px}
+.lc-tbl th{text-align:left;padding:8px 10px;color:#64748b;font-weight:600;border-bottom:2px solid #e2e8f0;font-size:11px;text-transform:uppercase}
+.lc-tbl td{padding:8px 10px;border-bottom:1px solid #f1f5f9}
+.lc-tbl tr:hover td{background:#f8fafc}
+.lc-empty{padding:40px;text-align:center;color:#94a3b8;font-size:13px}
+.lc-empty .icon{font-size:36px;margin-bottom:8px}
+.lc-q-btn{padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;border:1px solid #d1d5db;background:#fff;color:#475569;transition:.15s;white-space:nowrap}
+.lc-q-btn:hover{background:#eff6ff;border-color:#93c5fd;color:#2563eb}
+.lc-stg-btn{padding:6px 14px;border-radius:20px;font-size:12px;cursor:pointer;border:1px solid #e5e7eb;background:#fff;color:#475569;transition:.15s}
+.lc-stg-btn.active{background:#2563eb;color:#fff;border-color:#2563eb}
+.lc-stg-btn:hover:not(.active){background:#f1f5f9}
+.lc-alert-item{padding:8px 12px;border-radius:6px;margin-bottom:6px;font-size:12px;border-left:3px solid}
+.lc-alert-item.surge_up{border-color:#22c55e;background:#f0fdf4}
+.lc-alert-item.surge_down{border-color:#ef4444;background:#fef2f2}
+.lc-alert-item.low_stock{border-color:#f59e0b;background:#fffbeb}
+.lc-alert-item.hot_question{border-color:#2563eb;background:#eff6ff}
+#videoPreview{width:100%;height:480px;border-radius:6px;background:#000;display:block;object-fit:cover}
+.lc-stage-progress{display:flex;gap:6px;flex-wrap:wrap}
+.lc-tab{display:flex;gap:4px;margin-bottom:10px}
+.lc-tab button{padding:4px 14px;border-radius:16px;font-size:12px;cursor:pointer;border:1px solid #e2e8f0;background:#fff;color:#64748b;transition:.15s}
+.lc-tab button.active{background:#2563eb;color:#fff;border-color:#2563eb}
+.lc-tab button:hover:not(.active){background:#f1f5f9}
+.lc-dm-item{padding:6px 8px;border-bottom:1px solid #f1f5f9;font-size:12px;line-height:1.5}
+.lc-dm-item:last-child{border-bottom:none}
+.lc-dm-reply{background:#f0f7ff;margin:4px 0 4px 20px;padding:4px 8px;border-radius:4px;font-size:11px;color:#2563eb;border-left:2px solid #2563eb}
+.lc-setting-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f1f5f9}
+.lc-setting-row:last-child{border-bottom:none}
+.lc-setting-row .lbl{font-size:13px;color:#1e293b}
+.lc-setting-row .desc{font-size:11px;color:#94a3b8;margin-top:1px}
+.lc-switch{position:relative;width:40px;height:22px;background:#e2e8f0;border-radius:11px;cursor:pointer;transition:.2s;flex-shrink:0}
+.lc-switch.on{background:#2563eb}
+.lc-switch::after{content:'';position:absolute;top:2px;left:2px;width:18px;height:18px;background:#fff;border-radius:50%;transition:.2s}
+.lc-switch.on::after{left:20px}
+/* ===== 商品管理页 ===== */
+.lc-prod-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin-top:14px}
+.lc-prod-card{background:#fff;border:1px solid #eef2f7;border-radius:12px;overflow:hidden;cursor:pointer;transition:.18s;display:flex;flex-direction:column}
+.lc-prod-card:hover{box-shadow:0 6px 20px rgba(15,23,42,.08);transform:translateY(-2px);border-color:#c7d2fe}
+.lc-prod-thumb{height:120px;display:flex;align-items:center;justify-content:center;font-size:52px;position:relative;flex-shrink:0}
+.lc-prod-badge{position:absolute;top:8px;left:8px;font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;color:#fff}
+.lc-prod-body{padding:10px 12px 12px;display:flex;flex-direction:column;gap:6px;flex:1}
+.lc-prod-name{font-size:13px;font-weight:600;color:#1e293b;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.lc-prod-price{font-size:16px;font-weight:700;color:#ef4444}
+.lc-prod-price .op{font-size:11px;color:#94a3b8;font-weight:400;text-decoration:line-through;margin-left:4px}
+.lc-prod-meta{font-size:11px;color:#64748b;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.lc-prod-actions{display:flex;gap:6px;margin-top:2px;flex-wrap:wrap}
+.lc-prod-points{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
+.lc-spec-tbl{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
+.lc-spec-tbl td{border:1px solid #f1f5f9;padding:6px 10px}
+.lc-spec-tbl td:first-child{background:#f8fafc;color:#64748b;width:110px;font-weight:500}
+.lc-prod-detail-main{display:flex;gap:18px;flex-wrap:wrap}
+.lc-prod-bigimg{width:180px;height:180px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:88px;flex-shrink:0}
+.lc-tbl2{width:100%;border-collapse:collapse;font-size:12px}
+.lc-tbl2 th,.lc-tbl2 td{padding:7px 10px;border-bottom:1px solid #f1f5f9;text-align:left;white-space:nowrap}
+.lc-tbl2 th{color:#64748b;font-weight:500;background:#f8fafc}
+.lc-tbl2 tr:hover td{background:#fafbfc}
+.lc-order-status{padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
+.lc-script-area{width:100%;min-height:200px;border:1px solid #e2e8f0;border-radius:8px;padding:10px;font-size:13px;line-height:1.7;font-family:inherit;resize:vertical}
+.lc-mini-btn{padding:2px 8px;border-radius:6px;font-size:11px;cursor:pointer;border:1px solid #e2e8f0;background:#fff;color:#475569}
+.lc-mini-btn:hover{border-color:#c7d2fe;color:#2563eb}
+.lc-empty-row{text-align:center;color:#94a3b8;padding:24px;font-size:13px}
+</style>
+</head>
+<body>
+<!-- Auth loading overlay - shown before verification completes -->
+<div id="authOverlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:#f3f4f6;z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px">
+  <div style="font-size:48px">📺</div>
+  <div style="font-size:16px;font-weight:600;color:#1e293b">直播电商运营台</div>
+  <div style="font-size:13px;color:#94a3b8">主播端 · 验证身份中...</div>
+  <!-- 正常情况后端闸门会直接 302 到 /login，这里只是兜底：
+       前端校验失败时手动给个出口，免得卡在灰屏上 -->
+  <a href="/login" style="font-size:12px;color:#2563eb;cursor:pointer;text-decoration:none">没有自动跳转？点此去登录 →</a>
+</div>
+
+<div class="lc-app" style="display:none" id="appContent">
+  <!-- Sidebar -->
+  <div class="lc-sidebar">
+    <div class="lc-sb-header">
+      <div class="lc-sb-title">📺 直播电商管理</div>
+      <div class="lc-sb-sub">Live Commerce Dashboard</div>
+    </div>
+    <div class="lc-sb-menu">
+      <div class="lc-sb-item active" data-page="console" onclick="switchPage('console')">
+        <span class="icon">🎮</span>直播控制台
+      </div>
+      <div class="lc-sb-item" data-page="products" onclick="switchPage('products')">
+        <span class="icon">📦</span>商品管理
+      </div>
+      <div class="lc-sb-item" data-page="danmaku" onclick="switchPage('danmaku')">
+        <span class="icon">💬</span>弹幕与AI问答
+      </div>
+      <div class="lc-sb-item" data-page="analysis" onclick="switchPage('analysis')">
+        <span class="icon">📊</span>商品数据分析
+      </div>
+      <div class="lc-sb-item" data-page="viewers" onclick="switchPage('viewers')">
+        <span class="icon">👥</span>观众列表
+      </div>
+      <div class="lc-sb-item" data-page="inbox" onclick="switchPage('inbox')">
+        <span class="icon">✉️</span>私信收件箱<span id="sbInboxDot" style="display:none;margin-left:auto;background:#ef4444;color:#fff;font-size:10px;border-radius:8px;padding:0 6px;font-weight:600">0</span>
+      </div>
+      <div class="lc-sb-item" data-page="reviews" onclick="switchPage('reviews')">
+        <span class="icon">⭐</span>用户评价管理
+      </div>
+      <div class="lc-sb-item" data-page="report" onclick="switchPage('report')">
+        <span class="icon">📋</span>直播复盘报告
+      </div>
+      <div class="lc-sb-item" data-page="settings" onclick="switchPage('settings')">
+        <span class="icon">⚙️</span>直播系统设置
+      </div>
+    </div>
+    <div class="lc-sb-footer">
+      <!-- 当前登录账号：由 /auth/me 结果填入（见 setAcctName）-->
+      <div id="acctRow" title="当前登录账号">
+        <span class="acct-ico">👤</span><span id="acctName">—</span>
+      </div>
+      <div id="wsStatus"><span class="lc-dot idle"></span>正在连接服务…</div>
+      <div style="display:flex;gap:4px;margin-top:8px">
+        <button class="lc-btn lc-btn-outline lc-btn-sm" id="btnEmg" style="flex:1" onclick="toggleEmg()">⏸️ 暂停AI</button>
+        <button class="lc-btn lc-btn-outline lc-btn-sm" style="flex:0;white-space:nowrap" onclick="doLogout()" title="退出登录">🚪 退出登录</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div class="lc-main">
+
+    <!-- ============ PAGE 1: 直播控制台 ============ -->
+    <div class="lc-inner active" id="page-console">
+      <div class="lc-page-hdr">
+        <div><h2>🎮 直播控制台</h2><div class="sub">实时控制和管理直播全流程</div></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span id="consoleStatus"><span class="lc-badge lc-badge-idle">⏸ 未开播</span></span>
+          <span id="consoleStage"></span>
+          <button class="lc-btn lc-btn-success lc-btn-sm" id="btnStartLive" onclick="startLive()">🎬 开始直播</button>
+          <button class="lc-btn lc-btn-danger lc-btn-sm" id="btnEndLive" onclick="endLive()" style="display:none">⏹ 结束直播</button>
+        </div>
+      </div>
+      <!-- Top: Camera full-width row -->
+      <div style="margin-bottom:16px">
+        <!-- Camera card -->
+        <div class="lc-card">
+          <div class="lc-card-title">📷 摄像头</div>
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
+            <select class="lc-sel" id="camSelect" onchange="changeCam()" style="width:240px"></select>
+            <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="startCam()">📷 开启</button>
+            <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="stopCam()">⏹ 关闭</button>
+          </div>
+          <video id="videoPreview" autoplay playsinline muted></video>
+          <div id="camHint" style="margin-top:6px;font-size:12px;color:#059669;display:none">📡 摄像头画面正在实时推送给观众端（画面帧转发）</div>
+        </div>
+      </div>
+      <!-- Middle: Product + Stage 2-column -->
+      <div class="lc-grid lc-grid-2" style="margin-bottom:16px">
+        <!-- Product card -->
+        <div class="lc-card">
+          <div class="lc-card-title" style="display:flex;align-items:center;justify-content:space-between">
+            <span>📦 当前商品</span>
+            <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="openProductForm()">➕ 添加商品</button>
+          </div>
+          <select class="lc-sel" id="prodSelect" onchange="setCurProd(this.value)"></select>
+          <div id="prodInfo" style="margin-top:10px;font-size:12px;color:#64748b">请选择商品</div>
+        </div>
+        <!-- Stage control card -->
+        <div class="lc-card">
+          <div class="lc-card-title">🎯 直播阶段</div>
+          <div class="lc-stage-progress" id="stageControl"></div>
+          <div id="stageStrategy" style="margin-top:8px;font-size:11px;color:#94a3b8;font-style:italic"></div>
+        </div>
+      </div>
+      <!-- AI 话术生成器 -->
+      <div class="lc-card" style="margin-bottom:16px">
+        <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center">
+          <span>🎙️ AI 主播话术生成</span>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-weight:400">
+            <span style="font-size:11px;color:#94a3b8" id="scriptModelHint">用大模型一键生成直播口播稿</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <select class="lc-sel" id="scriptProd" style="width:220px"></select>
+          <select class="lc-sel" id="scriptType" style="width:170px">
+            <option value="opening">🎤 开场暖场</option>
+            <option value="product_intro" selected>📦 商品介绍</option>
+            <option value="promo">⚡ 促销逼单</option>
+            <option value="interact">💬 互动提问</option>
+            <option value="objection">🤝 异议安抚</option>
+            <option value="closing">👋 收尾下播</option>
+          </select>
+          <button class="lc-btn lc-btn-primary lc-btn-sm" id="btnGenScript" onclick="generateScriptNow()">✨ 生成话术</button>
+          <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="copyScript()">📋 复制</button>
+        </div>
+        <div style="margin-top:10px">
+          <textarea class="lc-script-area" id="scriptOutput" placeholder="点击「✨ 生成话术」，AI 将结合商品信息为你写一段自然带货口播…"></textarea>
+        </div>
+        <div id="scriptHistory" style="margin-top:8px;font-size:12px"></div>
+      </div>
+      <!-- Bottom 4-column row: Danmaku + Stats + Alerts + Session Orders -->
+      <div class="lc-grid lc-grid-4">
+        <div class="lc-card">
+          <div class="lc-card-title">💬 弹幕互动</div>
+          <div style="display:flex;gap:6px;margin-bottom:8px">
+            <input class="lc-inp" id="danmakuInput" placeholder="输入弹幕内容…" style="flex:1" onkeydown="if(event.key==='Enter')sendDanmaku()">
+            <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="sendDanmaku()">发送</button>
+          </div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">
+            <button class="lc-q-btn" onclick="quickDanmaku('多少钱？')">💰多少钱</button>
+            <button class="lc-q-btn" onclick="quickDanmaku('有优惠吗？')">🏷️有优惠</button>
+            <button class="lc-q-btn" onclick="quickDanmaku('怎么下单？')">🛒怎么下单</button>
+            <button class="lc-q-btn" onclick="quickDanmaku('保质期多久？')">📅保质期</button>
+            <button class="lc-q-btn" onclick="quickDanmaku('还发货吗？')">📦发货</button>
+            <button class="lc-q-btn" onclick="quickDanmaku('什么规格？')">📐规格</button>
+          </div>
+          <div class="lc-scroll" id="danmakuList" style="max-height:200px"></div>
+        </div>
+        <div class="lc-card">
+          <div class="lc-card-title">🤖 AI统计数据</div>
+          <div class="lc-grid lc-grid-2">
+            <div class="lc-stat"><div class="nv" id="statTotalDm">0</div><div class="lb">弹幕总数</div></div>
+            <div class="lc-stat"><div class="nv" id="statAiReplies">0</div><div class="lb">AI回复</div></div>
+            <div class="lc-stat"><div class="nv" id="statOnline">0</div><div class="lb">在线观众</div></div>
+            <div class="lc-stat"><div class="nv" id="statReplyRate">0%</div><div class="lb">回复成功率</div></div>
+          </div>
+          <div style="margin-top:10px">
+            <div class="lc-card-title">🏆 高频问题 TOP10</div>
+            <div id="topQuestions" style="font-size:12px"></div>
+          </div>
+        </div>
+        <div class="lc-card">
+          <div class="lc-card-title">🔔 场控面板</div>
+          <div id="alertPanel" class="lc-scroll" style="max-height:300px">
+            <div class="lc-empty"><div class="icon">📢</div>暂无场控提示</div>
+          </div>
+        </div>
+        <div class="lc-card">
+          <div class="lc-card-title">🛒 本场订单</div>
+          <!-- 汇总条：主播一眼要看的三个数。挤在一行小字里，因为它下方才是列表 -->
+          <div id="sessionOrderSum" style="font-size:12px;color:#475569;margin-bottom:8px">未开播</div>
+          <div id="sessionOrderList" class="lc-scroll" style="max-height:260px">
+            <div class="lc-empty"><div class="icon">🛒</div>开播后这里显示本场订单</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ PAGE 1.5: 商品管理 ============ -->
+    <div class="lc-inner" id="page-products">
+      <div class="lc-page-hdr">
+        <div><h2>📦 商品管理</h2><div class="sub">添加、上架、编辑你的直播间商品</div></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="openProductForm()">➕ 添加商品</button>
+          <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="batchGenMissingImages()" title="为没有图片的商品批量生成本地 SVG 商品主图">🖼 给无图商品补图</button>
+        </div>
+      </div>
+      <!-- 统计卡 -->
+      <div class="lc-grid lc-grid-4" id="prodStatRow"></div>
+      <!-- 工具栏 -->
+      <div class="lc-card" style="margin-top:16px">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <input class="lc-inp" id="prodSearch" placeholder="🔍 搜索商品名称 / 品类…" style="width:220px" oninput="renderProductsPage()">
+          <select class="lc-sel" id="prodCatFilter" style="width:150px" onchange="renderProductsPage()"></select>
+          <select class="lc-sel" id="prodStateFilter" style="width:130px" onchange="renderProductsPage()">
+            <option value="all">全部状态</option>
+            <option value="on">售卖中</option>
+            <option value="off">已下架</option>
+            <option value="soldout">已售罄</option>
+          </select>
+        </div>
+      </div>
+      <!-- 商品卡片网格 -->
+      <div class="lc-prod-grid" id="prodGrid"></div>
+      <div class="lc-empty" id="prodEmpty" style="display:none;margin-top:20px">
+        <div class="icon">📦</div>没有找到商品，点击右上角「添加商品」开始吧
+      </div>
+    </div>
+
+    <!-- ============ 商品 添加/编辑 弹窗 ============ -->
+    <div class="lc-modal" id="productFormModal">
+      <div style="background:#fff;border-radius:14px;width:620px;max-width:94vw;max-height:88vh;overflow:auto;padding:20px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <div style="font-size:16px;font-weight:700" id="productFormTitle">➕ 添加商品</div>
+          <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="closeProductForm()">✕</button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div>
+            <label style="font-size:12px;color:#64748b">商品名称 *</label>
+            <input class="lc-inp" id="pfName" style="width:100%;margin-top:4px">
+          </div>
+          <div>
+            <label style="font-size:12px;color:#64748b">品类</label>
+            <select class="lc-sel" id="pfCategory" style="width:100%;margin-top:4px">
+              <option>美妆护肤</option><option>个护电器</option><option>食品生鲜</option>
+              <option>数码3C</option><option>家居生活</option><option>母婴用品</option>
+              <option>服饰穿搭</option><option>其他</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:12px;color:#64748b">售价 (¥) *</label>
+            <input class="lc-inp" id="pfPrice" type="number" min="0" step="0.01" style="width:100%;margin-top:4px">
+          </div>
+          <div>
+            <label style="font-size:12px;color:#64748b">原价 (¥)</label>
+            <input class="lc-inp" id="pfOrigPrice" type="number" min="0" step="0.01" style="width:100%;margin-top:4px">
+          </div>
+          <div>
+            <label style="font-size:12px;color:#64748b">库存 *</label>
+            <input class="lc-inp" id="pfStock" type="number" min="0" step="1" style="width:100%;margin-top:4px">
+          </div>
+          <div>
+            <label style="font-size:12px;color:#64748b">商品外链图片URL（可多个，逗号/换行分隔；自动生成的 SVG 主图无需在此填写）</label>
+            <input class="lc-inp" id="pfImages" placeholder="https://...  也可在商品卡点「🖼 生成图」自动生成" style="width:100%;margin-top:4px">
+          </div>
+        </div>
+        <div style="margin-top:12px">
+          <label style="font-size:12px;color:#64748b">核心卖点（每行一条，卡片上高亮）</label>
+          <textarea class="lc-inp" id="pfPoints" rows="2" style="width:100%;margin-top:4px;resize:vertical" placeholder="三重玻尿酸深层补水&#10;德国进口原料敏感肌可用"></textarea>
+        </div>
+        <div style="margin-top:12px">
+          <label style="font-size:12px;color:#64748b">规格参数（每行 `键: 值`）</label>
+          <textarea class="lc-inp" id="pfSpecs" rows="3" style="width:100%;margin-top:4px;resize:vertical" placeholder="容量: 30ml&#10;保质期: 3年&#10;产地: 中国"></textarea>
+        </div>
+        <div style="margin-top:12px">
+          <label style="font-size:12px;color:#64748b">详细介绍</label>
+          <textarea class="lc-inp" id="pfDesc" rows="3" style="width:100%;margin-top:4px;resize:vertical"></textarea>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+          <button class="lc-btn lc-btn-outline" onclick="closeProductForm()">取消</button>
+          <button class="lc-btn lc-btn-primary" id="pfSubmit" onclick="submitProductForm()">✅ 保存商品</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 商品 详情弹窗 ============ -->
+    <div class="lc-modal" id="productDetailModal">
+      <div style="background:#fff;border-radius:14px;width:720px;max-width:94vw;max-height:88vh;overflow:auto;padding:20px">
+        <div id="prodDetailContent"></div>
+      </div>
+    </div>
+
+    <!-- ============ 头像选择弹窗（主播资料） ============ -->
+    <div class="lc-modal" id="avatarPickModal">
+      <div style="background:#fff;border-radius:14px;width:560px;max-width:94vw;max-height:88vh;overflow:auto;padding:20px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div style="font-size:16px;font-weight:700">🖼 选择头像</div>
+          <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="closeAvatarPick()">✕</button>
+        </div>
+        <div style="display:flex;gap:14px;align-items:center;margin:10px 0 4px">
+          <div id="avPickPrev" class="host-av-prev" style="width:52px;height:52px;font-size:22px">主</div>
+          <div style="font-size:12px;color:#64748b;line-height:1.6">点下方 emoji 或上传图片。<br>观众端会以圆形头像展示。</div>
+        </div>
+        <div style="font-size:12px;font-weight:600;color:#1e293b;margin:12px 0 6px">Emoji 头像</div>
+        <div class="av-grid" id="avEmojiGrid"></div>
+        <div style="display:flex;gap:10px;margin-top:14px;align-items:center">
+          <button class="lc-btn lc-btn-primary" onclick="document.getElementById('avFileInput').click()">⬆ 上传图片</button>
+          <input type="file" id="avFileInput" accept="image/*" style="display:none">
+          <span id="avUploadHint" style="font-size:12px;color:#94a3b8"></span>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+          <button class="lc-btn lc-btn-outline" onclick="closeAvatarPick()">取消</button>
+          <button class="lc-btn lc-btn-primary" onclick="confirmAvatarPick()">✅ 用这个头像</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ PAGE 2: 弹幕与AI问答 ============ -->
+    <div class="lc-inner" id="page-danmaku">
+      <div class="lc-page-hdr">
+        <div><h2>💬 弹幕与AI问答</h2><div class="sub">查看所有弹幕记录和AI回复</div></div>
+        <div style="font-size:12px;color:#64748b">
+          弹幕: <strong id="dmDmTotal">0</strong> | AI回复: <strong id="dmRepliedTotal">0</strong>
+        </div>
+      </div>
+      <div class="lc-grid lc-grid-2">
+        <div class="lc-card">
+          <div class="lc-card-title">📝 弹幕历史记录</div>
+          <div class="lc-tab" id="dmHistoryTab">
+            <button class="active" data-tab="real" onclick="switchDmHistoryTab('real')">真实观众</button>
+            <button data-tab="sim" onclick="switchDmHistoryTab('sim')">AI虚拟 / 模拟</button>
+            <button data-tab="all" onclick="switchDmHistoryTab('all')">全部</button>
+          </div>
+          <div class="lc-scroll" id="dmHistoryList" style="max-height:470px">
+            <div class="lc-empty"><div class="icon">💬</div>暂无弹幕记录</div>
+          </div>
+        </div>
+        <div class="lc-card">
+          <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center">
+            <span>🤖 AI回复记录</span>
+            <span style="font-size:11px;font-weight:400;color:#94a3b8">仅真实观众</span>
+          </div>
+          <div class="lc-tab" id="aiReplyTab">
+            <button class="active" data-tab="ai" onclick="switchAiTab('ai')">AI回复</button>
+            <button data-tab="pending" onclick="switchAiTab('pending')">待回复</button>
+          </div>
+          <div class="lc-scroll" id="aiReplyList" style="max-height:450px">
+            <div class="lc-empty"><div class="icon">🤖</div>暂无AI回复记录</div>
+          </div>
+        </div>
+      </div>
+      <div class="lc-card" style="margin-top:16px">
+        <div class="lc-card-title">📊 高频问题排行</div>
+        <div id="hfqChart" style="height:260px"></div>
+      </div>
+      <div class="lc-card" style="margin-top:16px">
+        <div class="lc-card-title">🧾 弹幕总结（仅真实观众）</div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0">
+          <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="loadDanmakuSummary()">📊 生成弹幕总结</button>
+          <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="genDanmakuSummaryAI()">🤖 AI 复盘摘要</button>
+          <span style="font-size:12px;color:#94a3b8">模拟/虚拟弹幕只用于直播氛围，一律不计入以下统计</span>
+        </div>
+        <div id="dmSummaryStats">
+          <div style="color:#94a3b8;padding:16px 0;text-align:center">点击「生成弹幕总结」查看本场真实观众弹幕统计</div>
+        </div>
+        <div style="margin-top:14px;padding-top:12px;border-top:1px dashed #e2e8f0">
+          <div class="lc-card-title" style="font-size:12px">AI 复盘摘要</div>
+          <div id="dmSummaryAI">
+            <div style="color:#94a3b8;padding:16px 0;text-align:center">尚未生成 AI 摘要</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ PAGE 3: 商品数据分析 ============ -->
+    <div class="lc-inner" id="page-analysis">
+      <div class="lc-page-hdr">
+        <div><h2>📊 商品数据分析</h2><div class="sub">弹幕统计、观众画像、转化率分析</div></div>
+        <div style="display:flex;gap:12px;font-size:12px;color:#64748b">
+          提及: <strong id="anMention">0</strong> 意向分: <strong id="anIntent">0</strong>
+          <span title="意向分 = 100 × (0.4×人均弹幕率 + 0.3×私信观众占比 + 0.3×下单观众占比)，按本场真实观众数归一" style="cursor:help">ⓘ</span>
+        </div>
+      </div>
+      <div class="lc-grid lc-grid-4" style="margin-bottom:16px">
+        <div class="lc-stat lc-card"><div class="nv" id="anTotalDm">0</div><div class="lb">弹幕总数</div></div>
+        <div class="lc-stat lc-card"><div class="nv" id="anAiReplies">0</div><div class="lb">AI回复</div></div>
+        <div class="lc-stat lc-card"><div class="nv" id="anOnline">0</div><div class="lb">在线人数</div></div>
+        <div class="lc-stat lc-card"><div class="nv" id="anInquiry">0</div><div class="lb">咨询用户</div></div>
+      </div>
+      <div class="lc-grid lc-grid-2">
+        <div class="lc-card"><div class="lc-card-title">📈 弹幕趋势统计</div><div id="dmTrendChart" style="height:280px"></div></div>
+        <div class="lc-card"><div class="lc-card-title">👥 观众画像分布</div><div id="audienceChart" style="height:280px"></div></div>
+      </div>
+      <div class="lc-card" style="margin-top:16px">
+        <div class="lc-card-title">📋 本场直播数据总览</div>
+        <div id="liveDataOverview" style="font-size:13px"></div>
+      </div>
+      <!-- 商单成交区块 -->
+      <div class="lc-card" style="margin-top:16px">
+        <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center">
+          <span>💰 商单与成交</span>
+          <span style="font-size:11px;font-weight:400;color:#94a3b8">只统计真实注册观众的成交（模拟单已停用）</span>
+        </div>
+        <div class="lc-grid lc-grid-4" style="margin-top:6px" id="orderStatRow"></div>
+        <div class="lc-grid lc-grid-2" style="margin-top:14px">
+          <div>
+            <div class="lc-card-title" style="border:none;padding:0">📄 最近订单</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">
+              <button class="lc-mini-btn" data-ost="all" onclick="setOrderFilter('all')">全部</button>
+              <button class="lc-mini-btn" data-ost="pending_pay" onclick="setOrderFilter('pending_pay')">待付款</button>
+              <button class="lc-mini-btn" data-ost="paid" onclick="setOrderFilter('paid')">已付款</button>
+              <button class="lc-mini-btn" data-ost="shipped" onclick="setOrderFilter('shipped')">已发货</button>
+              <button class="lc-mini-btn" data-ost="completed" onclick="setOrderFilter('completed')">已完成</button>
+              <button class="lc-mini-btn" data-ost="refunded" onclick="setOrderFilter('refunded')">已退款</button>
+              <button class="lc-mini-btn" data-ost="canceled" onclick="setOrderFilter('canceled')">已取消</button>
+            </div>
+            <div class="lc-scroll" style="max-height:320px"><table class="lc-tbl2" id="orderTable"></table></div>
+          </div>
+          <div>
+            <div class="lc-card-title" style="border:none;padding:0">🏆 商品销量 Top</div>
+            <div id="orderByProduct" style="margin-top:8px;font-size:13px"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ PAGE 4: 用户评价管理 ============ -->
+    <div class="lc-inner" id="page-reviews">
+      <div class="lc-page-hdr">
+        <div><h2>⭐ 用户评价管理</h2><div class="sub">查看观众提问与AI回复详情</div></div>
+        <div style="font-size:12px;color:#64748b">
+          总数: <strong id="rvTotal">0</strong> 好评: <strong id="rvPos" style="color:#10b981">0</strong> 中评: <strong id="rvNeu" style="color:#d97706">0</strong> 差评: <strong id="rvNeg" style="color:#ef4444">0</strong>
+        </div>
+      </div>
+      <!-- 两个维度各一个下拉：商品 + 类型。商品选项后面的括号是「当前类型下」的条数，
+           页头统计则只跟商品走（忽略类型），所以选任意商品都能看到它的好中差全貌。 -->
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+        <select class="lc-sel" id="rvProdFilter" style="width:240px" onchange="onReviewProdFilter()">
+          <option value="">全部商品评价</option>
+        </select>
+        <select class="lc-sel" id="rvTypeFilter" style="width:150px" onchange="onReviewTypeFilter()">
+          <option value="all">全部评价</option>
+          <option value="positive">好评</option>
+          <option value="neutral">中评</option>
+          <option value="negative">差评</option>
+          <option value="pending">未处理</option>
+        </select>
+        <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="refreshReviews()">🔄 刷新</button>
+      </div>
+
+      <!-- 评价总结：纯统计图表，不走 LLM（产品决策）。口径与下方「观众提问清单」一致——只算真实注册用户 -->
+      <div class="lc-card" style="margin-bottom:16px">
+        <div class="lc-card-title">📊 评价总结（仅真实用户）</div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0">
+          <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="loadReviewSummary()">📊 生成评价总结</button>
+          <span style="font-size:12px;color:#94a3b8">模拟评价只用于观众端商品卡的评分展示，一律不计入以下统计</span>
+        </div>
+        <div id="rvSummaryStats">
+          <div class="lc-empty"><div class="icon">📊</div>点「生成评价总结」查看真实用户的评价统计</div>
+        </div>
+      </div>
+
+      <!-- 原「📝 历史问答记录」卡片已删除：与弹幕页的「AI回复记录」是同一份数据
+           （都按 isReplied 取 Q/A 对），属重复功能。所以这里改单列，让清单占满宽度 -->
+      <div class="lc-grid">
+        <div class="lc-card">
+          <!-- 标题原来是「❓ 观众提问清单」，但这里渲染的就是 S.reviews，和「提问」无关；
+               那排类型按钮已换成上方的 #rvTypeFilter 下拉（原来的高亮选择器 #reviews
+               根本不存在，页面 id 是 page-reviews，一直是坏的）。 -->
+          <div class="lc-card-title">⭐ 评价列表</div>
+          <div class="lc-scroll" id="reviewList" style="max-height:450px">
+            <div class="lc-empty"><div class="icon">⭐</div>暂无评价数据</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 观众列表 ============ -->
+    <div class="lc-inner" id="page-viewers">
+      <div class="lc-page-hdr">
+        <div><h2>👥 观众列表</h2><div class="sub">在线观众与全部注册账号，可查看详情并发送定向私信</div></div>
+        <div style="font-size:12px;color:#64748b">
+          在线: <strong id="vwOnline" style="color:#10b981">0</strong>
+          · 真实连接: <strong id="vwReal">0</strong>
+          · 模拟基数: <strong id="vwBase">0</strong>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+        <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="refreshViewers()">🔄 刷新</button>
+        <span style="font-size:12px;color:#94a3b8">在线人数 = 模拟热度基数 + 真实在线观众数（同一账号多开只算一个）</span>
+      </div>
+      <div class="lc-grid lc-grid-2">
+        <div class="lc-card">
+          <div class="lc-card-title">账号列表</div>
+          <div class="lc-tab">
+            <button class="active" id="vwTabOnline" onclick="switchViewerTab('online')">在线</button>
+            <button id="vwTabAll" onclick="switchViewerTab('all')">全部注册账号</button>
+          </div>
+          <div class="lc-scroll" id="viewerList" style="max-height:520px">
+            <div class="lc-empty"><div class="icon">👥</div>暂无观众</div>
+          </div>
+        </div>
+        <div class="lc-card">
+          <div class="lc-card-title">观众详情</div>
+          <div class="lc-scroll" id="viewerDetail" style="max-height:520px">
+            <div class="lc-empty"><div class="icon">👆</div>点击左侧观众查看详情</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 私信收件箱（统一会话列表 + 聊天记录） ============ -->
+    <div class="lc-inner" id="page-inbox">
+      <div class="lc-page-hdr">
+        <div><h2>✉️ 私信收件箱</h2><div class="sub">只显示有私信往来的<span style="color:#2563eb">真实观众</span>，可直接回复</div></div>
+        <div style="font-size:12px;color:#64748b">
+          未读: <strong id="ibUnread" style="color:#ef4444">0</strong>
+          · 会话: <strong id="ibThreads">0</strong>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+        <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="refreshInbox()">🔄 刷新</button>
+        <span style="font-size:12px;color:#94a3b8">模拟观众（氛围数据）不会出现在这里，观众端也只有本会话可见</span>
+      </div>
+      <div class="lc-grid lc-grid-2">
+        <div class="lc-card">
+          <div class="lc-card-title">会话列表</div>
+          <div class="lc-scroll" id="inboxList" style="max-height:520px">
+            <div class="lc-empty"><div class="icon">✉️</div>暂无私信会话</div>
+          </div>
+        </div>
+        <div class="lc-card">
+          <div class="lc-card-title">聊天记录</div>
+          <div class="lc-scroll" id="inboxDetail" style="max-height:520px">
+            <div class="lc-empty"><div class="icon">👆</div>点击左侧会话查看聊天记录</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ PAGE 5: 直播复盘报告 ============ -->
+    <div class="lc-inner" id="page-report">
+      <div class="lc-page-hdr">
+        <div><h2>📋 直播复盘报告</h2><div class="sub">自动汇总直播数据，生成带货总结和优化建议</div></div>
+        <button class="lc-btn lc-btn-primary" onclick="generateReport()">📊 生成报告</button>
+      </div>
+      <div id="reportContent">
+        <div class="lc-card">
+          <div class="lc-empty"><div class="icon">📋</div>点击「生成报告」查看本场直播复盘数据</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ PAGE 6: 直播系统设置 ============ -->
+    <div class="lc-inner" id="page-settings">
+      <div class="lc-page-hdr">
+        <div><h2>⚙️ 直播系统设置</h2><div class="sub">配置AI回复、敏感词过滤和弹幕开关</div></div>
+        <button class="lc-btn lc-btn-primary" onclick="saveSettings()">💾 保存设置</button>
+      </div>
+
+      <!-- 主播资料：对外昵称/头像（观众端展示） -->
+      <div class="lc-card" style="margin-bottom:14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+          <div class="lc-card-title" style="margin:0">🧑‍🚀 主播资料</div>
+          <button class="lc-btn lc-btn-primary" onclick="saveHostProfile()">💾 保存主播资料</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+          <div id="hostAvPrev" class="host-av-prev" onclick="openAvatarPick(setHostAvatar)">主</div>
+          <div style="min-width:200px;flex:1">
+            <div class="lbl">主播昵称</div>
+            <input class="lc-inp" id="hostNameInp" maxlength="12" placeholder="主播对外昵称" style="width:220px;margin-top:4px">
+            <div class="desc" style="margin-top:4px">观众端主播发言/标签显示的名字与头像；AI 人设名不受影响</div>
+          </div>
+          <button class="lc-btn" onclick="openAvatarPick(setHostAvatar)">🖼 选择头像</button>
+        </div>
+      </div>
+
+      <div class="lc-grid lc-grid-2">
+        <div class="lc-card">
+          <div class="lc-card-title">🤖 AI回复设置</div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">回复语气</div><div class="desc">AI自动回复的语气风格</div></div>
+            <select class="lc-sel" id="setAiStyle" style="width:140px">
+              <option value="friendly">亲切友好</option>
+              <option value="professional">专业严谨</option>
+              <option value="enthusiastic">热情活泼</option>
+            </select>
+          </div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">回复长度</div><div class="desc">回复内容的详细程度</div></div>
+            <select class="lc-sel" id="setAiLength" style="width:140px">
+              <option value="short">简洁</option>
+              <option value="medium">适中</option>
+              <option value="detailed">详细</option>
+            </select>
+          </div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">智能 AI 回复（大模型）</div><div class="desc" id="aiModelHint">用大模型智能生成弹幕/私信回复；关闭则用规则话术</div></div>
+            <div class="lc-switch on" id="switchUseLLM" onclick="toggleSwitch(this)"></div>
+          </div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">自动发送商品信息</div><div class="desc">回复时附带商品详情</div></div>
+            <div class="lc-switch on" id="switchAutoProd" onclick="toggleSwitch(this)"></div>
+          </div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">情感检测</div><div class="desc">识别用户情绪调整回复</div></div>
+            <div class="lc-switch on" id="switchEmotion" onclick="toggleSwitch(this)"></div>
+          </div>
+        </div>
+        <div class="lc-card">
+          <div class="lc-card-title">🛡️ 敏感词与安全</div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">敏感词过滤</div><div class="desc">过滤违规内容</div></div>
+            <div class="lc-switch on" id="switchSensitive" onclick="toggleSwitch(this)"></div>
+          </div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">违规拦截</div><div class="desc">拦截并标记违规弹幕</div></div>
+            <div class="lc-switch on" id="switchViolation" onclick="toggleSwitch(this)"></div>
+          </div>
+          <div style="margin-top:10px">
+            <div style="font-size:12px;font-weight:600;color:#1e293b;margin-bottom:6px">自定义敏感词（逗号分隔）</div>
+            <textarea class="lc-inp" id="setSensitiveWords" rows="3" style="resize:vertical"></textarea>
+          </div>
+        </div>
+        <div class="lc-card">
+          <div class="lc-card-title">💬 弹幕与私信</div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">虚拟弹幕</div><div class="desc">自动生成模拟弹幕</div></div>
+            <div class="lc-switch on" id="switchVdanmaku" onclick="toggleSwitch(this)"></div>
+          </div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">弹幕频率</div><div class="desc">生成速度</div></div>
+            <select class="lc-sel" id="setVdanmakuFreq" style="width:140px">
+              <option value="low">低</option>
+              <option value="medium" selected>中</option>
+              <option value="high">高</option>
+            </select>
+          </div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">私信自动回复</div><div class="desc">自动回复用户咨询</div></div>
+            <div class="lc-switch on" id="switchPvtReply" onclick="toggleSwitch(this)"></div>
+          </div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">人工转接</div><div class="desc">AI无法回答时转人工</div></div>
+            <div class="lc-switch on" id="switchHumanTransfer" onclick="toggleSwitch(this)"></div>
+          </div>
+        </div>
+        <div class="lc-card">
+          <div class="lc-card-title">⚙️ 系统选项</div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">智能提示</div><div class="desc">推送运营建议</div></div>
+            <div class="lc-switch on" id="switchAlerts" onclick="toggleSwitch(this)"></div>
+          </div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">直播计时提醒</div><div class="desc">每45分钟提醒</div></div>
+            <div class="lc-switch on" id="switchTimer" onclick="toggleSwitch(this)"></div>
+          </div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">数据自动备份</div><div class="desc">结束后自动备份</div></div>
+            <div class="lc-switch" id="switchBackup" onclick="toggleSwitch(this)"></div>
+          </div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">模拟热度基数</div><div class="desc">「X 人在看」= 本基数 + 真实在线观众数</div></div>
+            <input class="lc-inp" id="setOnlineBase" type="number" min="0" max="100000" step="1" style="width:110px" placeholder="120">
+          </div>
+        </div>
+      </div>
+
+      <!-- 大模型接入端口 -->
+      <div class="lc-card" style="margin-top:16px">
+        <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <span>🔌 大模型接入端口</span>
+          <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="openLlmEndpointForm('')">➕ 添加端口</button>
+        </div>
+
+        <div class="lc-setting-row">
+          <div>
+            <div class="lbl">当前启用的端口</div>
+            <div class="desc" id="llmActiveHint">AI 文字功能（话术生成、弹幕/私信自动回复、弹幕总结）都走这里选的端口</div>
+          </div>
+          <select class="lc-sel" id="llmActiveSel" style="width:220px" onchange="setActiveLlmEndpoint(this.value)"></select>
+        </div>
+
+        <div id="llmEndpointList" style="margin-top:2px"></div>
+
+        <div id="llmEndpointEmpty" style="display:none;padding:16px;text-align:center;color:#94a3b8;font-size:12px;background:#f8fafc;border-radius:8px;line-height:1.7">
+          还没有配置端口。<br>此时 AI 文字功能使用 <code>.env</code> 里的默认模型；<br>
+          要换成别家（DeepSeek / 通义 / 智谱 / 硅基流动 / Kimi / 本地 Ollama 等），点右上角「➕ 添加端口」。
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ============================================================
+// State
+// ============================================================
+var S = {
+  liveStatus: {status:'idle',onlineCount:0,totalDanmaku:0,totalPrivateMessages:0,totalAIReplies:0,liveDuration:0,currentStage:'warmup'},
+  curProd: null,
+  products: [],
+  stats: {},
+  settings: null,
+  dmList: [],
+  sessions: [],
+  alerts: [],
+  reviews: [],
+  hfq: [],
+  curPage: 'console',
+  aiReplyFilter: 'ai',
+  reviewFilter: 'all',
+  dmHistoryTab: 'real',   // 弹幕历史：默认只看真实观众（注册用户）
+  isLive: false,
+  orders: [],
+  orderStats: null,
+  // 控制台「本场订单」：口径是当前这场直播 + 真实注册观众，与分析页的
+  // S.orders / S.orderStats（今日/累计、全部订单）是两套东西，别互相覆盖。
+  sessionOrders: [],
+  sessionOrderStats: null,
+  scriptHistory: [],
+  prodFilter: {cat:'all', state:'all', kw:''},
+  editingProductId: null,
+  detailProductId: null,
+  detailReviews: [],
+  // AI 出图进行中的商品 {productId: true}。免费端点单张要 1.6s~45s，
+  // 且后端串行排队，不给个「生成中」状态用户会以为按钮没反应而反复点。
+  aiImgBusy: {},
+  // 观众列表：两个数据源都在服务端算好，切 tab 只换渲染集合
+  viewersOnline: [],
+  viewersAll: [],
+  viewerTab: 'online',
+  viewerCur: null,
+  // 私信收件箱（只含真实观众会话）
+  inboxThreads: [],
+  inboxCur: null,
+  inboxMsgs: [],
+  // 打开会话时的买家名兜底。仅由「最近订单」的 💬 私信按钮写入：那个买家
+  // 可能还没聊过，服务端根本没有会话记录，不带着名字过来标题就只能写「观众」。
+  inboxName: '',
+  // 弹幕总结
+  dmSummary: null,
+  dmSummaryAI: null,
+  // 评价总结（纯统计，无 AI 那一半）
+  rvSummary: null,
+  // 最近一次生成的复盘报告（切页不重新请求，直接重渲染）
+  lastReport: null,
+  host: {hostName:'主播', hostAvatar:''},
+  // 大模型接入端口：列表来自服务端（apiKey 只有掩码），editingEndpointId 为空表示新增
+  llmEndpoints: [], llmActiveId: '', llmActiveLabel: '', editingEndpointId: null
+};
+window.__camStream = null;
+window.__camOn = false;
+
+var ws = null, wsR = null, wsA = 0, wsQ = [], LL = {}, wsConnected = false, wsInitDone = false;
+
+// ============================================================
+// WebSocket
+// ============================================================
+function wsConn() {
+  if (ws && ws.readyState === 1) return;
+  var loc = window.location;
+  var wsProto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+  // 角色由服务端**凭据**判定：带有效运营台 JWT 才是 host，校验失败会降级成观众连接。
+  // 旧服务端是「不带 role 即 host」，任何人裸连 /ws/live-commerce 就拿到主播权限。
+  var htok = '';
+  try { htok = localStorage.getItem('lc_auth_token') || ''; } catch(e) {}
+  ws = new WebSocket(wsProto + '//' + loc.host + '/ws/live-commerce?host_token=' + encodeURIComponent(htok));
+  ws.onopen = function() {
+    wsA = 0; wsConnected = true; wsInitDone = true;
+    document.getElementById('wsStatus').innerHTML = '<span class="lc-dot live"></span>已连接 &#10003;';
+    while (wsQ.length && ws.readyState === 1) { ws.send(wsQ.shift()); }
+    // 端口列表不只设置页要用：「话术生成」「AI 回复」两处卡片上的
+    // 「当前模型：xxx」也靠它，所以连上就拉一次，不必等用户点进设置页。
+    loadLlmEndpoints();
+  };
+  ws.onclose = function(e) {
+    wsConnected = false;
+    if (e.code === 1008) {
+      // 握手阶段 JWT 校验失败（过期/伪造/自称 host 但无有效 token）。
+      // 不再降级成只读观众连接：显式挡住并引导重新登录。
+      showRoleBlocked();
+      return;
+    }
+    if (e.code === 1000 || e.code === 1001) {
+      document.getElementById('wsStatus').innerHTML = '<span class="lc-dot idle"></span>连接已断开';
+      console.log('[LiveCommerce] WebSocket正常关闭');
+      return;
+    }
+    var msg = '第'+(wsA+1)+'次重连...';
+    document.getElementById('wsStatus').innerHTML = '<span class="lc-dot idle"></span>'+msg;
+    clearTimeout(wsR);
+    var delay = wsInitDone ? Math.min(1000 * Math.pow(1.3, wsA), 10000) : 200;
+    wsR = setTimeout(wsConn, delay);
+    wsA++;
+  };
+  ws.onmessage = function(e) {
+    try { var m = JSON.parse(e.data); emit(m.type, m.data||{}); emit('*', m); } catch(ex) {}
+  };
+  ws.onerror = function(e) {
+    wsConnected = false;
+    document.getElementById('wsStatus').innerHTML = '<span class="lc-dot err"></span>正在连接…';
+    console.error('[LiveCommerce] WebSocket连接失败:', e);
+  };
+}
+function wsSend(t, d) {
+  var msg = JSON.stringify({type:t,data:d||{},timestamp:new Date().toISOString()});
+  if (ws && ws.readyState === 1) { ws.send(msg); }
+  else {
+    wsQ.push(msg);
+    if (wsInitDone && wsA > 0 && wsA % 5 === 0) {
+      toast('消息已排队，等待连接恢复…','warn');
+    }
+  }
+}
+function on(e, c) { if (!LL[e]) LL[e] = []; LL[e].push(c); }
+function emit(e, d) { if (LL[e]) LL[e].forEach(function(f){try{f(d)}catch(ex){}}); }
+
+// ============================================================
+// Helpers
+// ============================================================
+function fmtNum(n) { return (n===null||n===undefined||isNaN(n))?'0':Number(n).toLocaleString(); }
+function fmtPrice(p) { return '¥' + (p||0).toFixed(0); }
+function fmtTime(t) { if(!t)return'--';try{var d=new Date(t);return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2)}catch(e){return t} }
+function esc(s) { if(!s)return'';var d=document.createElement('div');d.textContent=s;return d.innerHTML; }
+function toast(msg, type) {
+  var el=document.createElement('div');
+  el.style.cssText='position:fixed;top:80px;right:24px;z-index:1100;padding:8px 16px;border-radius:8px;color:#fff;font-size:13px;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,.15);animation:lcFade .3s;background:'+(type==='success'?'#10b981':type==='warn'?'#f59e0b':type==='err'?'#ef4444':'#2563eb');
+  el.textContent=msg;document.body.appendChild(el);
+  setTimeout(function(){el.style.opacity='0';el.style.transition='opacity .3s';setTimeout(function(){el.remove()},300)},2500);
+}
+var emg=false;
+function toggleEmg() {
+  emg=!emg;
+  var b=document.getElementById('btnEmg');
+  if(emg){b.style.background='#10b981';b.innerHTML='▶️ 已暂停AI';wsSend('pause_live');toast('已暂停全部AI自动功能','warn');}
+  else{b.style.background='transparent';b.innerHTML='⏸️ 一键暂停AI';wsSend('resume_live');toast('AI服务已恢复','success');}
+}
+
+// ============================================================
+// Page Switching
+// ============================================================
+function switchPage(page) {
+  S.curPage = page;
+  document.querySelectorAll('.lc-sb-item').forEach(function(el){el.classList.toggle('active',el.dataset.page===page)});
+  document.querySelectorAll('.lc-inner').forEach(function(el){el.classList.toggle('active',el.id==='page-'+page)});
+  if (page==='console') { renderAll(); }
+  if (page==='products') renderProductsPage();
+  if (page==='danmaku') { renderDmPage(); renderDanmakuSummary(); renderDanmakuSummaryAI(); }
+  if (page==='analysis') renderAnalysisPage();
+  if (page==='reviews') { renderReviewsPage(); loadReviewSummary(); }
+  if (page==='viewers') renderViewersPage();
+  if (page==='inbox') refreshInbox();
+  if (page==='report') renderReport(S.lastReport);
+  if (page==='settings') { loadSettings(); loadLlmEndpoints(); }
+}
+
+// ============================================================
+// Camera
+// ============================================================
+function startCam() {
+  if (window.__camOn) return;
+  navigator.mediaDevices.getUserMedia({video:true}).then(function(stream) {
+    window.__camStream = stream; window.__camOn = true;
+    document.getElementById('videoPreview').srcObject = stream;
+    var h=document.getElementById('camHint'); if(h) h.style.display='block';
+    toast('摄像头已开启，画面将实时推送给观众端','success');
+    startCamPush();
+  }).catch(function(e){toast('摄像头启动失败: '+e.message,'err')});
+}
+function stopCam() {
+  stopCamPush();
+  if (window.__camStream) { window.__camStream.getTracks().forEach(function(t){t.stop()}); window.__camStream = null; }
+  window.__camOn = false;
+  var v=document.getElementById('videoPreview'); if(v) v.srcObject = null;
+  var h=document.getElementById('camHint'); if(h) h.style.display='none';
+}
+function startCamPush() {
+  // 摄像头画面帧转发：离屏 canvas 抽帧 → JPEG dataURL → 经既有 WS 推给观众端（~4fps，限带宽）
+  if (window.__camTimer || !window.__camStream) return;
+  var v=document.getElementById('videoPreview');
+  if (!window.__camCanvas) { window.__camCanvas=document.createElement('canvas'); window.__camCtx=window.__camCanvas.getContext('2d'); }
+  window.__camTimer=setInterval(function(){
+    if (!window.__camOn || !v || !v.videoWidth || !v.srcObject) return;
+    var cw=480;
+    var ch=Math.max(270, Math.round(v.videoHeight/v.videoWidth*cw));
+    var cv=window.__camCanvas; cv.width=cw; cv.height=ch;
+    window.__camCtx.drawImage(v,0,0,cw,ch);
+    try {
+      var frame=cv.toDataURL('image/jpeg',0.55);
+      wsSend('pub_cam_frame',{frame:frame});
+    } catch(ex) {}
+  },250);
+}
+function stopCamPush() {
+  if (window.__camTimer) { clearInterval(window.__camTimer); window.__camTimer=null; }
+}
+function changeCam() { if (window.__camOn) { stopCam(); setTimeout(startCam, 300); } }
+// Enumerate cameras
+navigator.mediaDevices.enumerateDevices().then(function(devices) {
+  var sel = document.getElementById('camSelect');
+  devices.forEach(function(d) {
+    if (d.kind==='videoinput') {
+      var o=document.createElement('option');
+      o.value=d.deviceId; o.textContent=d.label||('摄像头 '+(sel.options.length+1));
+      sel.appendChild(o);
+    }
+  });
+}).catch(function(){});
+
+// ============================================================
+// Live Controls
+// ============================================================
+function startLive() { wsSend('start_live'); }
+function endLive() {
+  if (window.__camOn) { stopCam(); }
+  wsSend('end_live');
+}
+function switchStage(stage) { wsSend('switch_stage',{stage:stage}); }
+
+// ============================================================
+// Product
+// ============================================================
+function setCurProd(pid) { if (pid) wsSend('set_product',{productId:pid}); }
+
+// ============================================================
+// Danmaku
+// ============================================================
+function sendDanmaku() {
+  var inp=document.getElementById('danmakuInput');
+  var text=inp.value.trim();
+  if (!text) return;
+  if (!S.curProd) { toast('请先选择商品','warn'); return; }
+  if (!wsConnected || !ws || ws.readyState !== 1) {
+    toast('服务未连接，暂时无法发送弹幕','warn');
+    return;
+  }
+  var _host=S.host||{};
+  var hName=_host.hostName||'主播', hAv=_host.hostAvatar||'';
+  var dm = {
+    danmakuId:'dm_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+    userId:'host_001',userName:hName,avatar:hAv,content:text,
+    timestamp:new Date().toISOString(),isVirtual:false,isReplied:false
+  };
+  S.dmList.push(dm);
+  wsSend('send_danmaku_reply',{
+    danmakuId:dm.danmakuId,content:text,
+    userId:dm.userId,userName:dm.userName,avatar:hAv,
+    timestamp:dm.timestamp
+  });
+  inp.value=''; renderDmList(); updateConsoleStats();
+}
+function quickDanmaku(text) { document.getElementById('danmakuInput').value=text; sendDanmaku(); }
+
+// ============================================================
+// AI 话术生成
+// ============================================================
+function populateScriptProdSelect() {
+  var sel = document.getElementById('scriptProd');
+  if (!sel) return;
+  var opts = S.products.map(function(p){
+    return '<option value="'+p.productId+'">'+esc(p.name)+'</option>';
+  }).join('');
+  var cur = S.curProd ? S.curProd.productId : (S.products[0]?S.products[0].productId:'');
+  sel.innerHTML = '<option value="">（直播整体）</option>'+opts;
+  sel.value = cur || '';
+}
+function generateScriptNow() {
+  var sel=document.getElementById('scriptProd');
+  var pid=sel?sel.value:'';
+  var st=document.getElementById('scriptType').value;
+  var btn=document.getElementById('btnGenScript');
+  var out=document.getElementById('scriptOutput');
+  btn.disabled=true; btn.textContent='⏳ 生成中…';
+  out.value='';
+  wsSend('generate_script',{productId:pid,scriptType:st,stage:S.liveStatus.currentStage||''});
+}
+function copyScript() {
+  var out=document.getElementById('scriptOutput');
+  if(!out.value){toast('暂无可复制的内容','warn');return;}
+  out.select(); document.execCommand('copy');
+  toast('已复制到剪贴板','success');
+}
+function renderScriptHistory() {
+  var el=document.getElementById('scriptHistory');
+  if(!el)return;
+  if(!S.scriptHistory.length){el.innerHTML='';return;}
+  el.innerHTML='<div style="font-size:11px;color:#94a3b8;margin-bottom:4px">🕘 最近生成</div>'+
+    S.scriptHistory.slice(0,5).map(function(h){
+      var label='';
+      var opt=document.querySelector('#scriptType option[value="'+h.type+'"]');
+      label=opt?opt.textContent:h.type;
+      return '<button class="lc-mini-btn" style="margin:2px 4px 2px 0" title="'+esc(h.productName||'')+'" onclick="loadScriptHistory(\''+h.type+'\','+h.idx+')">'+
+        esc(h.productName||'整体')+' · '+esc(label)+'</button>';
+    }).join('');
+}
+function loadScriptHistory(type, idx) {
+  var h=S.scriptHistory[idx];
+  if(h){document.getElementById('scriptType').value=h.type;document.getElementById('scriptOutput').value=h.content;}
+}
+
+// ============================================================
+// Settings
+// ============================================================
+function loadSettings() { wsSend('get_settings'); }
+function toggleSwitch(el) { el.classList.toggle('on'); }
+function saveSettings() {
+  wsSend('save_settings',{settings:{
+    aiReply:{
+      style:document.getElementById('setAiStyle').value,
+      length:document.getElementById('setAiLength').value,
+      useLLM:document.getElementById('switchUseLLM').classList.contains('on'),
+      autoSendProductInfo:document.getElementById('switchAutoProd').classList.contains('on'),
+      emotionDetectionEnabled:document.getElementById('switchEmotion').classList.contains('on'),
+      sensitiveFilterEnabled:document.getElementById('switchSensitive').classList.contains('on'),
+      violationFilterEnabled:document.getElementById('switchViolation').classList.contains('on'),
+      customSensitiveWords:document.getElementById('setSensitiveWords').value.split(/[,，]/).map(function(s){return s.trim()}).filter(Boolean)
+    },
+    virtualDanmaku:{
+      enabled:document.getElementById('switchVdanmaku').classList.contains('on'),
+      frequency:document.getElementById('setVdanmakuFreq').value
+    },
+    privateMessage:{
+      enabled:document.getElementById('switchPvtReply').classList.contains('on'),
+      humanTransferEnabled:document.getElementById('switchHumanTransfer').classList.contains('on')
+    },
+    system:{
+      smartAlertEnabled:document.getElementById('switchAlerts').classList.contains('on'),
+      liveDurationReminderEnabled:document.getElementById('switchTimer').classList.contains('on'),
+      dataAutoBackup:document.getElementById('switchBackup').classList.contains('on'),
+      // 留空时回退 120，避免把空串写进后端（后端 int() 兜底也会回 120）
+      onlineCountBase: Math.max(0, parseInt(document.getElementById('setOnlineBase').value, 10)) || 120
+    }
+  }});
+}
+
+// ============================================================
+// Report
+// ============================================================
+function generateReport() { wsSend('request_report'); }
+
+// ============================================================
+// Tab switching
+// ============================================================
+function switchAiTab(tab) {
+  if (tab==='all') tab='ai'; // 兼容旧调用：全部≈AI回复
+  S.aiReplyFilter=tab;
+  document.querySelectorAll('#aiReplyTab button').forEach(function(b){b.classList.toggle('active',b.dataset.tab===tab)});
+  renderAiReplyList();
+}
+
+// ============================================================
+// Rendering: Console
+// ============================================================
+function renderConsoleStatus() {
+  var ls=S.liveStatus;
+  var isLive=ls.status==='live',isPaused=ls.status==='paused';
+  S.isLive=isLive||isPaused;
+  var se=document.getElementById('consoleStatus');
+  if(isLive) se.innerHTML='<span class="lc-badge lc-badge-live">● 直播中</span>';
+  else if(isPaused) se.innerHTML='<span class="lc-badge" style="background:#fffbeb;color:#d97706;border-color:#fde68a">⏸ 已暂停</span>';
+  else se.innerHTML='<span class="lc-badge lc-badge-idle">⏸ 未开播</span>';
+  document.getElementById('btnStartLive').style.display=(isLive||isPaused)?'none':'';
+  document.getElementById('btnEndLive').style.display=(isLive||isPaused)?'':'none';
+  var stageLabels={warmup:'🔥 预热',flash_sale:'⚡ 秒杀',deep_dive:'🎯 深度',interact:'💰 互动',closing:'👋 收尾'};
+  var se2=document.getElementById('consoleStage');
+  if(isLive) se2.innerHTML='<span class="lc-badge lc-badge-stage">'+(stageLabels[ls.currentStage]||ls.currentStage)+'</span>';
+  else se2.innerHTML='';
+}
+function renderStageControl() {
+  var stages=[{k:'warmup',l:'预热'},{k:'flash_sale',l:'秒杀'},{k:'deep_dive',l:'深度'},{k:'interact',l:'互动'},{k:'closing',l:'收尾'}];
+  var cur=S.liveStatus.currentStage||'warmup';
+  var idx=stages.findIndex(function(x){return x.k===cur});
+  document.getElementById('stageControl').innerHTML=stages.map(function(s,i){
+    var cls=i<idx?'done':s.k===cur?'active':'pending';
+    return '<div class="lc-stg-btn '+cls+'" onclick="switchStage(\''+s.k+'\')">'+s.l+'</div>';
+  }).join('');
+  var strats={warmup:'预热阶段：侧重介绍商品亮点',flash_sale:'秒杀阶段：强调限时优惠',deep_dive:'深度讲解：详细展示商品细节',interact:'互动促单：引导下单',closing:'收尾总结：汇总本场直播'};
+  document.getElementById('stageStrategy').textContent=strats[cur]||'';
+}
+function renderProductSelect() {
+  var sel=document.getElementById('prodSelect');
+  sel.innerHTML='<option value="">-- 选择商品 --</option>';
+  S.products.forEach(function(p){
+    var o=document.createElement('option');o.value=p.productId;
+    o.textContent=p.name+' '+fmtPrice(p.price);
+    if(S.curProd&&p.productId===S.curProd.productId) o.selected=true;
+    sel.appendChild(o);
+  });
+  renderProductInfo();
+}
+function renderProductInfo() {
+  var p=S.curProd;
+  var el=document.getElementById('prodInfo');
+  if(!p){el.innerHTML='<div style="color:#94a3b8">请选择商品</div>';return;}
+  var desc=p.description?esc(p.description).slice(0,60):'';
+  el.innerHTML='<div style="font-size:15px;font-weight:700;color:#0f172a">'+esc(p.name)+'</div>'+
+    '<div style="display:flex;gap:12px;margin:4px 0;font-size:12px">'+
+    '<span style="color:#64748b">'+(p.category||'')+'</span>'+
+    '<span style="color:#dc2626;font-weight:600">'+fmtPrice(p.price)+'</span>'+
+    '<span style="color:#475569">库存 '+fmtNum(p.stock)+'</span></div>'+
+    '<div style="font-size:11px;color:#94a3b8;margin-top:4px">'+desc+'</div>';
+}
+// ============================================================
+// 商品管理页（Products Management）
+// ============================================================
+// 品类 -> {emoji, 渐变底色} 映射（商品无真实图片时用作主图视觉）
+function catStyle(cat) {
+  var map = {
+    '美妆护肤': {emoji:'💄', grad:'linear-gradient(135deg,#fce7f3,#fbcfe8)'},
+    '个护电器': {emoji:'💇', grad:'linear-gradient(135deg,#e0e7ff,#c7d2fe)'},
+    '食品生鲜': {emoji:'🍓', grad:'linear-gradient(135deg,#fef3c7,#fde68a)'},
+    '数码3C':   {emoji:'📱', grad:'linear-gradient(135deg,#e0f2fe,#bae6fd)'},
+    '家居生活': {emoji:'🛋️', grad:'linear-gradient(135deg,#ede9fe,#ddd6fe)'},
+    '母婴用品': {emoji:'🍼', grad:'linear-gradient(135deg,#ffedd5,#fed7aa)'},
+    '服饰穿搭': {emoji:'👗', grad:'linear-gradient(135deg,#fecdd3,#fda4af)'},
+    '其他':     {emoji:'📦', grad:'linear-gradient(135deg,#f1f5f9,#e2e8f0)'}
+  };
+  var m = map[cat] || map['其他'];
+  return {emoji:m.emoji, grad:m.grad};
+}
+function prodImgOrStyle(p) {
+  // 若商品有多图/主图且可用，返回 <img>；否则返回 emoji 块
+  var img = (p.images && p.images.length && p.images[0]) || p.imageUrl || '';
+  if (img) return '<img src="'+esc(img)+'" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'" style="width:100%;height:100%;object-fit:cover">'+
+      '<div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:52px">'+catStyle(p.category).emoji+'</div>';
+  var cs = catStyle(p.category);
+  return '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:52px;background:'+cs.grad+'">'+cs.emoji+'</div>';
+}
+function prodSales(p) {
+  // 运营台口径 = **只算真实用户成交**（决策：商品「已售 N 件」只改运营台，
+  // 观众端 viewer.html 仍读含模拟单的 salesQty，那边一行未动）。
+  // realSalesQty 缺失（旧后端）时回退到全部口径，避免页面直接归零。
+  var allQty = (p.salesQty != null) ? p.salesQty : (p.soldCount || 0);
+  var hasReal = (p.realSalesQty != null);
+  return {
+    qty: hasReal ? p.realSalesQty : allQty,
+    amount: hasReal ? (p.realSalesAmount || 0) : (p.salesAmount || 0),
+    today: hasReal ? (p.realTodayQty || 0) : (p.todayQty || 0),
+    allQty: allQty,
+    allToday: p.todayQty || 0
+  };
+}
+function escXml(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+function catColors(cat) {
+  var m = {
+    '美妆护肤': ['#ec4899', '#f9a8d4'],
+    '个护电器': ['#6366f1', '#a5b4fc'],
+    '食品生鲜': ['#f59e0b', '#fcd34d'],
+    '数码3C':   ['#0ea5e9', '#7dd3fc'],
+    '家居生活': ['#8b5cf6', '#c4b5fd'],
+    '母婴用品': ['#f97316', '#fdba74'],
+    '服饰穿搭': ['#f43f5e', '#fda4af'],
+    '其他':     ['#64748b', '#cbd5e1']
+  };
+  return m[cat] || m['其他'];
+}
+function productPosterSvg(p) {
+  // 依据商品信息生成本地 SVG 商品主图（无外部依赖）：品类配色渐变 + 图标 + 名称/价格/销量
+  var cs = catStyle(p.category);
+  var cc = catColors(p.category);
+  var name = String(p.name || '商品');
+  var n1 = name.slice(0, 12), rest = name.slice(12), n2 = '';
+  if (rest) n2 = rest.slice(0, 11) + (rest.length > 11 ? '…' : '');
+  var has2 = !!n2;
+  var s = prodSales(p);
+  var price = Number(p.price || 0);
+  var money = '¥' + (price === Math.floor(price) ? price.toFixed(0) : (Math.round(price * 100) / 100).toFixed(2));
+  var orig = (p.originalPrice && Number(p.originalPrice) > price) ? '¥' + Number(p.originalPrice).toFixed(0) : '';
+  var origX = orig ? (52 + money.length * 20 + 12) : 0;
+  var badge = s.qty > 0
+    ? ('已售 ' + fmtNum(s.qty) + ' 件' + (s.today > 0 ? ' · 今日+' + fmtNum(s.today) : ''))
+    : (s.allQty > 0 ? '真实成交 0 件（含模拟 ' + fmtNum(s.allQty) + '）' : '暂无成交');
+  var nameY1 = has2 ? 266 : 292, nameY2 = 306, priceY = 356, metaY = 408;
+  var catPillW = 34 + String(p.category || '').length * 16 + 30;
+  var svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480" font-family="-apple-system,BlinkMacSystemFont,\'PingFang SC\',\'Microsoft YaHei\',sans-serif">' +
+    '<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">' +
+      '<stop offset="0%" stop-color="' + cc[0] + '"/><stop offset="100%" stop-color="' + cc[1] + '"/></linearGradient></defs>' +
+    '<rect width="640" height="480" fill="url(#bg)"/>' +
+    '<circle cx="545" cy="70" r="115" fill="#ffffff" opacity="0.13"/>' +
+    '<circle cx="58" cy="430" r="92" fill="#ffffff" opacity="0.10"/>' +
+    '<circle cx="620" cy="430" r="42" fill="#ffffff" opacity="0.14"/>' +
+    '<rect x="28" y="26" rx="15" height="34" width="' + catPillW + '" fill="#ffffff" opacity="0.30"/>' +
+    '<text x="44" y="50" font-size="17" fill="#ffffff" font-weight="600">' + cs.emoji + ' ' + escXml(p.category || '') + '</text>' +
+    '<text x="320" y="150" text-anchor="middle" font-size="104">' + cs.emoji + '</text>' +
+    '<rect x="24" y="220" width="592" height="236" rx="18" fill="#ffffff"/>' +
+    '<text x="52" y="' + nameY1 + '" font-size="30" font-weight="700" fill="#0f172a">' + escXml(n1) + '</text>' +
+    (has2 ? '<text x="52" y="' + nameY2 + '" font-size="30" font-weight="700" fill="#0f172a">' + escXml(n2) + '</text>' : '') +
+    '<text x="52" y="' + priceY + '" font-size="34" font-weight="800" fill="#e11d48">' + escXml(money) + '</text>' +
+    (orig ? '<text x="' + origX + '" y="' + (priceY - 8) + '" font-size="16" fill="#94a3b8" text-decoration="line-through">' + escXml(orig) + '</text>' : '') +
+    '<text x="588" y="' + metaY + '" text-anchor="end" font-size="17" font-weight="700" fill="#475569">' + escXml(badge) + '</text>' +
+    '</svg>';
+  return svg;
+}
+function productDataUri(p) {
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(productPosterSvg(p));
+}
+function genProductImage(pid) {
+  // 用商品当前信息生成一张 SVG 商品主图并保存（卡片/详情弹窗即时刷新）
+  var p = S.products.filter(function(x){return x.productId === pid;})[0];
+  if (!p) return;
+  var uri = productDataUri(p);
+  wsSend('save_product', { product: { productId: pid, images: [uri], imageUrl: uri } });
+  toast('已生成商品主图', 'success');
+  if (S.detailProductId === pid) {
+    // 保存结果回来后再拉一遍新图刷新详情弹窗
+    setTimeout(function(){
+      if (S.detailProductId === pid && S.products.some(function(x){return x.productId === pid;})) openProductDetail(pid);
+    }, 600);
+  }
+}
+function batchGenMissingImages() {
+  var missing = S.products.filter(function(p){ return !((p.images && p.images.length) || p.imageUrl); });
+  if (!missing.length) { toast('所有商品都已配有图片', 'warn'); return; }
+  missing.forEach(function(p){ genProductImage(p.productId); });
+  toast('已为 ' + missing.length + ' 个商品生成主图', 'success');
+}
+// AI 出图：调后端 /api/product/{id}/generate-image，由后端写回商品主图。
+// 与上面 genProductImage（本地生成的 SVG 海报，瞬时、纯前端）是两回事：
+// 这个是真正的 AI 写实图片，慢（免费端点排队 1.6s~45s）、有概率画得不像，
+// 不满意就再点一次重新抽（后端每次随机 seed，不会返回缓存里的同一张）。
+function genAiProductImage(pid) {
+  var p = S.products.filter(function(x){return x.productId === pid;})[0];
+  if (!p) return;
+  if (S.aiImgBusy[pid]) { toast('该商品正在生成中，请稍候…', 'warn'); return; }
+  var t = '';
+  try { t = localStorage.getItem('lc_auth_token') || ''; } catch(e) {}
+  if (!t) { toast('登录已失效，请重新登录', 'err'); return; }
+
+  S.aiImgBusy[pid] = true;
+  refreshAiImgButtons();
+  toast('AI 出图中，免费端点排队可能要几十秒…', 'info');
+
+  fetch('/api/product/' + encodeURIComponent(pid) + '/generate-image', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + t }
+  }).then(function(r){
+    // 后端失败时返回的是 {detail: ...}，一并取出来当错误信息
+    return r.json().catch(function(){ return {}; }).then(function(j){
+      if (!r.ok) throw new Error((j && j.detail) || ('HTTP ' + r.status));
+      return j;
+    });
+  }).then(function(j){
+    delete S.aiImgBusy[pid];
+    toast(j.saved ? 'AI 商品图已生成并写回' : 'AI 商品图已生成', 'success');
+    // 写回是后端做的，本地 S.products 还是旧的 —— 重新拉一遍商品列表
+    wsSend('get_products');
+    if (S.detailProductId === pid) {
+      setTimeout(function(){
+        if (S.detailProductId === pid) openProductDetail(pid);
+      }, 600);
+    } else {
+      refreshAiImgButtons();
+    }
+  }).catch(function(e){
+    delete S.aiImgBusy[pid];
+    refreshAiImgButtons();
+    toast('AI 生成失败：' + (e && e.message ? e.message : e), 'err');
+  });
+}
+// 只重绘按钮文字/禁用态，不整页重渲染 —— 避免生成期间把用户滚动位置弄丢
+function refreshAiImgButtons() {
+  var btns = document.querySelectorAll('[data-aiimg]');
+  for (var i = 0; i < btns.length; i++) {
+    var id = btns[i].getAttribute('data-aiimg');
+    var busy = !!S.aiImgBusy[id];
+    btns[i].disabled = busy;
+    btns[i].style.opacity = busy ? '0.6' : '';
+    btns[i].style.cursor = busy ? 'not-allowed' : '';
+    btns[i].innerHTML = busy ? '⏳ 生成中…' : '✨ AI 生成图';
+  }
+}
+function prodStateBadge(p) {
+  if (p.stock<=0) return '<span class="lc-prod-badge" style="background:#f59e0b">已售罄</span>';
+  if (p.isOnSale) return '<span class="lc-prod-badge" style="background:#10b981">售卖中</span>';
+  return '<span class="lc-prod-badge" style="background:#94a3b8">已下架</span>';
+}
+function starHtml(rating) {
+  var full = Math.round(rating||0); var s='';
+  for (var i=1;i<=5;i++) s += i<=full?'⭐':'☆';
+  return s;
+}
+function prodStateFiltered(p) {
+  var st = document.getElementById('prodStateFilter') ? document.getElementById('prodStateFilter').value : 'all';
+  var cat = document.getElementById('prodCatFilter') ? document.getElementById('prodCatFilter').value : 'all';
+  var kw = document.getElementById('prodSearch') ? (document.getElementById('prodSearch').value||'').toLowerCase() : '';
+  if (cat!=='all' && p.category!==cat) return false;
+  if (st==='on' && !p.isOnSale) return false;
+  if (st==='off' && p.isOnSale) return false;
+  if (st==='soldout' && p.stock>0) return false;
+  if (kw && (p.name||'').toLowerCase().indexOf(kw)<0 && (p.category||'').toLowerCase().indexOf(kw)<0) return false;
+  return true;
+}
+function renderProductsPage() {
+  if (!S.products.length) { wsSend('get_products'); }
+  // 分类下拉（仅在首次/变化时重建）
+  var cats = [];
+  S.products.forEach(function(p){ if (cats.indexOf(p.category)<0 && p.category) cats.push(p.category); });
+  var catSel = document.getElementById('prodCatFilter');
+  if (catSel && catSel.options.length !== cats.length+1) {
+    catSel.innerHTML = '<option value="all">全部分类</option>'+cats.map(function(c){return '<option value="'+esc(c)+'">'+esc(c)+'</option>';}).join('');
+  }
+  // 统计卡
+  var onCount=S.products.filter(function(p){return p.isOnSale;}).length;
+  var offCount=S.products.filter(function(p){return p.isOnSale===false;}).length;
+  var soldout=S.products.filter(function(p){return p.stock<=0;}).length;
+  var totalSold=S.products.reduce(function(a,p){return a+prodSales(p).qty;},0);
+  document.getElementById('prodStatRow').innerHTML =
+    statCard('全部商品', S.products.length, '#2563eb') +
+    statCard('售卖中', onCount, '#10b981') +
+    statCard('已售罄', soldout, '#f59e0b') +
+    statCard('真实成交(件)', totalSold, '#ef4444');
+  // 网格
+  var list = S.products.filter(prodStateFiltered);
+  var grid = document.getElementById('prodGrid');
+  var empty = document.getElementById('prodEmpty');
+  empty.style.display = list.length ? 'none' : 'block';
+  grid.innerHTML = list.map(function(p){
+    var isCur = S.curProd && S.curProd.productId===p.productId;
+    var sl = prodSales(p);
+    var points = (p.sellingPoints&&p.sellingPoints.length)?p.sellingPoints.slice(0,2).map(function(pt){return '<span class="lc-tag lc-tag-blue">'+esc(pt)+'</span>';}).join(''):'';
+    var salesHtml =
+      '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;margin-top:2px">'+
+        '<span style="color:#dc2626;font-weight:700">🔥 真实已售 '+fmtNum(sl.qty)+' 件</span>'+
+        (sl.today>0?'<span style="color:#059669;font-weight:600">今日+'+fmtNum(sl.today)+'</span>':'')+
+        '<span style="color:#64748b">成交 ¥'+fmtNum(sl.amount)+'</span>'+
+        (sl.allQty>sl.qty?'<span style="color:#cbd5e1">（含模拟共 '+fmtNum(sl.allQty)+' 件）</span>':'')+
+      '</div>';
+    return '<div class="lc-prod-card" onclick="openProductDetail(\''+p.productId+'\')">'+
+      '<div class="lc-prod-thumb">'+prodImgOrStyle(p)+prodStateBadge(p)+
+        (isCur?'<span class="lc-prod-badge" style="right:8px;left:auto;background:#2563eb">🎯 当前讲解</span>':'')+'</div>'+
+      '<div class="lc-prod-body">'+
+        '<div class="lc-prod-name">'+esc(p.name)+'</div>'+
+        '<div class="lc-prod-price">'+fmtPrice(p.price)+'<span class="op">¥'+fmtNum(p.originalPrice||p.price)+'</span></div>'+
+        '<div class="lc-prod-meta"><span>'+starHtml(p.rating)+' '+fmtNum(p.rating)+'</span>'+
+          '<span>库存 '+fmtNum(p.stock)+'</span></div>'+
+        salesHtml+
+        (points?'<div class="lc-prod-points">'+points+'</div>':'')+
+        '<div class="lc-prod-actions" onclick="event.stopPropagation()">'+
+          '<button class="lc-btn lc-btn-primary lc-btn-sm" onclick="setCurProdFromMgr(\''+p.productId+'\')" title="设为直播当前讲解商品">🎯 讲解</button>'+
+          (p.isOnSale
+            ? '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="toggleOnSale(\''+p.productId+'\',false)">下架</button>'
+            : '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="toggleOnSale(\''+p.productId+'\',true)" style="color:#059669;border-color:#a7f3d0">上架</button>')+
+          '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="openProductForm(\''+p.productId+'\')">编辑</button>'+
+          '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="genProductImage(\''+p.productId+'\')" title="按商品信息生成本地 SVG 商品主图（瞬时、离线，可重复点击重新生成）">🖼 生成图</button>'+
+          '<button class="lc-btn lc-btn-outline lc-btn-sm" data-aiimg="'+p.productId+'" onclick="genAiProductImage(\''+p.productId+'\')" title="AI 生成写实商品图并设为主图。免费端点较慢（几秒到几十秒），不满意可再点一次重新生成">✨ AI 生成图</button>'+
+          '<button class="lc-btn lc-btn-danger lc-btn-sm" onclick="deleteProduct(\''+p.productId+'\')">删除</button>'+
+        '</div>'+
+      '</div></div>';
+  }).join('');
+}
+function statCard(label, val, color) {
+  return '<div class="lc-card"><div class="lc-stat"><div class="nv" style="color:'+color+'">'+fmtNum(val)+'</div><div class="lb">'+label+'</div></div></div>';
+}
+// 商品管理操作
+function setCurProdFromMgr(pid) { wsSend('set_product',{productId:pid}); }
+function toggleOnSale(pid, on) { wsSend('on_sale_product',{productId:pid,onSale:on}); }
+function deleteProduct(pid) {
+  if(!confirm('确定删除该商品吗？此操作不可恢复。')) return;
+  wsSend('delete_product',{productId:pid});
+}
+// 添加/编辑 表单
+function openProductForm(pid) {
+  S.editingProductId = pid||null;
+  var f = {name:'',category:'美妆护肤',price:'',originalPrice:'',stock:100,images:'',points:'',specs:'',description:''};
+  if (pid) {
+    var p = S.products.filter(function(x){return x.productId===pid;})[0];
+    if (p) f = {name:p.name, category:p.category||'其他', price:p.price, originalPrice:p.originalPrice,
+      // 自动生成的 SVG 主图不放进文本框（很长）；外链图才展示，留空则保留原图
+      stock:p.stock, images:(p.images||[]).filter(function(u){return u.indexOf('data:image/svg')!==0;}).join('\n'),
+      points:(p.sellingPoints||[]).join('\n'),
+      specs:(p.specs||[]).join('\n'), description:p.description||''};
+  }
+  document.getElementById('productFormTitle').textContent = pid ? '✏️ 编辑商品' : '➕ 添加商品';
+  document.getElementById('pfName').value = f.name;
+  document.getElementById('pfCategory').value = f.category;
+  document.getElementById('pfPrice').value = f.price;
+  document.getElementById('pfOrigPrice').value = f.originalPrice;
+  document.getElementById('pfStock').value = f.stock;
+  document.getElementById('pfImages').value = f.images;
+  document.getElementById('pfPoints').value = f.points;
+  document.getElementById('pfSpecs').value = f.specs;
+  document.getElementById('pfDesc').value = f.description;
+  document.getElementById('productFormModal').classList.add('open');
+}
+function closeProductForm() { document.getElementById('productFormModal').classList.remove('open'); S.editingProductId=null; }
+function submitProductForm() {
+  var name=(document.getElementById('pfName').value||'').trim();
+  var price=parseFloat(document.getElementById('pfPrice').value);
+  if(!name){toast('请填写商品名称','err');return;}
+  if(isNaN(price)||price<=0){toast('请填写有效售价','err');return;}
+  var orig=parseFloat(document.getElementById('pfOrigPrice').value)||price;
+  if (orig < price) orig = price;
+  var images=(document.getElementById('pfImages').value||'').split(/[\n,]/).map(function(s){return s.trim();}).filter(Boolean);
+  // 图片框留空时保留原商品的图片（含自动生成的 SVG 主图），避免编辑名称/价格后把图误清
+  if(!images.length && S.editingProductId){
+    var ex=S.products.filter(function(x){return x.productId===S.editingProductId;})[0];
+    if(ex && (ex.images||[]).length) images=(ex.images||[]).slice();
+  }
+  var points=(document.getElementById('pfPoints').value||'').split('\n').map(function(s){return s.trim();}).filter(Boolean);
+  var specs=(document.getElementById('pfSpecs').value||'').split('\n').map(function(s){return s.trim();}).filter(Boolean);
+  var product = {
+    // 新建时 editingProductId 为 null，后端 productId 是必填 string，统一成空串表示「新增」
+    productId: S.editingProductId || '',
+    name: name,
+    category: document.getElementById('pfCategory').value,
+    price: price,
+    originalPrice: orig,
+    stock: parseInt(document.getElementById('pfStock').value)||0,
+    images: images,
+    imageUrl: images[0]||'',
+    sellingPoints: points,
+    specs: specs,
+    description: (document.getElementById('pfDesc').value||'').trim(),
+    addedTime: new Date().toISOString(),
+    isInLibrary: true
+  };
+  wsSend('save_product',{product:product});
+  closeProductForm();
+  // 成功提示统一交给 save_product_result，避免请求失败时也弹「已保存」把错误盖掉
+}
+// 商品详情弹窗
+function openProductDetail(pid) {
+  S.detailProductId = pid;
+  var p = S.products.filter(function(x){return x.productId===pid;})[0];
+  if (!p) return;
+  var sl = prodSales(p);
+  var cs = catStyle(p.category);
+  var isCur = S.curProd && S.curProd.productId===pid;
+  var specRows = (p.specs||[]).map(function(sp){
+    var i = sp.indexOf(':');
+    var k = i>=0?sp.slice(0,i).trim():sp; var v = i>=0?sp.slice(i+1).trim():'';
+    return '<tr><td>'+esc(k)+'</td><td>'+esc(v)+'</td></tr>';
+  }).join('');
+  var pointsHtml = (p.sellingPoints&&p.sellingPoints.length)
+    ? p.sellingPoints.map(function(pt){return '<span class="lc-tag lc-tag-green">'+esc(pt)+'</span>';}).join(' ')
+    : (p.tags||[]).map(function(t){return '<span class="lc-tag lc-tag-blue">'+esc(t)+'</span>';}).join(' ');
+  var imgHtml;
+  if (p.images && p.images.length) imgHtml = '<img src="'+esc(p.images[0])+'" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'" style="width:180px;height:180px;object-fit:cover;border-radius:12px">'+
+    '<div style="display:none;width:180px;height:180px;border-radius:12px;align-items:center;justify-content:center;font-size:88px;background:'+cs.grad+'">'+cs.emoji+'</div>';
+  else imgHtml = '<div style="width:180px;height:180px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:88px;background:'+cs.grad+'">'+cs.emoji+'</div>';
+  document.getElementById('prodDetailContent').innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'+
+      '<div style="font-size:17px;font-weight:700">'+esc(p.name)+'</div>'+
+      '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="closeProductDetail()">✕</button></div>'+
+    '<div class="lc-prod-detail-main">'+imgHtml+
+      '<div style="flex:1;min-width:220px">'+
+        '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+
+          '<span class="lc-tag lc-tag-blue">'+esc(p.category||'未分类')+'</span>'+
+          (isCur?'<span class="lc-tag lc-tag-green">🎯 当前讲解中</span>':'')+
+          (p.isOnSale?'<span class="lc-tag lc-tag-green">上架中</span>':'<span class="lc-tag" style="background:#f1f5f9;color:#64748b">已下架</span>')+
+        '</div>'+
+        '<div style="font-size:24px;font-weight:800;color:#ef4444;margin:8px 0">'+fmtPrice(p.price)+
+          '<span style="font-size:13px;color:#94a3b8;font-weight:400;text-decoration:line-through;margin-left:8px">¥'+fmtNum(p.originalPrice||p.price)+'</span></div>'+
+        '<div style="font-size:12px;color:#64748b;display:flex;gap:16px;flex-wrap:wrap">'+
+          '<span>'+starHtml(p.rating)+' '+fmtNum(p.rating)+' 分</span>'+
+          '<span>库存 '+fmtNum(p.stock)+' 件</span>'+
+          '<span>评价 '+fmtNum(p.reviewCount||0)+' 条</span></div>'+
+        '<div style="margin-top:8px;display:flex;gap:16px;flex-wrap:wrap;font-size:13px">'+
+          '<span style="color:#dc2626;font-weight:700">🔥 累计销量 '+fmtNum(sl.qty)+' 件</span>'+
+          (sl.today>0?'<span style="color:#059669;font-weight:600">今日 +'+fmtNum(sl.today)+'</span>':'')+
+          '<span style="color:#64748b">成交额 ¥'+fmtNum(sl.amount)+'</span></div>'+
+        '<div style="margin-top:10px">'+pointsHtml+'</div>'+
+      '</div>'+
+    '</div>'+
+    (p.description?'<div style="margin-top:12px;font-size:13px;color:#475569;line-height:1.7;background:#f8fafc;border-radius:8px;padding:10px">'+esc(p.description)+'</div>':'')+
+    (specRows?'<table class="lc-spec-tbl"><tr><td colspan="2" style="background:#f8fafc;font-weight:600;color:#1e293b">📋 规格参数</td></tr>'+specRows+'</table>':'')+
+    '<div style="display:flex;gap:8px;margin-top:14px" onclick="event.stopPropagation()">'+
+      '<button class="lc-btn lc-btn-primary lc-btn-sm" onclick="setCurProdFromMgr(\''+p.productId+'\');closeProductDetail()">🎯 设为讲解</button>'+
+      '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="openProductForm(\''+p.productId+'\');closeProductDetail()">✏️ 编辑</button>'+
+      '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="genProductImage(\''+p.productId+'\')" title="按商品信息生成本地 SVG 商品主图（瞬时、离线）">🖼 生成商品图</button>'+
+      '<button class="lc-btn lc-btn-outline lc-btn-sm" data-aiimg="'+p.productId+'" onclick="genAiProductImage(\''+p.productId+'\')" title="AI 生成写实商品图并设为主图。免费端点较慢（几秒到几十秒），不满意可再点一次重新生成">✨ AI 生成图</button>'+
+      (p.isOnSale?'<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="toggleOnSale(\''+p.productId+'\',false);closeProductDetail()">下架</button>'
+                 :'<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="toggleOnSale(\''+p.productId+'\',true);closeProductDetail()">上架</button>')+
+    '</div>'+
+    '<div style="font-size:14px;font-weight:700;margin-top:18px;padding-bottom:6px;border-bottom:1px solid #f1f5f9">⭐ 商品评价 ('+fmtNum(p.reviewCount||0)+')</div>'+
+    '<div id="prodDetailReviews" style="font-size:13px"></div>';
+  // 异步拉取该商品评价
+  S.detailReviews = [];
+  document.getElementById('prodDetailReviews').innerHTML='<div style="color:#94a3b8;padding:12px;text-align:center">加载中…</div>';
+  wsSend('get_product_reviews',{productId:pid});
+  document.getElementById('productDetailModal').classList.add('open');
+}
+function closeProductDetail() { document.getElementById('productDetailModal').classList.remove('open'); }
+function renderDetailReviews() {
+  var el = document.getElementById('prodDetailReviews');
+  if (!el) return;
+  if (!S.detailReviews.length) { el.innerHTML='<div style="color:#94a3b8;padding:14px;text-align:center">该商品暂无评价</div>'; return; }
+  el.innerHTML = S.detailReviews.map(function(r){
+    return '<div style="padding:10px 0;border-bottom:1px solid #f1f5f9">'+
+      '<div style="display:flex;align-items:center;gap:8px">'+
+        '<span style="font-weight:600;font-size:12px">'+esc(r.userName||'用户')+'</span>'+
+        '<span style="font-size:11px">'+starHtml(r.rating)+'</span>'+
+        '<span style="font-size:11px;color:#94a3b8">'+ (r.timeText||'') +'</span></div>'+
+      '<div style="margin-top:4px;color:#475569">'+esc(r.content)+'</div>'+
+    '</div>';
+  }).join('');
+}
+function renderDmList() {
+  var list=S.dmList;
+  var el=document.getElementById('danmakuList');
+  if(!list.length){el.innerHTML='<div class="lc-empty"><div class="icon">💬</div>暂无弹幕</div>';return;}
+  el.innerHTML=list.slice(-50).reverse().map(function(d){
+    return '<div class="lc-dm-item">'+
+      '<span style="font-weight:600;color:#1e293b;font-size:11px">'+esc(d.userName)+'</span> '+
+      '<span style="color:#475569">'+esc(d.content)+'</span>'+
+      (d.isReplied&&d.replyContent?'<div class="lc-dm-reply">🤖 '+esc(d.replyContent)+'</div>':'')+
+      '<span style="float:right;color:#cbd5e1;font-size:10px">'+fmtTime(d.timestamp)+'</span></div>';
+  }).join('');
+}
+function updateConsoleStats() {
+  var ls=S.liveStatus;
+  var total=S.dmList.length;
+  var replied=S.dmList.filter(function(d){return d.isReplied}).length;
+  document.getElementById('statTotalDm').textContent=fmtNum(total||ls.totalDanmaku);
+  document.getElementById('statAiReplies').textContent=fmtNum(replied||ls.totalAIReplies);
+  document.getElementById('statOnline').textContent=fmtNum(ls.onlineCount);
+  var rate=total?Math.round(replied/total*100):0;
+  document.getElementById('statReplyRate').textContent=rate+'%';
+  document.getElementById('dmDmTotal').textContent=fmtNum(total||ls.totalDanmaku);
+  document.getElementById('dmRepliedTotal').textContent=fmtNum(replied||ls.totalAIReplies);
+}
+function renderTopQuestions() {
+  var list=S.hfq;
+  var el=document.getElementById('topQuestions');
+  if(!list||!list.length){el.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:8px 0">暂无数据</div>';return;}
+  el.innerHTML=list.slice(0,10).map(function(q,i){
+    return '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f8fafc;font-size:12px">'+
+      '<span>#'+(i+1)+' '+esc(q.question)+'</span>'+
+      '<span style="font-weight:600;color:#2563eb">'+q.count+'次</span></div>';
+  }).join('');
+}
+function renderAlerts() {
+  var el=document.getElementById('alertPanel');
+  var list=S.alerts;
+  if(!list||!list.length){el.innerHTML='<div class="lc-empty"><div class="icon">📢</div>暂无场控提示</div>';return;}
+  el.innerHTML=list.slice(-20).reverse().map(function(a){
+    return '<div class="lc-alert-item '+(a.type||'hot_question')+'">'+
+      '<div style="font-weight:600;font-size:12px">'+esc(a.title||'')+'</div>'+
+      '<div style="font-size:11px;color:#475569">'+esc(a.message||'')+'</div>'+
+      '<div style="font-size:10px;color:#94a3b8;margin-top:2px">'+fmtTime(a.timestamp)+'</div></div>';
+  }).join('');
+}
+
+// ============================================================
+// Rendering: Danmaku Page
+// ============================================================
+function renderDmPage() {
+  renderDmHistoryList();
+  renderAiReplyList();
+  renderTopQuestionsChart();
+  updateConsoleStats();
+}
+function switchDmHistoryTab(tab){
+  S.dmHistoryTab=tab;
+  document.querySelectorAll('#dmHistoryTab button').forEach(function(b){
+    b.classList.toggle('active',b.dataset.tab===tab);
+  });
+  renderDmHistoryList();
+}
+function updateDmHistoryTabs(){
+  // 首次调用时按钮里还只有静态文案，借 dataset.label 记下来，之后只换数字
+  var all=S.dmList||[];
+  var n={ real:all.filter(dmIsRealViewer).length, sim:all.filter(dmIsSimulated).length, all:all.length };
+  var nQ=all.filter(function(d){return dmIsRealViewer(d)&&d.isQuestion;}).length;
+  document.querySelectorAll('#dmHistoryTab button').forEach(function(b){
+    var lb=b.dataset.label||b.textContent;
+    b.dataset.label=lb;
+    var t=b.dataset.tab;
+    b.innerHTML=esc(lb)+' <span style="opacity:.7">'+n[t]+'</span>'+
+      (t==='real'&&nQ?' <span style="color:#d97706">问'+nQ+'</span>':'');
+  });
+}
+function renderDmHistoryList() {
+  // 弹幕历史记录 = 纯弹幕流水：只展示观众发送的原始弹幕，不内嵌 AI 回复内容。
+  // 真实注册观众（userId 前缀 v_）与 AI 虚拟/模拟弹幕**分开**：运营主要看前者，
+  // 所以默认落在「真实观众」页签上。
+  var all=S.dmList||[];
+  var tab=S.dmHistoryTab||'real';
+  updateDmHistoryTabs();
+  var list = tab==='real' ? all.filter(dmIsRealViewer)
+           : tab==='sim'  ? all.filter(dmIsSimulated)
+           : all;
+  var el=document.getElementById('dmHistoryList');
+  if(!el) return;
+  if(!list.length){
+    var tip = tab==='real' ? '暂无真实观众弹幕（注册用户发言后才会出现在这里）'
+            : tab==='sim'  ? '暂无 AI 虚拟 / 模拟弹幕'
+            : '暂无弹幕记录';
+    el.innerHTML='<div class="lc-empty"><div class="icon">💬</div>'+tip+'</div>';
+    return;
+  }
+  var KIND_TAG={ viewer:['观众','#2563eb'], virtual:['AI','#7c3aed'],
+                 mock:['模拟','#94a3b8'], host:['主播','#ef4444'],
+                 legacy:['老账号','#94a3b8'], system:['系统','#94a3b8'], unknown:['其他','#94a3b8'] };
+  el.innerHTML=list.slice().reverse().map(function(d){
+    // 来源标签只在「全部」页签里打：分开的页签里每条都是同一种，打了是噪音
+    var tg='';
+    if(tab==='all'){
+      var k=KIND_TAG[danmakuKind(d)]||KIND_TAG.unknown;
+      tg='<span style="color:'+k[1]+';font-size:10px;border:1px solid '+k[1]+
+         ';border-radius:3px;padding:0 3px;margin-right:4px">'+k[0]+'</span>';
+    }
+    // 提问标记：注册用户提的问题是运营最关心的，单独标出来
+    var q=d.isQuestion?'<span style="color:#d97706;font-weight:600;margin-right:4px">问</span>':'';
+    return '<div class="lc-dm-item">'+
+      '<span style="font-weight:600;color:#1e293b;font-size:11px">'+esc(d.userName||'用户')+'</span> '+
+      tg+q+
+      '<span style="color:#475569">'+esc(d.content)+'</span>'+
+      '<span style="float:right;color:#cbd5e1;font-size:10px">'+fmtTime(d.timestamp)+'</span>'+
+    '</div>';
+  }).join('');
+}
+function renderAiReplyList() {
+  // AI回复记录 = AI问答记录：AI回复为主体、原弹幕为背景；待回复标签页展示尚未回复的弹幕
+  var pending = S.aiReplyFilter==='pending';
+  var list=S.dmList;
+  // 只留真实注册观众（v_ 前缀，判据与后端 is_real_user_id 同源，见 dmIsRealViewer）。
+  // 虚拟弹幕机器人（virtual_）和模拟观众（u00x）会自问自答式地刷满这张列表，
+  // 把真实观众的提问淹掉 —— 而这页要看的就是「真实观众问了什么、AI 答得对不对」。
+  // 两个标签页都过滤：「待回复」里的机器人提问同样没有跟进的价值。
+  // 想看全量去隔壁「弹幕历史记录」卡片，它带「AI虚拟 / 模拟」标签页。
+  list=list.filter(function(d){return dmIsRealViewer(d)});
+  // 待回复 = 未回复「且被判为问句」的弹幕。非问句（闲聊/礼物）后端不会自动回复，
+  // 若不过滤会永远挂在待回复里显示「等待AI回复」。isQuestion 由后端 is_question_like 判定下发。
+  if(pending) list=list.filter(function(d){return !d.isReplied && d.isQuestion});
+  else list=list.filter(function(d){return d.isReplied});
+  var el=document.getElementById('aiReplyList');
+  if(!list.length){el.innerHTML='<div class="lc-empty"><div class="icon">🤖</div>'+(pending?'暂无真实观众的待回复弹幕':'暂无真实观众的AI回复记录')+'</div>';return;}
+  el.innerHTML=list.slice().reverse().map(function(d){
+    if(pending){
+      return '<div class="lc-dm-item" style="border-left:3px solid #f59e0b;padding-left:10px;margin-bottom:8px">'+
+        '<div><span style="font-weight:600;color:#1e293b;font-size:11px">'+esc(d.userName||'用户')+'</span> '+
+        '<span style="color:#475569">'+esc(d.content)+'</span></div>'+
+        '<div style="color:#d97706;font-size:11px;margin-top:4px">⏳ 等待AI回复</div>'+
+        '<span style="float:right;color:#cbd5e1;font-size:10px">'+fmtTime(d.timestamp)+'</span></div>';
+    }
+    return '<div class="lc-dm-item" style="border-left:3px solid #10b981;padding-left:10px;margin-bottom:8px">'+
+      '<div style="font-size:13px;color:#1e293b;line-height:1.6">🤖 '+esc(d.replyContent||'')+'</div>'+
+      '<div style="font-size:11px;color:#94a3b8;margin-top:5px">针对「'+esc(d.userName||'观众')+'」的提问：'+esc(d.content)+
+        '<span style="float:right;color:#cbd5e1">'+fmtTime(d.replyTime||d.timestamp)+'</span></div></div>';
+  }).join('');
+}
+function renderTopQuestionsChart() {
+  var list=S.hfq;
+  var el=document.getElementById('hfqChart');
+  if(!list||!list.length){el.innerHTML='<div style="text-align:center;padding:60px 0;color:#94a3b8">暂无数据</div>';return;}
+  try {
+    if(window.__hfqChart) window.__hfqChart.dispose();
+    var chart=echarts.init(el); window.__hfqChart=chart;
+    var top10=list.slice(0,10);
+    chart.setOption({
+      tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
+      grid:{left:120,right:20,top:20,bottom:30},
+      xAxis:{type:'value'},
+      yAxis:{type:'category',data:top10.map(function(q){return q.question.length>12?q.question.slice(0,12)+'…':q.question}),axisLabel:{fontSize:11}},
+      series:[{type:'bar',data:top10.map(function(q){return q.count}),itemStyle:{color:function(p){var c=['#2563eb','#3b82f6','#60a5fa','#93c5fd','#bfdbfe'];return c[p.dataIndex%c.length]}},barMaxWidth:24}]
+    });
+  }catch(e){}
+}
+
+// ============================================================
+// Rendering: Analysis Page
+// ============================================================
+function renderAnalysisPage() {
+  var ls=S.liveStatus, st=S.stats;
+  // 优先用后端 liveStatus 数据，回退到本地 dmList 长度
+  var totalDm = ls.totalDanmaku || S.dmList.length || 0;
+  var totalReplies = ls.totalAIReplies || S.dmList.filter(function(d){return d.isReplied}).length || 0;
+  document.getElementById('anTotalDm').textContent=fmtNum(totalDm);
+  document.getElementById('anAiReplies').textContent=fmtNum(totalReplies);
+  document.getElementById('anOnline').textContent=fmtNum(ls.onlineCount||0);
+  document.getElementById('anInquiry').textContent=fmtNum(ls.totalPrivateMessages||0);
+  document.getElementById('anMention').textContent=fmtNum(st.mentionCount||0);
+  document.getElementById('anIntent').textContent=fmtNum(Math.round(st.intentScore||0));
+  renderDmTrendChart(); renderAudienceChart(); renderLiveOverview();
+  if (S.curPage==='analysis') loadOrderData();
+}
+// ===== 商单成交 =====
+var S_orderFilter='all';
+function loadOrderData(){
+  if(!S.orders.length && !S.orderStats) { wsSend('get_orders',{limit:40}); wsSend('get_order_stats'); }
+  else { renderOrders(); renderOrderStats(); }
+}
+function setOrderFilter(f){
+  S_orderFilter=f;
+  var btns=document.querySelectorAll('[data-ost]');
+  btns.forEach(function(b){b.style.cssText=b.getAttribute('data-ost')===f?'border-color:#2563eb;color:#2563eb;font-weight:600':'';});
+  renderOrders();
+}
+function renderOrderStats(){
+  var el=document.getElementById('orderStatRow');
+  if(!el||!S.orderStats)return;
+  var o=S.orderStats;
+  el.innerHTML =
+    statCard('今日销售额', '¥'+fmtNum(o.todaySales), '#059669') +
+    statCard('今日订单', o.todayOrders, '#2563eb') +
+    statCard('累计 GMV', '¥'+fmtNum(o.totalSales), '#ef4444') +
+    statCard('累计订单', o.totalOrders, '#7c3aed') +
+    statCard('已售件数', o.totalQty, '#d97706') +
+    statCard('退款单', o.refundCount, '#94a3b8');
+  el.parentNode.style.gridTemplateColumns = 'repeat(auto-fit,minmax(120px,1fr))';
+}
+// 订单状态 → 徽章配色 / 中文名。提到函数外共用：分析页的宽表格（renderOrders）
+// 和 控制台的紧凑列表（renderSessionOrders）都读这一份，别再各写一张表。
+var ORDER_STATUS_STYLE={pending_pay:'background:#fef3c7;color:#d97706',paid:'background:#dbeafe;color:#2563eb',
+  shipped:'background:#e0e7ff;color:#4f46e5',completed:'background:#d1fae5;color:#059669',
+  refunded:'background:#fee2e2;color:#dc2626',canceled:'background:#f1f5f9;color:#64748b'};
+var ORDER_STATUS_NAME={pending_pay:'待付款',paid:'已付款',shipped:'已发货',completed:'已完成',refunded:'已退款',canceled:'已取消'};
+function renderOrders(){
+  var el=document.getElementById('orderTable');
+  if(!el)return;
+  var list=S.orders.filter(function(o){return S_orderFilter==='all'||o.status===S_orderFilter;});
+  if(!list.length){el.innerHTML='<tr><td class="lc-empty-row">暂无订单数据</td></tr>';return;}
+  var stl=ORDER_STATUS_STYLE;
+  var stName=ORDER_STATUS_NAME;
+  el.innerHTML='<tr><th>单号</th><th>商品</th><th>买家</th><th>数量</th><th>金额</th><th>状态</th><th>时间</th><th>操作</th></tr>'+
+    list.slice(0,30).map(function(o){
+      return '<tr>'+
+        '<td style="color:#64748b;font-size:11px">'+esc(o.orderNo||o.orderId)+'</td>'+
+        '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis">'+esc(o.productName)+'</td>'+
+        '<td>'+esc(o.userName||'-')+'</td>'+
+        '<td>×'+o.quantity+'</td>'+
+        '<td style="color:#dc2626;font-weight:600">¥'+fmtNum(o.totalAmount)+'</td>'+
+        '<td title="'+(o.shipTime?('发货时间 '+o.shipTime):'')+'"><span class="lc-order-status" style="'+(stl[o.status]||'')+'">'+(stName[o.status]||o.status)+'</span></td>'+
+        '<td style="color:#94a3b8;font-size:11px">'+fmtTime(o.createTime)+'</td>'+
+        '<td>'+orderActBtns(o)+'</td>'+
+      '</tr>';
+    }).join('');
+}
+// ===== 控制台：本场订单（当前这场直播 + 真实注册观众）=====
+function loadSessionOrders(){
+  wsSend('get_session_orders',{limit:50});
+}
+function renderSessionOrders(){
+  var sumEl=document.getElementById('sessionOrderSum');
+  var el=document.getElementById('sessionOrderList');
+  if(!sumEl||!el)return;
+  var st=S.sessionOrderStats;
+  // startTime 为空 = 还没开播（后端 _in_session 因此恒为 false，列表必然是空的）。
+  // 这里要单独区分「未开播」和「开播了但没人下单」，否则主播会以为订单丢了。
+  if(!st||!st.startTime){
+    sumEl.textContent='未开播';
+    el.innerHTML='<div class="lc-empty"><div class="icon">🛒</div>开播后这里显示本场订单</div>';
+    return;
+  }
+  var bits=['订单 <strong>'+fmtNum(st.orderCount)+'</strong>',
+            'GMV <strong style="color:#dc2626">¥'+fmtNum(st.gmv)+'</strong>'];
+  if(st.pendingShip) bits.push('<strong style="color:#2563eb">待发货 '+st.pendingShip+'</strong>');
+  if(st.pendingPay) bits.push('<strong style="color:#d97706">待付款 '+st.pendingPay+'</strong>');
+  var extra='';
+  if(st.excludedOrders) extra=' <span style="color:#cbd5e1" title="模拟/虚拟用户的订单不计入本场成交">（另有'+st.excludedOrders+'笔模拟单未计入）</span>';
+  sumEl.innerHTML=bits.join(' · ')+extra;
+  var list=S.sessionOrders||[];
+  if(!list.length){
+    el.innerHTML='<div class="lc-empty"><div class="icon">🛒</div>本场暂无成交</div>';
+    return;
+  }
+  // 紧凑列表：1/4 列宽放不下分析页那张 nowrap 的宽表格，所以用 div 两行式。
+  el.innerHTML=list.map(function(o){
+    var name=esc(o.productName||'商品');
+    if(name.length>16) name=name.slice(0,16)+'…';
+    var badge='<span class="lc-order-status" style="'+(ORDER_STATUS_STYLE[o.status]||'')+'">'+(ORDER_STATUS_NAME[o.status]||o.status)+'</span>';
+    // 只有已付款能发货（复用 orderAct，服务端在 update_order_status 里还有一道闸）；
+    // 私信复用 orderMsg —— 它按 userId 去订单列表里取昵称，不信任 onclick 传参。
+    var acts=[];
+    if(o.status==='paid') acts.push('<button class="lc-mini-btn" style="border-color:#2563eb;color:#2563eb" onclick="orderAct(\''+esc(o.orderId)+'\',\'shipped\',this)">🚚 发货</button>');
+    if(o.userId) acts.push('<button class="lc-mini-btn" style="border-color:#10b981;color:#10b981" onclick="orderMsg(\''+esc(o.userId)+'\')">💬</button>');
+    return '<div class="lc-dm-item" style="border-left:3px solid '+(o.status==='paid'?'#2563eb':'#10b981')+';padding-left:10px;margin-bottom:8px">'+
+      '<div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline">'+
+        '<span style="font-size:12px;color:#1e293b;overflow:hidden;text-overflow:ellipsis" title="'+esc(o.productName||'')+'">'+name+'</span>'+
+        '<span style="font-size:12px;font-weight:600;color:#dc2626;flex-shrink:0">¥'+fmtNum(o.totalAmount)+'</span></div>'+
+      '<div style="font-size:11px;color:#94a3b8;margin-top:3px;display:flex;justify-content:space-between;gap:6px;align-items:center;flex-wrap:wrap">'+
+        '<span>'+esc(o.userName||'-')+' ×'+o.quantity+' '+badge+'</span>'+
+        '<span style="flex-shrink:0">'+((acts.length)?acts.join(' '):'')+'</span></div>'+
+      '<span style="color:#cbd5e1;font-size:10px">'+fmtTime(o.createTime)+'</span></div>';
+  }).join('');
+}
+// 订单是否属于真实用户。与后端 order_is_real 同源的判据是 userId 前缀，
+// 这里用「非空且非 v_ 开头即非真实」的等价写法；isVirtual 仅作兜底提示。
+function orderIsReal(o){
+  var uid=(o&&o.userId)||'';
+  return uid.indexOf('v_')===0;
+}
+// 弹幕来源分类。判据与后端 data_manager.classify_user_id 同源：只看 **userId 前缀**。
+// ⚠️ 绝不能改用 danmakuId 判断 —— 虚拟弹幕的 danmakuId 形如 `v_12_1757500000000`，
+// 同样以 `v_` 开头，会把 AI 虚拟弹幕整批误判成真实观众。
+function danmakuKind(d){
+  var uid=((d&&d.userId)||'').trim();
+  if(!uid) return 'system';                        // 无归属（模拟订单类）
+  if(uid.indexOf('virtual_')===0) return 'virtual';// AI 虚拟弹幕机器人
+  if(uid.indexOf('v_')===0) return 'viewer';       // 真实注册观众 ← 运营主看这个
+  if(uid.indexOf('viewer_')===0) return 'legacy';  // 老账号（协议层不可达）
+  if(uid.indexOf('host_')===0) return 'host';      // 主播本人
+  if(/^u\d+$/.test(uid)) return 'mock';            // 模拟观众
+  return 'unknown';
+}
+function dmIsRealViewer(d){ return danmakuKind(d)==='viewer'; }
+// AI 虚拟 + 模拟观众：运营口径上的「非真实」
+function dmIsSimulated(d){ var k=danmakuKind(d); return k==='virtual'||k==='mock'; }
+function orderActBtns(o){
+  var s=o.status, btns=[];
+  var real=orderIsReal(o);
+  function mk(label,st,primary){
+    var base='lc-mini-btn';
+    var stl=primary?'border-color:#2563eb;color:#2563eb;background:#eff6ff':'';
+    var rcl=st==='refunded'?'border-color:#dc2626;color:#dc2626':(st==='canceled'?'border-color:#ef4444;color:#ef4444':stl);
+    return '<button class="'+base+'" style="'+rcl+';margin-right:4px" onclick="orderAct(\''+esc(o.orderId)+'\',\''+st+'\',this)">'+label+'</button>';
+  }
+  if(s==='pending_pay'){ btns.push(mk('取消','canceled')); }
+  else if(s==='paid'){
+    // 发货闸（决策：只有真实用户订单可发货）。服务端同样有闸门 ——
+    // 这里隐藏按钮只是体验，WS 消息可以直接构造，所以拦截必须两边都做。
+    if(real) btns.push(mk('🚚 发货','shipped',true));
+    else btns.push('<span style="color:#cbd5e1;font-size:11px;margin-right:6px" title="模拟订单不能发货">🔒 模拟单不可发货</span>');
+    btns.push(mk('退款','refunded'));
+  }
+  else if(s==='shipped'){ btns.push(mk('退款','refunded')); }
+  // 「私信」不限状态：买过东西的观众，不管单子走到哪一步都可能要联系
+  // （用户要的是「下播后与购买用品的用户私信」，不是「只有已付款才能私信」）。
+  // 同样只给真实订单 —— 伪造 id 的模拟单没有可对话的账号。点击后跳收件箱
+  // 直接打开该买家的会话，省掉「去观众列表里找人」那一跳。
+  if(real) btns.push('<button class="lc-mini-btn" style="border-color:#10b981;color:#10b981;background:#ecfdf5" onclick="orderMsg(\''+esc(o.userId)+'\')">💬 私信</button>');
+  if(!btns.length) return '<span style="color:#cbd5e1;font-size:12px">—</span>';
+  return btns.join('');
+}
+function orderMsg(userId){
+  if(!userId){ toast('该订单没有关联的观众账号','warn'); return; }
+  // 买家名只从内存里的订单数据里取，**不走 onclick 参数**：昵称是观众注册时
+  // 自己填的，esc() 只转义 &<> 不转义引号，把昵称拼进内联属性里就是一个注入口子。
+  // 过属性的只有服务端生成的 userId（v_ + 十六进制），可信度同既有的 orderId。
+  // 两个列表都要查：分析页的 S.orders（今日/累计）＋ 控制台的 S.sessionOrders（本场）。
+  // 只查前者的话，从控制台点「💬」会取不到昵称，私信里就只剩一个裸 userId。
+  var o = (S.orders||[]).concat(S.sessionOrders||[]).filter(function(x){return x.userId===userId})[0] || {};
+  // 顺序有讲究：先切页（切页顺带拉一次会话列表，左列才有新会话的名字），
+  // 再开具体会话。服务端按发送顺序串行处理，get_inbox_threads 的回包先于
+  // get_user_messages 到达，renderInboxDetail 拿到的线程信息就不会是空的。
+  switchPage('inbox');
+  switchInbox(userId, o.userName||'');
+}
+function orderAct(orderId,status,btn){
+  var labels={shipped:'已提交发货',refunded:'已提交退款',canceled:'已提交取消'};
+  if(btn){ btn.disabled=true; btn.textContent='⏳'; }
+  wsSend('update_order_status',{orderId:orderId,status:status});
+  toast(labels[status]||'操作已提交','success');
+  setTimeout(function(){ if(btn){ btn.disabled=false; } },1800);
+}
+function renderOrderByProduct(){
+  var el=document.getElementById('orderByProduct');
+  if(!el||!S.orderStats)return;
+  var top=S.orderStats.byProduct||[];
+  if(!top.length){el.innerHTML='<div style="color:#94a3b8;text-align:center;padding:20px">暂无成交</div>';return;}
+  var maxQ=top[0].qty||1;
+  el.innerHTML=top.slice(0,8).map(function(b){
+    var w=Math.round(b.qty/maxQ*100);
+    return '<div style="margin-bottom:8px">'+
+      '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px">'+
+        '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%">'+esc(b.name)+'</span>'+
+        '<span style="color:#64748b">'+b.qty+'件 · ¥'+fmtNum(b.amount)+'</span></div>'+
+      '<div style="background:#eef2f7;border-radius:4px;height:8px;overflow:hidden"><div style="width:'+w+'%;background:#2563eb;height:100%;border-radius:4px"></div></div>'+
+    '</div>';
+  }).join('');
+}
+// 「▶️ 模拟一波成交」按钮与 simulateOrders() 已删除：它会通过 WS 让后端凭空生成
+// 5 张 userId="" 的假订单并直接改动商品库存/销量，运营台的成交数据因此混入从未发生
+// 过的交易。后端对应的 simulate_orders / buy_product 两条消息也已一并移除。
+function renderDmTrendChart() {
+  try {
+    if(window.__dmTrendChart) window.__dmTrendChart.dispose();
+    var chart=echarts.init(document.getElementById('dmTrendChart'));
+    window.__dmTrendChart=chart;
+    var data=S.dmList.slice(-30);
+    var times=data.map(function(d){return fmtTime(d.timestamp)});
+    var counts=data.map(function(_,i){return i+1});
+    chart.setOption({
+      tooltip:{trigger:'axis'},grid:{left:40,right:20,top:20,bottom:30},
+      xAxis:{type:'category',data:times.length>10?times.filter(function(_,i){return i%Math.ceil(times.length/10)===0}):times,axisLabel:{fontSize:10}},
+      yAxis:{type:'value'},
+      series:[{type:'line',data:counts,smooth:true,lineStyle:{color:'#2563eb',width:2},areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'rgba(37,99,235,.2)'},{offset:1,color:'rgba(37,99,235,0)'}]}},symbol:'circle',symbolSize:6}]
+    });
+  }catch(e){}
+}
+// 观众画像：按**真实观众会话**的 userLevel 计数。
+// 旧实现是写死的 35/25/20/12/8，与直播间里到底有谁毫无关系 —— 一个观众都没有时
+// 也照样画出一张漂亮的饼图。现在没数据就显示空态。
+var AUD_LEVELS=[['high_intent','高意向','#2563eb'],['potential','潜力用户','#3b82f6'],
+                ['wait_and_see','观望中','#60a5fa'],['picky','挑剔型','#93c5fd'],
+                ['just_ask','随便看看','#bfdbfe']];
+function isRealViewerId(uid){ return typeof uid==='string' && uid.indexOf('v_')===0; }
+function renderAudienceChart() {
+  var el=document.getElementById('audienceChart');
+  if(!el) return;
+  var real=(S.sessions||[]).filter(function(s){return isRealViewerId(s.userId)});
+  if(!real.length){
+    if(window.__audChart){ try{window.__audChart.dispose()}catch(e){} window.__audChart=null; }
+    el.innerHTML='<div style="text-align:center;padding:60px 0;color:#94a3b8">'+
+      '暂无真实观众数据<br><span style="font-size:11px">（观众画像只统计真实注册观众）</span></div>';
+    return;
+  }
+  try {
+    if(window.__audChart) window.__audChart.dispose();
+    var chart=echarts.init(el);
+    window.__audChart=chart;
+    var counts={};
+    real.forEach(function(s){counts[s.userLevel]=(counts[s.userLevel]||0)+1});
+    chart.setOption({
+      tooltip:{trigger:'item',formatter:'{b}: {c} ({d}%)'},
+      series:[{type:'pie',radius:['30%','60%'],center:['50%','50%'],
+        data:AUD_LEVELS.filter(function(l){return counts[l[0]]}).map(function(l){
+          return {name:l[1],value:counts[l[0]],itemStyle:{color:l[2]}};
+        }),
+        label:{fontSize:12,formatter:'{b}\n{d}%'},
+        emphasis:{itemStyle:{shadowBlur:10,shadowColor:'rgba(0,0,0,.15)'}}
+      }]
+    });
+  }catch(e){}
+}
+function renderLiveOverview() {
+  var ls=S.liveStatus,st=S.stats;
+  var dur=ls.liveDuration||0;
+  var h=Math.floor(dur/3600),m=Math.floor((dur%3600)/60);
+  var ds=(h>0?h+'小时':'')+m+'分钟';
+  document.getElementById('liveDataOverview').innerHTML=
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">'+
+    '<div class="lc-stat lc-card"><div class="nv">'+ds+'</div><div class="lb">直播时长</div></div>'+
+    '<div class="lc-stat lc-card"><div class="nv">'+fmtNum(ls.totalDanmaku||0)+'</div><div class="lb">真实观众弹幕</div></div>'+
+    '<div class="lc-stat lc-card"><div class="nv">'+fmtNum(ls.totalAIReplies||0)+'</div><div class="lb">AI回复（真实）</div></div>'+
+    '<div class="lc-stat lc-card"><div class="nv">'+fmtNum(st.virtualDanmakuCount||0)+'</div><div class="lb">氛围弹幕（不计入统计）</div></div>'+
+    '<div class="lc-stat lc-card"><div class="nv">'+fmtNum(Math.round(st.aiReplySuccessRate||0))+'%</div><div class="lb">回复成功率</div></div>'+
+    '<div class="lc-stat lc-card"><div class="nv">'+fmtNum(st.potentialOrderCount||0)+'</div><div class="lb">潜在订单</div></div></div>';
+}
+
+// ============================================================
+// Rendering: Reviews Page
+// ============================================================
+function renderReviewsPage() {
+  // 从别页切回来时把下拉选中值同步回 S.reviewFilter，否则下拉显示「全部」、
+  // 列表却还是上次筛过的结果，两边对不上。
+  var tf=document.getElementById('rvTypeFilter');
+  if(tf) tf.value=S.reviewFilter||'all';
+  populateReviewProdFilter();
+  renderReviewList(); updateReviewStats();
+}
+// 评价是否命中当前类型筛选。'pending' 是「未处理」，不是 sentiment 取值。
+function rvMatch(r,t){
+  if(t==='pending') return !r.isHandled;
+  if(t&&t!=='all') return r.sentiment===t;
+  return true;
+}
+// 商品下拉的**基准选项集**：商品库里的**全部**商品，哪怕一条评价都没有（显示 (0)），
+// 后面再接上「只在评价里出现过、商品库里已经没有了」的商品 —— 商品被删掉后它的历史
+// 评价仍在 S.reviews 里，那一项不能让 TA 消失，否则那些评价就再也筛不出来了。
+//
+// 这个集合**不随类型筛选增减**。若跟着类型变，切到「差评」时选项可能只剩一两个、
+// 当前选中的商品凭空消失、列表突然跳回全部，看着像 bug。类型只影响括号里的数字。
+function reviewProdOptions(){
+  var opts=[], seen={};
+  S.products.forEach(function(p){
+    if(p.productId&&!seen[p.productId]){seen[p.productId]=1;opts.push([p.productId,p.name]);}
+  });
+  S.reviews.forEach(function(r){
+    if(r.productId&&!seen[r.productId]){seen[r.productId]=1;opts.push([r.productId,r.productName||r.productId]);}
+  });
+  return opts;
+}
+function reviewProdCount(pid){
+  var t=S.reviewFilter||'all';
+  return S.reviews.filter(function(r){return (!pid||r.productId===pid)&&rvMatch(r,t)}).length;
+}
+function populateReviewProdFilter() {
+  var sel=document.getElementById('rvProdFilter');
+  if(!sel)return;
+  var opts=reviewProdOptions();
+  // 用「签名」判断要不要重建，而不是原来的 options.length：数量不变但内容变了
+  // （比如某商品从 0 条变 1 条）时，比长度会漏掉，旧选项一直残留。
+  var sig=(S.reviewFilter||'all')+'|'+reviewProdCount('')+'|'+opts.map(function(o){
+    return o[0]+':'+o[1]+':'+reviewProdCount(o[0]);
+  }).join(',');
+  if(sel.dataset.sig===sig)return;
+  var keep=sel.value;
+  sel.innerHTML='<option value="">全部商品评价 ('+reviewProdCount('')+')</option>'+opts.map(function(o){
+    return '<option value="'+esc(o[0])+'">'+esc(o[1])+' ('+reviewProdCount(o[0])+')</option>';
+  }).join('');
+  sel.value=keep;           // 选中项若已不在选项里，浏览器会自动回落到第一项
+  sel.dataset.sig=sig;
+}
+function onReviewProdFilter() {
+  // 纯本地过滤：S.reviews 就是 source=user 的全集（init_state 和刷新都拉全量）
+  renderReviewList(); updateReviewStats();
+}
+function onReviewTypeFilter() {
+  var sel=document.getElementById('rvTypeFilter');
+  S.reviewFilter=sel?sel.value:'all';
+  populateReviewProdFilter();               // 选项文案里的计数要跟着类型变
+  renderReviewList(); updateReviewStats();
+}
+// source:'user' = 只看真实注册观众主动提交的评价。
+// 模拟评价（u001~u010，source 为 danmaku/private）仍在内存里服务观众端商品卡的评分，
+// 但运营台的「用户评价管理」是管理/分析页面，不掺模拟数据。
+//
+// sentiment/productId 一律传空：筛选是纯前端的，让后端按 sentiment 截断会让
+// S.reviews 只剩一个子集 —— 选了「好评」再点刷新，切回「全部」也恢复不回来。
+function refreshReviews() { wsSend('get_reviews',{sentiment:'',productId:'',source:'user'}); }
+function renderReviewList() {
+  var list=S.reviews;
+  var t=S.reviewFilter||'all';
+  var sel=document.getElementById('rvProdFilter');
+  var pid=sel?sel.value:'';
+  list=list.filter(function(r){ return rvMatch(r,t) && (!pid||r.productId===pid) });
+  // 显式按时间倒序：get_reviews 返回倒序、new_review 广播是 push 到末尾（即正序），
+  // 原来那句 .slice().reverse() 让两条路径进来的顺序互相打架。统一在这里排一次。
+  list=list.slice().sort(function(a,b){
+    return String(b.timestamp||'').localeCompare(String(a.timestamp||''));
+  });
+  var el=document.getElementById('reviewList');
+  if(!list.length){el.innerHTML='<div class="lc-empty"><div class="icon">⭐</div>暂无评价</div>';return;}
+  el.innerHTML=list.map(function(r){
+    var stars='★'.repeat(r.rating||0)+'☆'.repeat(5-(r.rating||0));
+    var stags={positive:'<span class="lc-tag lc-tag-green">好评</span>',negative:'<span class="lc-tag lc-tag-red">差评</span>',neutral:'<span class="lc-tag lc-tag-yellow">中评</span>'};
+    // 「未处理」标签此前是个死标签：后端 mark_review_handled 一直存在，但前端从未发过
+    // 这条消息，也没有任何操作入口，isHandled 永远不变。
+    var actBtn=r.isHandled
+      ? '<span class="lc-tag lc-tag-blue">已处理</span>'
+      : '<button class="lc-mini-btn" onclick="markReviewHandled(\''+esc(r.reviewId||'')+'\',this)">✅ 标记已处理</button>';
+    return '<div class="lc-dm-item">'+
+      '<div style="display:flex;justify-content:space-between">'+
+      '<span style="font-weight:600;font-size:12px">'+esc(r.userName||'匿名')+'</span>'+
+      '<span style="color:#f59e0b;font-size:12px">'+stars+'</span></div>'+
+      '<div style="font-size:12px;color:#475569;margin:2px 0">'+esc(r.content)+'</div>'+
+      '<div style="display:flex;gap:6px;align-items:center;font-size:11px;color:#94a3b8">'+
+      (stags[r.sentiment]||'')+
+      (r.productName?'<span>'+esc(r.productName)+'</span>':'')+
+      '<span>'+fmtTime(r.timestamp)+'</span>'+
+      '<span style="margin-left:auto">'+actBtn+'</span></div></div>';
+  }).join('');
+}
+function markReviewHandled(reviewId,btn){
+  if(!reviewId)return;
+  if(btn){btn.disabled=true;btn.textContent='处理中…';}
+  wsSend('mark_review_handled',{reviewId:reviewId});
+}
+function updateReviewStats() {
+  // 只跟商品筛选走，**忽略类型筛选** —— 这样选中任一商品都能看到它的好评/中评/差评
+  // 全貌，正是「既看一个商品的好评差评情况」要的效果（跟类型走的话统计会自己坍缩成一项）。
+  var sel=document.getElementById('rvProdFilter');
+  var pid=sel?sel.value:'';
+  var list=S.reviews.filter(function(r){return !pid||r.productId===pid});
+  var n=function(s){return list.filter(function(r){return r.sentiment===s}).length};
+  document.getElementById('rvTotal').textContent=list.length;
+  document.getElementById('rvPos').textContent=n('positive');
+  document.getElementById('rvNeu').textContent=n('neutral');
+  document.getElementById('rvNeg').textContent=n('negative');
+}
+
+// ============================================================
+// Render Report
+// ============================================================
+function renderReport(data) {
+  var el=document.getElementById('reportContent');
+  if(!el) return;
+  if(!data||!data.liveDuration){
+    el.innerHTML='<div class="lc-card"><div class="lc-empty"><div class="icon">📋</div>'+
+      '暂无报告数据 —— 点「生成报告」用本场真实数据生成一份'+
+      '<div style="font-size:11px;color:#94a3b8;margin-top:6px">报告只统计真实观众，模拟氛围数据不计入</div></div></div>';
+    return;
+  }
+  var dur=data.liveDuration||0;
+  var h=Math.floor(dur/3600),m=Math.floor((dur%3600)/60);
+  var ds=(h>0?h+'小时':'')+m+'分钟';
+  var c1=data.chapter1_overview||{}, c1a=c1.audience||{}, c1i=c1.interaction||{}, c1c=c1.conversion||{};
+  var c2=data.chapter2_product||{}, c4=data.chapter4_reviews||{}, c5=data.chapter5_ai||{};
+  // 章节编号在 schemaVersion 2 里顺延重排过（旧版 chapter5_ai 与 chapter5_barriers 重号）。
+  // 两个键都读，历史报告仍能正确渲染。
+  var barriers=data.chapter6_barriers||data.chapter5_barriers||[];
+  var imp=data.chapter9_improvements||data.chapter7_improvements||{};
+  var c8=data.chapter8_conversion||{};
+  var sc=data.scope||{};
+  // schemaVersion 缺失 = 本版之前生成的旧报告（口径含模拟数据），明确提示不要误读
+  var legacyNote=(data.schemaVersion===2)?''
+    :'<div class="lc-card" style="margin-bottom:12px;border-left:3px solid #f59e0b">'+
+      '<div style="font-size:12px;color:#b45309">⚠️ 历史报告（旧口径）：本版之前生成的报告把模拟数据也算进了统计，数字与本版口径不可比。</div></div>';
+  var audRow=(c1a.peakRealViewers!=null)
+    ? '<tr><td>真实观众峰值</td><td><strong>'+fmtNum(c1a.peakRealViewers||0)+'</strong> 人</td></tr>'+
+      '<tr><td>真实观众均值</td><td><strong>'+fmtNum(c1a.avgRealViewers||0)+'</strong> 人</td></tr>'+
+      '<tr><td>本场真实观众</td><td><strong>'+fmtNum(c1a.uniqueRealViewers||0)+'</strong> 人</td></tr>'
+    : '<tr><td>在线峰值</td><td><strong>'+fmtNum(c1a.peakOnline||0)+'</strong> 人</td></tr>';
+  el.innerHTML=legacyNote+
+    '<div class="lc-grid lc-grid-3">'+
+    '<div class="lc-card"><div class="lc-card-title">📊 直播概况</div>'+
+    '<table class="lc-tbl"><tr><td>直播时长</td><td><strong>'+ds+'</strong></td></tr>'+
+    audRow+
+    '<tr><td>真实观众弹幕</td><td><strong>'+fmtNum(c1i.totalDanmaku||0)+'</strong> 条</td></tr>'+
+    '<tr><td>AI回复</td><td><strong>'+fmtNum(c1i.totalAIReplies||0)+'</strong> 次</td></tr>'+
+    '<tr><td>真实评价</td><td><strong>'+fmtNum(c4.totalReviews||0)+'</strong> 条</td></tr>'+
+    '<tr><td>真实GMV</td><td><strong>¥'+fmtNum(c8.realGMV||0)+'</strong>（'+fmtNum(c8.realOrders||0)+' 单）</td></tr>'+
+    '<tr><td>综合评价</td><td><span class="lc-badge lc-badge-live" style="font-size:16px;padding:4px 18px">'+(data.grade||'B')+'</span></td></tr></table>'+
+    (data.gradeNote?'<div style="font-size:11px;color:#94a3b8;margin-top:6px">'+esc(data.gradeNote)+'</div>':'')+
+    (c1a.baseNote?'<div style="font-size:11px;color:#94a3b8;margin-top:4px">'+esc(c1a.baseNote.label)+'：'+fmtNum(c1a.baseNote.value)+' 人（对外展示用，不计入以上分析）</div>':'')+
+    (sc.caliber?'<div style="font-size:11px;color:#94a3b8;margin-top:4px">口径：'+esc(sc.caliber)+'；已排除模拟弹幕 '+fmtNum((sc.excludedMockDanmaku||0)+(sc.excludedVirtualDanmaku||0))+' 条、模拟订单 '+fmtNum(sc.excludedMockOrders||0)+' 单</div>':'')+
+    '</div>'+
+    '<div class="lc-card"><div class="lc-card-title">🏆 带货总结</div>'+
+    '<div style="font-size:13px;line-height:1.8">'+
+    ((data.summary&&data.summary.highlights)?data.summary.highlights.map(function(h){return '✅ '+h+'<br>'}).join(''):'✅ 暂无总结数据<br>')+
+    '</div></div>'+
+    '<div class="lc-card"><div class="lc-card-title">⭐ 商品表现</div>'+
+    '<table class="lc-tbl">'+
+    '<tr><td>主打商品</td><td><strong>'+esc(data.productName||'')+'</strong></td></tr>'+
+    '<tr><td>真实评价均分</td><td>'+((c2.score||c2.score===0)?(c2.score+' 分（'+fmtNum(c2.realReviewCount||0)+' 条）'):'— 暂无真实评价')+'</td></tr>'+
+    '<tr><td>意向指数</td><td>'+(c2.intentTrend||0)+'</td></tr>'+
+    (c2.positivePoints?'<tr><td>优点</td><td><span class="lc-tag lc-tag-green">'+esc(c2.positivePoints.join('</span> <span class="lc-tag lc-tag-green">'))+'</span></td></tr>':'')+
+    (c2.concernPoints?'<tr><td>改进点</td><td><span class="lc-tag lc-tag-yellow">'+esc(c2.concernPoints.join('</span> <span class="lc-tag lc-tag-yellow">'))+'</span></td></tr>':'')+
+    '</table></div></div>'+
+    '<div class="lc-grid lc-grid-3">'+
+    '<div class="lc-card"><div class="lc-card-title">🚧 转化阻碍分析</div>'+
+    '<div style="font-size:12px">'+
+    (barriers.length?barriers.map(function(b){
+      var icons={price_sensitive:'💰',trust_issue:'🔒',effect_doubt:'🤔',logistics_concern:'📦',spec_confusion:'📐'};
+      return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:12px">'+
+        '<span>'+(icons[b.type]||'⚠️')+'</span>'+
+        '<div style="flex:1"><span style="font-weight:600">'+esc(b.title)+'</span> <span class="lc-tag lc-tag-red">'+b.count+'次</span>'+
+        '<div style="color:#64748b;font-size:11px;margin-top:2px">💡 '+esc(b.suggestion)+'</div></div></div>';
+    }).join(''):'<div style="color:#94a3b8;padding:20px 0;text-align:center">暂无转化阻碍数据</div>')+
+    '</div></div>'+
+    '<div class="lc-card"><div class="lc-card-title">⭐ 用户评价</div>'+
+    '<div style="display:flex;gap:16px;margin-bottom:10px;flex-wrap:wrap">'+
+    '<div class="lc-stat"><div class="nv" style="color:#10b981">'+fmtNum(c4.positiveCount||0)+'</div><div class="lb">好评</div></div>'+
+    '<div class="lc-stat"><div class="nv" style="color:#64748b">'+fmtNum((c4.totalReviews||0)-(c4.positiveCount||0)-(c4.negativeCount||0))+'</div><div class="lb">中评</div></div>'+
+    '<div class="lc-stat"><div class="nv" style="color:#ef4444">'+fmtNum(c4.negativeCount||0)+'</div><div class="lb">差评</div></div>'+
+    '<div class="lc-stat"><div class="nv" style="color:#2563eb">'+(c4.positiveRate||0)+'%</div><div class="lb">好评率</div></div>'+
+    '</div>'+
+    '<div style="background:#f1f5f9;border-radius:6px;height:10px;overflow:hidden">'+
+    '<div style="background:linear-gradient(90deg,#10b981 0%,#10b981 '+(c4.positiveRate||0)+'%,#f1f5f9 '+(c4.positiveRate||0)+'%);height:10px;border-radius:6px"></div></div>'+
+    '</div>'+
+    '<div class="lc-card"><div class="lc-card-title">🤖 AI回复统计</div>'+
+    '<table class="lc-tbl">'+
+    '<tr><td>回复覆盖率</td><td><strong>'+fmtNum(c5.successRate||0)+'%</strong>'+(c5.repliedCount!=null?'（'+fmtNum(c5.repliedCount)+' 条）':'')+'</td></tr>'+
+    '<tr><td>平均响应</td><td>'+(c5.avgResponseTime||0)+'s</td></tr>'+
+    '<tr><td>转人工次数</td><td>'+fmtNum(c5.humanTransferCount||0)+' 次</td></tr>'+
+    '<tr><td>话术使用</td><td>'+fmtNum(c5.presetUsedCount||0)+' 条</td></tr>'+
+    '</table>'+
+    ((c5.failedQuestions&&c5.failedQuestions.length)?
+      '<div style="margin-top:10px;font-size:11px;color:#64748b"><strong>未答上的问题（'+c5.failedQuestions.length+'）</strong>'+
+      c5.failedQuestions.slice(0,5).map(function(f){return '<div style="padding:3px 0;color:#b45309">· '+esc(f.content)+'</div>'}).join('')+
+      '</div>'
+      :'<div style="margin-top:10px;font-size:11px;color:#94a3b8">没有未答复的真实观众提问</div>')+
+    '</div>'+
+    '<div class="lc-card"><div class="lc-card-title">💰 成交转化（真实订单）</div>'+
+    '<table class="lc-tbl">'+
+    '<tr><td>真实GMV</td><td><strong>¥'+fmtNum(c8.realGMV||0)+'</strong></td></tr>'+
+    '<tr><td>成交单数</td><td>'+fmtNum(c8.realOrders||0)+' 单 / '+fmtNum(c8.realQty||0)+' 件</td></tr>'+
+    '<tr><td>下单人数</td><td>'+fmtNum(c8.buyerCount||0)+' 人（转化率 '+(c8.conversionRate||0)+'%）</td></tr>'+
+    '<tr><td>退款单数</td><td>'+fmtNum(c8.refundCount||0)+' 单</td></tr>'+
+    '</table>'+
+    ((c8.byProduct&&c8.byProduct.length)?
+      '<div style="margin-top:8px;font-size:11px;color:#475569">'+
+      c8.byProduct.slice(0,5).map(function(b){return '<div style="padding:2px 0">· '+esc(b.name)+'　'+b.qty+' 件 / ¥'+fmtNum(b.amount)+'</div>'}).join('')+
+      '</div>':'')+
+    '<div style="margin-top:8px;font-size:11px;color:#94a3b8">已排除模拟订单 '+fmtNum(c8.mockOrdersExcluded||0)+' 单（氛围数据，不计入本报告）</div>'+
+    '</div></div>'+
+    '<div class="lc-grid lc-grid-2">'+
+    '<div class="lc-card"><div class="lc-card-title">📈 高频问题 TOP10（仅真实观众）</div>'+
+    '<div style="font-size:12px">'+
+    ((data.summary&&data.summary.topQuestions&&data.summary.topQuestions.length)?
+      '<div style="display:flex;gap:6px;flex-wrap:wrap">'+
+        data.summary.topQuestions.map(function(q,i){return '<span class="lc-tag lc-tag-blue">#'+(i+1)+' '+esc(q)+'</span>'}).join('')+
+        '</div>'+
+      '<div style="margin-top:8px;font-size:11px;color:#64748b">在弹幕与AI问答页面可查看完整排行图表</div>'
+    :'<div style="color:#94a3b8;padding:10px 0">暂无高频问题数据</div>')+
+    '</div></div>'+
+    '<div class="lc-card"><div class="lc-card-title">💡 优化建议</div>'+
+    '<div style="font-size:12px;line-height:1.7;color:#475569">'+
+    '<div style="margin-bottom:6px"><strong>📦 商品方面</strong></div>'+
+    ((imp.product?imp.product.map(function(s){return '<div style="padding:2px 0 2px 16px">👉 '+esc(s)+'</div>'}).join(''):'')||'')+
+    '<div style="margin-top:6px;margin-bottom:6px"><strong>💬 话术方面</strong></div>'+
+    ((imp.presets?imp.presets.map(function(s){return '<div style="padding:2px 0 2px 16px">👉 '+esc(s)+'</div>'}).join(''):'')||'')+
+    '<div style="margin-top:6px;margin-bottom:6px"><strong>🎬 运营方面</strong></div>'+
+    ((imp.operation?imp.operation.map(function(s){return '<div style="padding:2px 0 2px 16px">👉 '+esc(s)+'</div>'}).join(''):'')||'')+
+    ((imp.content?imp.content.map(function(s){return '<div style="padding:2px 0 2px 16px">👉 '+esc(s)+'</div>'}).join(''):'')||'')+
+    '</div></div></div>'+
+    '<div class="lc-card" style="margin-top:16px"><div class="lc-card-title">🔍 完整报告数据</div>'+
+    '<pre style="font-size:11px;color:#64748b;max-height:400px;overflow-y:auto;background:#f8fafc;padding:12px;border-radius:6px">'+esc(JSON.stringify(data,null,2))+'</pre></div>';
+}
+
+// ============================================================
+// 观众列表
+// ============================================================
+// 仅在服务端回包后填充；切 tab 不重新拉取（数据源已在 S.viewers 里）
+function renderViewersPage() {
+  refreshViewers();
+}
+function refreshViewers() {
+  wsSend('get_viewers', {});
+}
+function switchViewerTab(tab) {
+  S.viewerTab = tab || 'online';
+  document.getElementById('vwTabOnline').classList.toggle('active', S.viewerTab==='online');
+  document.getElementById('vwTabAll').classList.toggle('active', S.viewerTab==='all');
+  renderViewerList();
+}
+function renderViewerList() {
+  var el = document.getElementById('viewerList');
+  if (!el) return;
+  var rows = (S.viewerTab==='all') ? (S.viewersAll||[]) : (S.viewersOnline||[]);
+  if (!rows.length) {
+    el.innerHTML = '<div class="lc-empty"><div class="icon">👥</div>'+
+      (S.viewerTab==='all'?'暂无注册账号':'当前没有观众在线')+'</div>';
+    return;
+  }
+  el.innerHTML = rows.map(function(v){
+    var on = !!v.isOnline;
+    var tags = '';
+    if (on) tags += '<span class="lc-tag lc-tag-green">在线</span>';
+    if (v.isLegacy) tags += '<span class="lc-tag lc-tag-yellow">历史账户</span>';
+    if (v.connections > 1) tags += '<span class="lc-tag">'+v.connections+' 个连接</span>';
+    var sel = (S.viewerCur===v.userId) ? ';border-color:#2563eb;background:#eff6ff' : '';
+    return '<div class="lc-dm-item" style="cursor:pointer'+sel+'" onclick="openViewerDetail(\''+esc(v.userId)+'\')">'+
+      '<div style="display:flex;gap:8px;align-items:center">'+
+        avatarHtml(v.avatar, v.userName, 32)+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-weight:600;font-size:13px">'+esc(v.userName||'(未命名)')+'</div>'+
+          '<div style="font-size:11px;color:#94a3b8">'+esc(v.userId)+'</div>'+
+        '</div>'+
+        '<div style="text-align:right;font-size:12px">'+
+          '<div style="color:#f59e0b;font-weight:600">💰 ¥'+(v.balance||0).toFixed(2)+'</div>'+
+          '<div style="color:#94a3b8;font-size:11px">'+v.orderCount+' 单 · 消费 ¥'+(v.totalSpend||0).toFixed(0)+'</div>'+
+        '</div>'+
+      '</div>'+
+      (tags?'<div style="display:flex;gap:4px;margin-top:6px">'+tags+'</div>':'')+
+    '</div>';
+  }).join('');
+}
+function avatarHtml(avatar, name, size) {
+  var s = size || 32;
+  var style = 'width:'+s+'px;height:'+s+'px;border-radius:50%;flex-shrink:0;object-fit:cover';
+  if (avatar) return '<img src="'+esc(avatar)+'" style="'+style+'" alt="">';
+  var ch = (name||'?').slice(0,1);
+  return '<div style="'+style+';background:#2563eb;color:#fff;display:flex;align-items:center;'+
+         'justify-content:center;font-size:'+Math.round(s/2)+'px">'+esc(ch)+'</div>';
+}
+function openViewerDetail(userId) {
+  S.viewerCur = userId;
+  renderViewerList();
+  wsSend('get_viewer_detail', {userId: userId});
+}
+function renderViewerDetail(d) {
+  var el = document.getElementById('viewerDetail');
+  if (!el) return;
+  if (!d || !d.success) {
+    el.innerHTML = '<div class="lc-empty"><div class="icon">⚠️</div>'+esc((d&&d.message)||'加载失败')+'</div>';
+    return;
+  }
+  var v = d.viewer || {};
+  var orders = d.orders || [];
+  var msgs = d.messages || [];
+  var stMap = {pending_pay:'待付款',paid:'已付款',shipped:'已发货',completed:'已完成',refunded:'已退款',canceled:'已取消'};
+  var html = '<div style="display:flex;gap:10px;align-items:center;margin-bottom:12px">'+
+      avatarHtml(v.avatar, v.userName, 44)+
+      '<div><div style="font-weight:600;font-size:15px">'+esc(v.userName||'(未命名)')+'</div>'+
+      '<div style="font-size:11px;color:#94a3b8">'+esc(v.userId)+'</div></div></div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;margin-bottom:12px">'+
+      statBox('余额','¥'+(v.balance||0).toFixed(2))+
+      statBox('订单数',String(v.orderCount||0))+
+      statBox('累计消费','¥'+(v.totalSpend||0).toFixed(0))+
+      statBox('状态', v.isOnline ? ('在线'+(v.connections>1?'（'+v.connections+' 连接）':'')) : '离线')+
+      statBox('注册时间', v.registerTime || '--')+
+      statBox('账号类型', v.hasAccount ? '新账号' : '历史账户（无登录凭据）')+
+    '</div>'+
+    '<div class="lc-card-title" style="font-size:13px">📦 订单（'+orders.length+'）</div>'+
+    (orders.length ? orders.slice().reverse().map(function(o){
+      return '<div class="lc-dm-item"><div style="display:flex;justify-content:space-between;font-size:12px">'+
+        '<span style="font-weight:600">'+esc(o.productName||o.productId)+' ×'+o.quantity+'</span>'+
+        '<span style="color:#f59e0b">¥'+(o.totalAmount||0).toFixed(2)+'</span></div>'+
+        '<div style="font-size:11px;color:#94a3b8">'+esc(o.orderNo||o.orderId)+' · '+
+        (stMap[o.status]||o.status)+' · '+esc(o.createTime||'')+'</div></div>';
+    }).join('') : '<div class="lc-empty"><div class="icon">📦</div>暂无订单</div>')+
+    '<div class="lc-card-title" style="font-size:13px;margin-top:14px">✉️ 私信记录（'+msgs.length+'）</div>'+
+    (msgs.length ? msgs.slice(-20).map(function(m){
+      var mine = !m.isFromUser;
+      return '<div style="display:flex;'+(mine?'justify-content:flex-end':'')+';margin:4px 0">'+
+        '<div style="max-width:80%;padding:6px 10px;border-radius:8px;font-size:12px;'+
+        (mine?'background:#2563eb;color:#fff':'background:#f1f5f9;color:#334155')+'">'+
+        esc(m.content)+'<div style="font-size:10px;opacity:.7;margin-top:2px">'+fmtTime(m.timestamp)+'</div></div></div>';
+    }).join('') : '<div class="lc-empty"><div class="icon">✉️</div>暂无私信</div>')+
+    '<div style="margin-top:12px"><textarea id="vwMsgInput" class="lc-input" rows="2" '+
+      'placeholder="发送定向私信（仅该观众可见，离线也会送达）" style="width:100%;resize:vertical"></textarea>'+
+      '<button class="lc-btn lc-btn-primary lc-btn-sm" style="margin-top:6px" onclick="sendViewerMsg()">发送</button></div>';
+  el.innerHTML = html;
+}
+function statBox(label, val) {
+  return '<div style="background:#f8fafc;border-radius:6px;padding:6px 8px">'+
+    '<div style="font-size:11px;color:#94a3b8">'+esc(label)+'</div>'+
+    '<div style="font-weight:600;color:#334155;font-size:12px">'+esc(val)+'</div></div>';
+}
+function sendViewerMsg() {
+  var input = document.getElementById('vwMsgInput');
+  if (!input) return;
+  var content = (input.value || '').trim();
+  if (!content) { toast('请输入私信内容','warn'); return; }
+  if (!S.viewerCur) { toast('请先选择观众','warn'); return; }
+  wsSend('send_viewer_msg', {userId: S.viewerCur, content: content});
+  input.value = '';
+}
+
+// ============================================================
+// 私信收件箱
+// ============================================================
+// 数据源：get_inbox_threads（服务端已滤掉模拟观众 u00x），
+// 聊天记录复用 get_user_messages，回复复用 send_viewer_msg（host-only）。
+function refreshInbox() { wsSend('get_inbox_threads', {}); }
+
+function switchInbox(userId, nameHint) {
+  S.inboxCur = userId;
+  // nameHint 只有从「最近订单」的 💬 按钮过来时才有（买家可能还没聊过，没有会话记录）。
+  // 每次切换都要重置，否则上一个买家的名字会粘到下一个会话的标题上。
+  S.inboxName = nameHint || '';
+  S.inboxMsgs = [];
+  // 打开会话即清未读（服务端 mark_read 已落盘，重启后红点不会复活）
+  wsSend('mark_read', {userId: userId});
+  wsSend('get_user_messages', {userId: userId});
+  renderInboxList();
+  renderInboxDetail();
+}
+
+function renderInboxList() {
+  var el = document.getElementById('inboxList');
+  if (!el) return;
+  var rows = S.inboxThreads || [];
+  if (!rows.length) {
+    el.innerHTML = '<div class="lc-empty"><div class="icon">✉️</div>暂无私信会话'+
+      '<div style="font-size:11px;color:#94a3b8;margin-top:6px">观众端发来私信后才会出现在这里</div></div>';
+    return;
+  }
+  el.innerHTML = rows.map(function(t){
+    var sel = (S.inboxCur===t.userId) ? ';border-color:#2563eb;background:#eff6ff' : '';
+    var tags = '';
+    if (t.isOnline) tags += '<span class="lc-tag lc-tag-green">在线</span>';
+    if (t.isLegacy) tags += '<span class="lc-tag lc-tag-yellow">历史账户</span>';
+    if (t.unreadCount > 0) tags += '<span class="lc-tag lc-tag-red">未读 '+t.unreadCount+'</span>';
+    return '<div class="lc-dm-item" style="cursor:pointer'+sel+'" onclick="switchInbox(\''+esc(t.userId)+'\')">'+
+      '<div style="display:flex;gap:8px;align-items:center">'+
+        avatarHtml(t.avatar, t.userName, 32)+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-weight:600;font-size:13px">'+esc(t.userName||'(未命名)')+' '+
+            '<span style="font-weight:400;color:#94a3b8;font-size:11px">'+esc(t.userId)+'</span></div>'+
+          '<div style="font-size:11px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+
+            (t.lastFromUser?'':'<span style="color:#10b981">我：</span>')+esc(t.lastMessage||'')+'</div>'+
+          '<div style="margin-top:2px">'+tags+'</div>'+
+        '</div>'+
+        '<div style="text-align:right;font-size:11px;color:#94a3b8;white-space:nowrap">'+
+          fmtTime(t.lastMessageTime)+
+          '<div style="color:#cbd5e1">'+t.messageCount+' 条</div>'+
+        '</div>'+
+      '</div></div>';
+  }).join('');
+}
+
+function renderInboxDetail() {
+  var el = document.getElementById('inboxDetail');
+  if (!el) return;
+  if (!S.inboxCur) {
+    el.innerHTML = '<div class="lc-empty"><div class="icon">👆</div>点击左侧会话查看聊天记录</div>';
+    return;
+  }
+  // 重绘前先留住回复框里的草稿与焦点：这个面板会被实时重绘（观众新私信到达、
+  // 以及自己发送后的回执都会走到这里），不保住的话主播打到一半的回复就没了。
+  // 输入框在本函数内部生成，重绘即销毁，光靠"不主动清空"是保不住的。
+  var prevInp = document.getElementById('ibMsgInput');
+  var draft = prevInp ? prevInp.value : '';
+  var hadFocus = !!prevInp && document.activeElement === prevInp;
+  var t = (S.inboxThreads||[]).filter(function(x){return x.userId===S.inboxCur})[0] || {};
+  var msgs = S.inboxMsgs || [];
+  // 会话记录可能还没拿到，两种来路：① 从「最近订单」的 💬 按钮直接打开一个
+  // 从没聊过的买家（服务端没有该会话）；② switchInbox 先渲染、get_inbox_threads
+  // 后到的那一瞬。这时**不能**把统计打印成「订单 0 单 · 累计消费 ¥0」——
+  // 那是假数据，主播会当真。缺统计就整段省掉，只留名字和账号。
+  var known = !!t.userId;
+  var head =
+    '<div style="padding:8px 0 10px;border-bottom:1px solid #eef2f7;margin-bottom:10px">'+
+      '<div style="font-weight:700;font-size:14px">'+esc(t.userName || S.inboxName || '观众')+'</div>'+
+      '<div style="font-size:11px;color:#94a3b8">'+esc(S.inboxCur)+
+        (known ? (' · 订单 '+fmtNum(t.orderCount||0)+' 单 · 累计消费 ¥'+fmtNum(t.totalSpend||0)+
+                  ' · 余额 ¥'+fmtNum(t.balance||0)) : '')+
+      '</div>'+
+    '</div>';
+  var body = msgs.length ? msgs.map(function(m){
+    var mine = !m.isFromUser;
+    // 发送者标签必须先看方向：观众发来的消息 replyType 同样是 'manual'，
+    // 只看 replyType 会把观众的话标成「主播」，主播会以为自己说过这句话。
+    var who = m.isFromUser
+      ? esc(m.userName || '观众')
+      : (m.replyType==='manual'?'主播':(m.replyType==='ai'?'AI':''));
+    return '<div style="display:flex;justify-content:'+(mine?'flex-end':'flex-start')+';margin-bottom:8px">'+
+      '<div style="max-width:78%;background:'+(mine?'#eff6ff':'#f1f5f9')+';border-radius:10px;padding:7px 10px">'+
+        '<div style="font-size:13px;color:#1e293b;line-height:1.6">'+esc(m.content)+'</div>'+
+        '<div style="font-size:10px;color:#94a3b8;margin-top:3px;text-align:right">'+
+          who+' '+fmtTime(m.timestamp)+'</div>'+
+      '</div></div>';
+  }).join('') : '<div class="lc-empty"><div class="icon">💬</div>暂无聊天记录</div>';
+  el.innerHTML = head + body +
+    '<div style="display:flex;gap:6px;margin-top:14px">'+
+      '<input class="lc-input" id="ibMsgInput" style="flex:1" placeholder="回复该观众（仅对方可见）" '+
+        'onkeydown="if(event.key===\'Enter\')sendInboxMsg()">'+
+      '<button class="lc-btn lc-btn-primary" onclick="sendInboxMsg()">发送</button>'+
+    '</div>';
+  // 把草稿与焦点放回去。只在原本就有内容/焦点时才动，避免把光标硬塞给主播。
+  // 注意 sendInboxMsg() 是先清空再发、再等回执重绘的，那时 draft 已是空串，
+  // 所以"发完自动清空"的既有行为不受影响。
+  var nextInp = document.getElementById('ibMsgInput');
+  if (nextInp) {
+    if (draft) nextInp.value = draft;
+    if (hadFocus) { try { nextInp.focus(); } catch(e) {} }
+  }
+}
+
+function sendInboxMsg() {
+  var input = document.getElementById('ibMsgInput');
+  if (!input) return;
+  var content = (input.value || '').trim();
+  if (!content) { toast('请输入私信内容','warn'); return; }
+  if (!S.inboxCur) { toast('请先选择会话','warn'); return; }
+  wsSend('send_viewer_msg', {userId: S.inboxCur, content: content});
+  input.value = '';
+}
+
+// ============================================================
+// 评价总结（纯统计图表，不走 LLM —— 产品决策）
+// 口径与下方「观众提问清单」一致：只算真实注册观众的评价（source=user）
+// ============================================================
+function loadReviewSummary() {
+  wsSend('get_review_summary', {});
+}
+function renderReviewSummary() {
+  var el = document.getElementById('rvSummaryStats');
+  if (!el) return;
+  var d = S.rvSummary;
+  if (!d || !d.stats) {
+    el.innerHTML = '<div class="lc-empty"><div class="icon">📊</div>点「生成评价总结」查看真实用户的评价统计</div>';
+    return;
+  }
+  var s = d.stats, sc = d.scope || {};
+  var total = s.total || 0;
+  if (!total) {
+    // 无真实评价时不要兜底出「5.0 分」这种假数据 —— 后端 ratingAvg 就是 null
+    el.innerHTML = '<div class="lc-empty"><div class="icon">⭐</div>还没有真实用户评价，观众确认收货后即可评价</div>'+
+      '<div style="font-size:11px;color:#94a3b8;margin-top:8px">口径：'+esc(sc.caliber||'')+
+      '；已排除模拟评价 '+fmtNum(sc.excludedMock||0)+' 条</div>';
+    return;
+  }
+  var dist = s.ratingDist || {};
+  var maxD = Math.max.apply(null, [1].concat(Object.keys(dist).map(function(k){return dist[k]||0})));
+  var sent = s.sentiment || {};
+  var posRate = total ? Math.round((sent.positive||0)/total*100) : 0;
+  var trend = s.trend || [];
+  var maxT = trend.reduce(function(a,b){return Math.max(a,b.count)}, 1);
+  el.innerHTML =
+    '<div class="lc-grid lc-grid-4" style="margin-bottom:12px">'+
+      '<div class="lc-stat lc-card"><div class="nv">'+fmtNum(total)+'</div><div class="lb">真实评价</div></div>'+
+      '<div class="lc-stat lc-card"><div class="nv">'+(s.ratingAvg!=null?s.ratingAvg:'—')+
+        '</div><div class="lb">平均分</div></div>'+
+      '<div class="lc-stat lc-card"><div class="nv" style="color:#10b981">'+posRate+'%</div><div class="lb">好评率</div></div>'+
+      '<div class="lc-stat lc-card"><div class="nv">'+(s.handledRate||0)+'%</div><div class="lb">已处理率</div></div>'+
+    '</div>'+
+    '<div class="lc-grid lc-grid-2">'+
+      '<div><div class="lc-card-title" style="font-size:12px">星级分布</div>'+
+        [5,4,3,2,1].map(function(n){
+          var c = dist[String(n)]||0;
+          return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;font-size:11px">'+
+            '<span style="width:42px;color:#f59e0b">'+'★'.repeat(n)+'</span>'+
+            '<div style="flex:1;background:#eef2f7;border-radius:4px;height:9px;overflow:hidden">'+
+              '<div style="width:'+Math.round(c/maxD*100)+'%;background:#f59e0b;height:100%"></div></div>'+
+            '<span style="width:36px;text-align:right;color:#475569">'+c+'</span></div>';
+        }).join('')+
+        '<div style="margin-top:10px"><div class="lc-card-title" style="font-size:12px">近 7 天评价量</div>'+
+          trend.map(function(t){
+            return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;font-size:11px">'+
+              '<span style="width:42px;color:#64748b">'+esc(t.label)+'</span>'+
+              '<div style="flex:1;background:#eef2f7;border-radius:4px;height:9px;overflow:hidden">'+
+                '<div style="width:'+Math.round(t.count/maxT*100)+'%;background:#2563eb;height:100%"></div></div>'+
+              '<span style="width:36px;text-align:right;color:#475569">'+t.count+'</span></div>';
+          }).join('')+
+        '</div>'+
+      '</div>'+
+      '<div><div class="lc-card-title" style="font-size:12px">情绪分布</div>'+
+        '<div style="display:flex;gap:12px;flex-wrap:wrap">'+
+        '<div class="lc-stat"><div class="nv" style="color:#10b981;font-size:20px">'+fmtNum(sent.positive||0)+'</div><div class="lb">好评</div></div>'+
+        '<div class="lc-stat"><div class="nv" style="color:#64748b;font-size:20px">'+fmtNum(sent.neutral||0)+'</div><div class="lb">中评</div></div>'+
+        '<div class="lc-stat"><div class="nv" style="color:#ef4444;font-size:20px">'+fmtNum(sent.negative||0)+'</div><div class="lb">差评</div></div>'+
+        '</div>'+
+        '<div style="margin-top:10px"><div class="lc-card-title" style="font-size:12px">高频关键词</div>'+
+          ((s.topTags||[]).length ? (s.topTags||[]).map(function(k){
+            return '<span class="lc-tag lc-tag-blue">'+esc(k.tag)+' ×'+k.count+'</span>';
+          }).join(' ') : '<span style="color:#94a3b8;font-size:11px">暂无</span>')+
+        '</div>'+
+        '<div style="margin-top:10px"><div class="lc-card-title" style="font-size:12px">评价最多的商品</div>'+
+          ((s.byProduct||[]).length ? (s.byProduct||[]).slice(0,5).map(function(p){
+            return '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">'+
+              '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:62%">'+esc(p.productName||p.productId)+'</span>'+
+              '<span style="color:#64748b">'+p.count+'条 · 均分 '+(p.avgRating!=null?p.avgRating:'—')+'</span></div>';
+          }).join('') : '<span style="color:#94a3b8;font-size:11px">暂无</span>')+
+        '</div>'+
+        '<div style="margin-top:10px;font-size:11px;color:#94a3b8">来自真实订单的评价 '+fmtNum(s.withOrderCount||0)+
+          ' 条 · 买家秀 '+fmtNum(s.imageCount||0)+' 张 · 覆盖 '+fmtNum(s.productCount||0)+' 件商品</div>'+
+      '</div>'+
+    '</div>'+
+    '<div style="font-size:11px;color:#94a3b8;margin-top:10px">'+
+      '口径：'+esc(sc.caliber||'')+'；已排除模拟评价 '+fmtNum(sc.excludedMock||0)+' 条</div>';
+}
+
+// ============================================================
+// 弹幕总结（统计 + AI 摘要，两条消息分开取）
+// ============================================================
+function loadDanmakuSummary() {
+  S.dmSummaryAI = null;
+  wsSend('get_danmaku_summary', {});
+  renderDanmakuSummaryAI();
+}
+function genDanmakuSummaryAI() {
+  S.dmSummaryAI = {pending:true};
+  renderDanmakuSummaryAI();
+  wsSend('generate_danmaku_summary_ai', {});
+}
+function renderDanmakuSummary() {
+  var el = document.getElementById('dmSummaryStats');
+  if (!el) return;
+  var d = S.dmSummary;
+  if (!d || !d.stats) {
+    el.innerHTML = '<div style="color:#94a3b8;padding:16px 0;text-align:center">点击「生成弹幕总结」查看本场真实观众弹幕统计</div>';
+    return;
+  }
+  var s = d.stats, sc = d.scope || {};
+  var sent = s.sentiment || {};
+  var buckets = s.timeBuckets || [];
+  var maxB = buckets.reduce(function(a,b){return Math.max(a,b.count)}, 1);
+  el.innerHTML =
+    '<div class="lc-grid lc-grid-4" style="margin-bottom:12px">'+
+      '<div class="lc-stat lc-card"><div class="nv">'+fmtNum(s.realCount||0)+'</div><div class="lb">真实弹幕</div></div>'+
+      '<div class="lc-stat lc-card"><div class="nv">'+fmtNum(s.realUserCount||0)+'</div><div class="lb">发言观众</div></div>'+
+      '<div class="lc-stat lc-card"><div class="nv">'+fmtNum(s.questionCount||0)+'</div><div class="lb">提问</div></div>'+
+      '<div class="lc-stat lc-card"><div class="nv">'+fmtNum(s.avgPerMinute||0)+'</div><div class="lb">条/分钟</div></div>'+
+    '</div>'+
+    '<div class="lc-grid lc-grid-2">'+
+      '<div><div class="lc-card-title" style="font-size:12px">弹幕时间分布（每 5 分钟）</div>'+
+        (buckets.length ? buckets.map(function(b){
+          return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;font-size:11px">'+
+            '<span style="width:70px;color:#64748b">'+esc(b.label)+'</span>'+
+            '<div style="flex:1;background:#eef2f7;border-radius:4px;height:9px;overflow:hidden">'+
+              '<div style="width:'+Math.round(b.count/maxB*100)+'%;background:#2563eb;height:100%"></div></div>'+
+            '<span style="width:36px;text-align:right;color:#475569">'+b.count+'</span></div>';
+        }).join('') : '<div style="color:#94a3b8;padding:10px 0">暂无数据</div>')+
+      '</div>'+
+      '<div><div class="lc-card-title" style="font-size:12px">情绪分布</div>'+
+        '<div style="display:flex;gap:12px;flex-wrap:wrap">'+
+        '<div class="lc-stat"><div class="nv" style="color:#10b981;font-size:20px">'+fmtNum(sent.positive||0)+'</div><div class="lb">正面</div></div>'+
+        '<div class="lc-stat"><div class="nv" style="color:#64748b;font-size:20px">'+fmtNum(sent.neutral||0)+'</div><div class="lb">中性</div></div>'+
+        '<div class="lc-stat"><div class="nv" style="color:#ef4444;font-size:20px">'+fmtNum(sent.negative||0)+'</div><div class="lb">负面</div></div>'+
+        '</div>'+
+        '<div style="margin-top:10px"><div class="lc-card-title" style="font-size:12px">高频词</div>'+
+        ((s.topKeywords||[]).length ? (s.topKeywords||[]).map(function(k){
+          return '<span class="lc-tag lc-tag-blue">'+esc(k.keyword)+' ×'+k.count+'</span>';
+        }).join(' ') : '<span style="color:#94a3b8;font-size:11px">暂无</span>')+
+        '</div>'+
+        '<div style="margin-top:10px;font-size:11px;color:#94a3b8">回复耗时均值 '+(s.replyLatencyAvg||0)+
+          's · 已回复 '+fmtNum(s.repliedCount||0)+' 条</div>'+
+      '</div>'+
+    '</div>'+
+    '<div style="font-size:11px;color:#94a3b8;margin-top:10px">'+
+      '口径：'+esc(sc.caliber||'')+'；已排除模拟/虚拟弹幕 '+fmtNum((sc.excludedVirtual||0)+(sc.excludedMock||0))+' 条</div>';
+}
+function renderDanmakuSummaryAI() {
+  var el = document.getElementById('dmSummaryAI');
+  if (!el) return;
+  var d = S.dmSummaryAI;
+  if (!d) { el.innerHTML = '<div style="color:#94a3b8;padding:16px 0;text-align:center">尚未生成 AI 摘要</div>'; return; }
+  if (d.pending) { el.innerHTML = '<div style="color:#64748b;padding:16px 0;text-align:center">⏳ AI 正在总结本场真实弹幕…（最长 20 秒）</div>'; return; }
+  if (!d.success) { el.innerHTML = '<div style="color:#ef4444;padding:16px 0;text-align:center">'+esc(d.message||'生成失败')+'</div>'; return; }
+  if (d.reason === 'no_real_data' || !d.summary) {
+    el.innerHTML = '<div style="color:#94a3b8;padding:16px 0;text-align:center">'+
+      esc(d.message||'本场还没有真实观众弹幕，暂不能生成总结')+
+      '<div style="font-size:11px;margin-top:6px">不会用模拟弹幕凑一段摘要</div></div>';
+    return;
+  }
+  el.innerHTML = '<div style="font-size:13px;line-height:1.9;color:#1e293b">'+esc(d.summary)+'</div>'+
+    (d.fallback ? '<div style="margin-top:8px;font-size:11px;color:#b45309">⚠️ 离线摘要（AI 不可用，由统计数字直接拼成，未编造任何内容）</div>' : '');
+}
+
+// ============================================================
+// Event Handlers
+// ============================================================
+on('init_state',function(d){
+  // 服务端已把连接降级为观众（token 过期/无效）——必须显式挡住，否则运营台会
+  // 静默退化成只读观众端，界面上什么都点不动，极难排查。
+  if(d.role && d.role !== 'host'){ showRoleBlocked(); return; }
+  if(d.liveStatus) Object.assign(S.liveStatus,d.liveStatus);
+  if(d.products) S.products=d.products;
+  if(d.stats) S.stats=d.stats;
+  if(d.settings) S.settings=d.settings;
+  if(d.allDanmaku) S.dmList=d.allDanmaku;
+  if(d.sessions) S.sessions=d.sessions;
+  if(d.alerts) S.alerts=d.alerts;
+  if(d.highFreqQuestions) S.hfq=d.highFreqQuestions;
+  if(d.reviews) S.reviews=d.reviews;
+  if(d.currentProduct) S.curProd=d.currentProduct;
+  if(d.hostProfile) S.host={hostName:(d.hostProfile.hostName||'主播'),hostAvatar:(d.hostProfile.hostAvatar||'')};
+  renderHostProfileUI();
+  renderAll();
+});
+on('host_profile',function(d){
+  if(!d)return;
+  S.host={hostName:(d.hostName||'主播'),hostAvatar:(d.hostAvatar||'')};
+  renderHostProfileUI();
+});
+on('update_host_profile_result',function(d){
+  if(d&&d.hostProfile)S.host={hostName:(d.hostProfile.hostName||'主播'),hostAvatar:(d.hostProfile.hostAvatar||'')};
+  renderHostProfileUI();
+  if(d)toast(d.message||'主播资料已保存','success');
+});
+on('live_started',function(d){
+  if(d.liveStatus){
+    Object.assign(S.liveStatus,d.liveStatus);
+  } else {
+    S.liveStatus.status='live';S.liveStatus.startTime=d.startTime;
+    S.liveStatus.totalDanmaku=0;S.liveStatus.totalAIReplies=0;
+    S.liveStatus.totalPrivateMessages=0;S.liveStatus.liveDuration=0;
+  }
+  S.dmList=[];S.alerts=[];S.hfq=[];S.reviews=[];
+  // 新的一场：本场订单也必须清空重拉，否则上一场的成交会挂在控制台上
+  // —— 后端的会话边界已经换了（新 startTime），前端不清就是两份口径对不上。
+  S.sessionOrders=[];S.sessionOrderStats=null;
+  renderConsoleStatus();renderStageControl();renderDmList();
+  updateConsoleStats();renderAlerts();renderTopQuestions();
+  renderSessionOrders();loadSessionOrders();
+  if(S.curPage==='analysis')renderAnalysisPage();
+  toast('直播已开始，数据已重置！','success');
+});
+on('live_paused',function(d){S.liveStatus.status='paused';renderConsoleStatus();toast('直播已暂停','warn');});
+on('live_resumed',function(d){S.liveStatus.status='live';renderConsoleStatus();toast('直播已恢复','success');});
+on('live_ended',function(d){S.liveStatus.status='ended';renderConsoleStatus();if(d.report){S.lastReport=d.report;if(S.curPage==='report')renderReport(d.report);}toast('直播已结束','success');});
+on('start_live_result',function(d){if(!d.success) toast(d.message||'开始失败','err');});
+on('end_live_result',function(d){if(d.report){S.lastReport=d.report;if(S.curPage==='report')renderReport(d.report);}});
+
+on('new_danmaku',function(d){
+  var exists=S.dmList.some(function(x){return x.danmakuId===d.danmakuId});
+  if(!exists) S.dmList.push(d);
+  if(S.curPage==='console'){renderDmList();updateConsoleStats();}
+  // 弹幕页也要跟着刷：否则停在「弹幕历史记录」页时，新弹幕要切页才看得到
+  // （danmaku_reply 一直是这么做的，这里原先漏了）
+  if(S.curPage==='danmaku'){renderDmPage();}
+});
+on('danmaku_reply',function(d){
+  for(var i=0;i<S.dmList.length;i++){if(S.dmList[i].danmakuId===d.danmakuId){S.dmList[i].isReplied=true;S.dmList[i].replyContent=d.replyContent;S.dmList[i].replyTime=d.replyTime;break;}}
+  if(S.curPage==='console'){renderDmList();updateConsoleStats();}
+  if(S.curPage==='danmaku'){renderDmPage();}
+});
+on('stage_changed',function(d){S.liveStatus.currentStage=d.stage;renderConsoleStatus();renderStageControl();toast('已切换阶段','success');});
+on('product_on_sale',function(d){
+  var p=S.products.find(function(x){return x.productId===d.productId});
+  if(p){S.curProd=p;renderProductSelect();}
+  if(S.curPage==='products')renderProductsPage();
+});
+on('product_updated',function(d){
+  // 商品发生变更（上下架/编辑等）：刷新商品列表
+  wsSend('get_products');
+});
+on('set_product_result',function(d){
+  if(d.success&&d.product){S.curProd=d.product;renderProductSelect();toast('已切换商品','success');}
+  // 必须透出后端的具体原因：「商品已下架，请先上架再讲解」和「商品不存在」是两种
+  // 完全不同的处置，笼统回一句「切换失败」等于没提示（下架商品是点不到讲解的，
+  // 这就是主播会撞上的那个反馈）。
+  else toast(d.message||'商品切换失败','err');
+  if(S.curPage==='products')renderProductsPage();
+});
+on('status_update',function(d){
+  if(d.onlineCount!==undefined) S.liveStatus.onlineCount=d.onlineCount;
+  if(d.liveDuration!==undefined) S.liveStatus.liveDuration=d.liveDuration;
+  if(S.curPage==='console') document.getElementById('statOnline').textContent=fmtNum(S.liveStatus.onlineCount);
+});
+on('stats_update',function(d){
+  if(d.stats)S.stats=d.stats;
+  if(d.liveStatus)Object.assign(S.liveStatus,d.liveStatus);
+  if(S.curPage==='console')updateConsoleStats();
+  if(S.curPage==='analysis')renderAnalysisPage();
+});
+on('new_alert',function(d){S.alerts.push(d);if(S.curPage==='console')renderAlerts();});
+on('new_review',function(d){if(d.reviewId&&!S.reviews.find(function(r){return r.reviewId===d.reviewId})){S.reviews.push(d);if(S.curPage==='reviews')renderReviewsPage();}});
+// 注意：后端从不广播 high_freq_update，这里原本挂了一个永远不触发的死监听。
+// 高频问题统一走 get_high_freq 请求-响应（见 loadHighFreq / get_high_freq_result）。
+on('get_high_freq_result',function(d){
+  if(d.questions){ S.hfq=d.questions; S.hfqMockCount=d.mockQuestionCount||0; }
+  if(S.curPage==='console') renderTopQuestions();
+  if(S.curPage==='danmaku') renderTopQuestionsChart();
+});
+on('danmaku_summary_result',function(d){ S.dmSummary=d; renderDanmakuSummary(); });
+on('danmaku_summary_ai_result',function(d){ S.dmSummaryAI=d; renderDanmakuSummaryAI(); });
+on('get_inbox_threads_result',function(d){
+  S.inboxThreads=d.threads||[];
+  // 当前打开的会话若不在服务端列表里 —— 即从「最近订单」的 💬 按钮打开、
+  // 但还从没聊过的买家（没有会话记录，服务端不会返回它）—— 补一行进去。
+  // 否则左列没有任何高亮，主播会以为会话没打开；而且聊到一半切走就再也点不回来。
+  // 该行只借用左列的渲染，字段按「新会话」置空：fmtTime('') 得到 '--'、
+  // 预览行空白，不会伪造出时间或消息内容。
+  if(S.inboxCur && !S.inboxThreads.some(function(t){return t.userId===S.inboxCur;})){
+    S.inboxThreads=[{userId:S.inboxCur, userName:S.inboxName, unreadCount:0,
+                     messageCount:0, lastMessage:'', lastMessageTime:'', isOnline:false}]
+                   .concat(S.inboxThreads);
+  }
+  var el=document.getElementById('ibUnread'); if(el) el.textContent=fmtNum(d.unreadTotal||0);
+  var el2=document.getElementById('ibThreads'); if(el2) el2.textContent=fmtNum(S.inboxThreads.length);
+  var dot=document.getElementById('sbInboxDot');
+  if(dot){ if(d.unreadTotal){dot.style.display='inline-block';dot.textContent=fmtNum(d.unreadTotal);} else dot.style.display='none'; }
+  renderInboxList();
+});
+on('get_user_messages_result',function(d){
+  if(S.curPage!=='inbox') return;
+  if(d.userId!==S.inboxCur) return;
+  S.inboxMsgs=d.messages||[];
+  renderInboxDetail();
+});
+on('get_stats_result',function(d){if(d.stats)S.stats=d.stats;if(d.liveStatus)Object.assign(S.liveStatus,d.liveStatus);if(S.curPage==='console')updateConsoleStats();if(S.curPage==='analysis')renderAnalysisPage();});
+on('get_settings_result',function(d){if(d.settings){S.settings=d.settings;applySettings(d.settings);}});
+on('save_settings_result',function(d){if(d.success)toast('设置已保存','success');});
+
+// ---- 大模型端口 回执 ----
+on('get_llm_endpoints_result',function(d){applyLlmEndpointsPayload(d);});
+on('save_llm_endpoint_result',function(d){
+  if(!d.success){toast(d.message||'保存失败','err');return;}
+  closeLlmEndpointForm();
+  toast('端口已保存','success');
+  applyLlmEndpointsPayload(d);
+});
+on('delete_llm_endpoint_result',function(d){
+  if(!d.success){toast(d.message||'删除失败','err');return;}
+  toast('端口已删除','success');
+  applyLlmEndpointsPayload(d);
+});
+on('set_active_llm_endpoint_result',function(d){
+  if(!d.success){toast(d.message||'切换失败','err');return;}
+  toast('已切换：'+(d.activeLabel||'不使用'),'success');
+  applyLlmEndpointsPayload(d);
+});
+on('test_llm_endpoint_result',function(d){
+  var btn=document.getElementById('leTestBtn');
+  if(btn){btn.disabled=false;btn.textContent='🔍 测试连接';}
+  var modal=document.getElementById('llmEndpointModal');
+  var open=modal&&modal.classList.contains('open');
+  if(open){showLlmTestResult(d);}
+  else{toast((d.ok?'✅ ':'❌ ')+(d.message||''),d.ok?'success':'err');}
+});
+on('request_report_result',function(d){if(d.success&&d.report){S.lastReport=d.report;renderReport(d.report);toast('报告生成成功','success');}else toast(d.message||'报告生成失败','err');});
+on('generate_report_result',function(d){if(d.success&&d.report){S.lastReport=d.report;renderReport(d.report);toast('报告生成成功','success');}});
+on('get_reviews_result',function(d){if(d.reviews)S.reviews=d.reviews;if(S.curPage==='reviews')renderReviewsPage();});
+on('review_summary_result',function(d){S.rvSummary=d;renderReviewSummary();});
+on('mark_review_handled_result',function(d){
+  if(!d.success){toast(d.message||'操作失败','err');return;}
+  // 本地改一份即可，不必再拉一次全量列表
+  var r=S.reviews.find(function(x){return x.reviewId===d.reviewId});
+  if(r)r.isHandled=true;
+  // 必须连下拉一起重建：商品选项后面的计数（尤其「未处理」那个类型下）
+  // 和「全部商品评价 (N)」都跟着 isHandled 变，只重绘列表的话数字会停在旧值。
+  populateReviewProdFilter();
+  renderReviewList(); loadReviewSummary();   // 总结里的「已处理率」要跟着变
+  toast('已标记为已处理','success');
+});
+on('get_viewers_result',function(d){
+  S.viewersOnline = d.online || [];
+  S.viewersAll = d.all || [];
+  var setTxt=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
+  setTxt('vwOnline', d.onlineCount!=null?d.onlineCount:'--');
+  setTxt('vwReal', d.realCount!=null?d.realCount:'--');
+  setTxt('vwBase', d.base!=null?d.base:'--');
+  if(S.curPage==='viewers')renderViewerList();
+  // 详情面板开着时同步刷新（余额/在线状态可能已变）
+  if(S.viewerCur && S.curPage==='viewers')wsSend('get_viewer_detail',{userId:S.viewerCur});
+});
+on('get_viewer_detail_result',function(d){
+  if(S.curPage==='viewers')renderViewerDetail(d);
+});
+on('new_private_msg',function(d){
+  // 私信到达。服务端定向投递：只给该观众本人 + 运营台，别的观众收不到
+  // （data_manager.add_private_message 的 to_user=uid，经 _on_data_event 生效）。
+  // 之前运营台**没有**这个监听，主播不开着收件箱、不手动刷新就永远看不到
+  // 观众发来的消息 —— "主播亲自回复"这条链路是断的。
+  var viewing = S.curPage==='inbox' && !!S.inboxCur && d.userId===S.inboxCur;
+  // 主播此刻正对着这个会话，就该算已读，否则红点会一直挂在他眼皮底下不消。
+  // 必须排在 get_inbox_threads 之前：那条回包带着 unreadTotal，先标记再取数，
+  // 才不至于把刚读掉的一条又算进角标里（同一连接按发送顺序串行处理，
+  // 见 live_commerce_ws.py:1430 的 await handle_message）。
+  if(viewing) wsSend('mark_read',{userId:S.inboxCur});
+  // 左列与侧栏角标：不管当前在哪一页都刷。侧栏「私信收件箱」的未读角标要能在
+  // 主播看别的页面时自己亮起来；不在 inbox 页时 renderInboxList 找不到元素会直接
+  // return，不会误伤别的页面。
+  wsSend('get_inbox_threads',{});
+  // 右列**仅当正好打开着这个会话**才重拉。否则主播在看甲、乙发来消息就把他强行
+  // 切走了 —— 刷新服务的对象是"当前打开的会话"，不是"最新来消息的那个会话"。
+  if(viewing) wsSend('get_user_messages',{userId:S.inboxCur});
+});
+on('send_viewer_msg_result',function(d){
+  if(d.success){
+    toast('私信已发送','success');
+    // 收件箱页：回包不带 userId，但此刻唯一可能的目标就是当前打开的会话
+    if(S.curPage==='inbox'&&S.inboxCur){
+      wsSend('get_user_messages',{userId:S.inboxCur});
+      wsSend('get_inbox_threads',{});
+    }
+  }
+  else toast(d.message||'私信发送失败','err');
+});
+on('get_products_result',function(d){
+  if(d.products){
+    S.products=d.products;
+    // 同步 curProd 引用，避免状态分裂
+    if(S.curProd){S.curProd=S.products.find(function(p){return p.productId===S.curProd.productId;})||S.curProd;}
+  }
+  renderProductSelect();
+  if(S.curPage==='products')renderProductsPage();
+});
+on('add_product_result',function(d){if(d.success){toast('商品添加成功','success');wsSend('get_products');}else toast('商品添加失败','err');});
+// 后端处理消息抛异常时会回 error（不带 *_result），没有这个处理器的话
+// 前端会完全静默 —— 弹窗照关、列表照旧，看起来像"点了没反应"
+on('error',function(d){toast((d&&d.message)||'服务端处理失败','err');});
+on('save_product_result',function(d){
+  if(d.success){toast('商品已保存','success');}
+  else toast('商品保存失败','err');
+  wsSend('get_products');
+});
+on('delete_product_result',function(d){
+  if(d.success){toast('商品已删除','success');}
+  else toast('商品删除失败','err');
+  wsSend('get_products');
+});
+on('on_sale_product_result',function(d){
+  if(d.success){toast('操作成功','success');}
+  else toast('操作失败','err');
+  wsSend('get_products');
+});
+on('get_product_reviews_result',function(d){
+  if(d.productId===S.detailProductId){
+    // 渲染详情弹窗里的评价
+    S.detailReviews=(d.reviews||[]).map(function(r){
+      r.timeText=r.timestamp?new Date(r.timestamp).toLocaleString():'';
+      return r;
+    });
+    renderDetailReviews();
+  }
+});
+on('generate_script_result',function(d){
+  var btn=document.getElementById('btnGenScript');
+  if(btn){btn.disabled=false;btn.textContent='✨ 生成话术';}
+  var out=document.getElementById('scriptOutput');
+  if(out&&d.script){out.value=d.script;}
+  if(d.success){toast('话术已生成','success');}
+  else if(out){out.value='生成失败，请重试';}
+  // 更新历史（重新拉取）
+  wsSend('get_scripts_history');
+});
+on('get_scripts_history_result',function(d){
+  S.scriptHistory=(d.history||[]).map(function(h,i){h.idx=i;return h;});
+  renderScriptHistory();
+});
+on('get_orders_result',function(d){
+  if(d.orders)S.orders=d.orders;
+  if(S.curPage==='analysis')renderOrders();
+});
+on('get_order_stats_result',function(d){
+  if(d.stats)S.orderStats=d.stats;
+  if(S.curPage==='analysis'){renderOrderStats();renderOrderByProduct();}
+});
+on('get_session_orders_result',function(d){
+  if(d.orders)S.sessionOrders=d.orders;
+  if(d.stats)S.sessionOrderStats=d.stats;
+  if(S.curPage==='console')renderSessionOrders();
+});
+on('order_new',function(d){
+  // 新订单到达：刷新分析页与商品销量；在控制台就地刷「本场订单」，
+  // 主播不用切页就能看到刚成交的那一单。
+  if(S.curPage==='analysis'){wsSend('get_orders',{limit:40});wsSend('get_order_stats');}
+  if(S.curPage==='console')loadSessionOrders();
+  wsSend('get_products');
+});
+on('order_updated',function(d){
+  if(S.curPage==='analysis'){wsSend('get_orders',{limit:40});wsSend('get_order_stats');}
+  if(S.curPage==='console')loadSessionOrders();
+});
+on('update_order_status_result',function(d){
+  if(d.success) toast('订单状态已更新','success');
+  else toast(d.message||'操作未生效（订单状态不满足条件）','warn');
+});
+
+// ============================================================
+// Apply Settings
+// ============================================================
+function applySettings(s) {
+  if(!s)return;
+  if(s.aiReply){
+    if(s.aiReply.style) document.getElementById('setAiStyle').value=s.aiReply.style;
+    if(s.aiReply.length) document.getElementById('setAiLength').value=s.aiReply.length;
+    setSwitch('switchUseLLM',s.aiReply.useLLM!==false);
+    setSwitch('switchAutoProd',s.aiReply.autoSendProductInfo!==false);
+    setSwitch('switchEmotion',s.aiReply.emotionDetectionEnabled!==false);
+    setSwitch('switchSensitive',s.aiReply.sensitiveFilterEnabled!==false);
+    setSwitch('switchViolation',s.aiReply.violationFilterEnabled!==false);
+    if(s.aiReply.customSensitiveWords&&s.aiReply.customSensitiveWords.length){
+      document.getElementById('setSensitiveWords').value=s.aiReply.customSensitiveWords.join(', ');
+    }
+  }
+  if(s.virtualDanmaku){
+    setSwitch('switchVdanmaku',s.virtualDanmaku.enabled!==false);
+    if(s.virtualDanmaku.frequency) document.getElementById('setVdanmakuFreq').value=s.virtualDanmaku.frequency;
+  }
+  if(s.privateMessage){
+    setSwitch('switchPvtReply',s.privateMessage.enabled!==false);
+    setSwitch('switchHumanTransfer',s.privateMessage.humanTransferEnabled!==false);
+  }
+  if(s.system){
+    setSwitch('switchAlerts',s.system.smartAlertEnabled!==false);
+    setSwitch('switchTimer',s.system.liveDurationReminderEnabled!==false);
+    setSwitch('switchBackup',s.system.dataAutoBackup===true);
+    var ob=document.getElementById('setOnlineBase');
+    if(ob && s.system.onlineCountBase!=null) ob.value=s.system.onlineCountBase;
+  }
+}
+function setSwitch(id,on){var el=document.getElementById(id);if(el)el.classList.toggle('on',!!on);}
+
+// ============================================================
+// 大模型接入端口
+// apiKey 全流程都不在浏览器里：服务端只下发 apiKeyMasked，
+// 编辑时留空即表示「不改」，由后端保留原值。
+// ============================================================
+function loadLlmEndpoints(){ wsSend('get_llm_endpoints'); }
+
+function applyLlmEndpointsPayload(d) {
+  if (!d) return;
+  if (d.endpoints) S.llmEndpoints = d.endpoints;
+  if (d.activeId !== undefined) S.llmActiveId = d.activeId || '';
+  if (d.activeLabel) S.llmActiveLabel = d.activeLabel;
+  renderLlmEndpoints();
+  applyLlmHints();
+}
+
+function applyLlmHints() {
+  var label = S.llmActiveLabel || '.env 默认模型';
+  var sh = document.getElementById('scriptModelHint');
+  if (sh) sh.textContent = '当前模型：' + label;
+  var ah = document.getElementById('aiModelHint');
+  if (ah) ah.textContent = '用「' + label + '」智能生成弹幕/私信回复；关闭则用规则话术';
+  var lh = document.getElementById('llmActiveHint');
+  if (lh) lh.textContent = 'AI 文字功能（话术生成、弹幕/私信自动回复、弹幕总结）当前走「' + label + '」';
+}
+
+function renderLlmEndpoints() {
+  var list = S.llmEndpoints || [];
+  var listEl = document.getElementById('llmEndpointList');
+  var emptyEl = document.getElementById('llmEndpointEmpty');
+  var sel = document.getElementById('llmActiveSel');
+  if (!listEl || !sel || !emptyEl) return;
+
+  // 下拉：「不使用」放第一项，表示回退 .env 默认模型
+  var opts = ['<option value="">不使用（用 .env 默认模型）</option>'];
+  list.forEach(function(e){
+    opts.push('<option value="' + esc(e.id) + '">' + esc(e.name || e.model) + '</option>');
+  });
+  sel.innerHTML = opts.join('');
+  sel.value = S.llmActiveId || '';
+
+  emptyEl.style.display = list.length ? 'none' : 'block';
+  listEl.innerHTML = list.map(function(e){
+    var active = e.id === S.llmActiveId;
+    var title = esc(e.name || e.model);
+    return '<div class="lc-setting-row" style="align-items:center' + (active ? ';background:#f0f9ff;border-radius:8px' : '') + '">'
+      + '<div style="min-width:0">'
+      +   '<div class="lbl">' + (active ? '✅ ' : '') + title
+      +     (active ? ' <span style="font-size:10px;background:#dbeafe;color:#1d4ed8;border-radius:8px;padding:1px 7px;margin-left:4px">当前启用</span>' : '')
+      +   '</div>'
+      +   '<div class="desc" style="word-break:break-all">' + esc(e.model) + ' · ' + esc(e.baseUrl)
+      +     ' · 密钥 ' + esc(e.apiKeyMasked || '未配置') + '</div>'
+      + '</div>'
+      + '<div style="display:flex;gap:6px;flex-shrink:0">'
+      +   (active ? '' : '<button class="lc-mini-btn" onclick="setActiveLlmEndpoint(\'' + esc(e.id) + '\')">启用</button>')
+      +   '<button class="lc-mini-btn" onclick="testLlmEndpoint(\'' + esc(e.id) + '\')">测试</button>'
+      +   '<button class="lc-mini-btn" onclick="openLlmEndpointForm(\'' + esc(e.id) + '\')">编辑</button>'
+      +   '<button class="lc-mini-btn" style="color:#dc2626" onclick="deleteLlmEndpoint(\'' + esc(e.id) + '\')">删除</button>'
+      + '</div>'
+      + '</div>';
+  }).join('');
+};
+
+function findLlmEndpoint(id){
+  return (S.llmEndpoints || []).filter(function(x){return x.id === id;})[0] || null;
+}
+
+function setActiveLlmEndpoint(id) {
+  wsSend('set_active_llm_endpoint', {id: id || ''});
+}
+
+function deleteLlmEndpoint(id) {
+  var e = findLlmEndpoint(id);
+  if (!confirm('确定删除端口「' + ((e && (e.name || e.model)) || id) + '」吗？\n删除后如果它是当前启用项，AI 将回退到 .env 默认模型。')) return;
+  wsSend('delete_llm_endpoint', {id: id});
+}
+
+// 列表里的「测试」：只传 id 和地址，**不带 key** —— 后端会用存着的那把
+function testLlmEndpoint(id) {
+  var e = findLlmEndpoint(id);
+  if (!e) return;
+  toast('正在测试「' + (e.name || e.model) + '」…');
+  wsSend('test_llm_endpoint', {endpoint: {
+    id: e.id, name: e.name, baseUrl: e.baseUrl, model: e.model, temperature: e.temperature
+  }});
+}
+
+// ---- 添加/编辑弹层 ----
+function openLlmEndpointForm(id) {
+  var e = id ? findLlmEndpoint(id) : null;
+  S.editingEndpointId = e ? e.id : null;
+  document.getElementById('llmFormTitle').textContent = e ? '✏️ 编辑大模型端口' : '➕ 添加大模型端口';
+  document.getElementById('leName').value = e ? (e.name || '') : '';
+  document.getElementById('leBaseUrl').value = e ? (e.baseUrl || '') : '';
+  document.getElementById('leModel').value = e ? (e.model || '') : '';
+  document.getElementById('leTemp').value = e && e.temperature != null ? e.temperature : 0.5;
+  var keyInp = document.getElementById('leApiKey');
+  keyInp.value = '';
+  keyInp.placeholder = e ? '已保存（留空则不修改）' : 'sk-...';
+  document.getElementById('leKeyHint').textContent = e
+    ? '当前：' + (e.apiKeyMasked || '未配置') + '　留空即保持不变'
+    : '只保存在服务端，不会下发给浏览器';
+  hideLlmTestResult();
+  document.getElementById('llmEndpointModal').classList.add('open');
+}
+
+function closeLlmEndpointForm() {
+  document.getElementById('llmEndpointModal').classList.remove('open');
+  S.editingEndpointId = null;
+}
+
+function collectLlmForm() {
+  return {
+    id: S.editingEndpointId || '',
+    name: document.getElementById('leName').value.trim(),
+    baseUrl: document.getElementById('leBaseUrl').value.trim(),
+    model: document.getElementById('leModel').value.trim(),
+    // 原样传（不 trim 掉中间内容）；留空时后端保留原 key
+    apiKey: document.getElementById('leApiKey').value.trim(),
+    temperature: document.getElementById('leTemp').value
+  };
+}
+
+function submitLlmEndpointForm() {
+  var ep = collectLlmForm();
+  if (!ep.baseUrl) { toast('请填写 Base URL', 'err'); return; }
+  if (!ep.model) { toast('请填写模型名', 'err'); return; }
+  if (!S.editingEndpointId && !ep.apiKey) { toast('新增端口必须填 API Key', 'err'); return; }
+  wsSend('save_llm_endpoint', {endpoint: ep});
+}
+
+function showLlmTestResult(res) {
+  var el = document.getElementById('leTestResult');
+  if (!el) return;
+  el.style.display = 'block';
+  el.style.background = res.ok ? '#ecfdf5' : '#fef2f2';
+  el.style.color = res.ok ? '#047857' : '#b91c1c';
+  el.textContent = (res.ok ? '✅ ' : '❌ ') + (res.message || '')
+    + (res.latencyMs ? '（' + res.latencyMs + ' ms）' : '');
+}
+
+function hideLlmTestResult() {
+  var el = document.getElementById('leTestResult');
+  if (el) { el.style.display = 'none'; el.textContent = ''; }
+}
+
+function testLlmEndpointForm() {
+  var ep = collectLlmForm();
+  if (!ep.baseUrl || !ep.model) { toast('先填 Base URL 和模型名再测', 'err'); return; }
+  var btn = document.getElementById('leTestBtn');
+  btn.disabled = true;
+  btn.textContent = '测试中...';
+  showLlmTestResult({ok: true, message: '正在请求…'});
+  wsSend('test_llm_endpoint', {endpoint: ep});
+}
+
+// ============================================================
+// 主播资料（对外昵称/头像）+ 头像选择器
+// ============================================================
+var AVATAR_EMOJIS=['😀','😄','😆','😎','🤩','🥳','😇','🤠','😺','🐶','🐱','🐼','🦊','🐯','🐸','🐮','🐷','🐨','🐙','🦁','🦄','🐬','🌸','🌻','🌈','🍎','🍓','🍉','🥑','🍩','⭐','🌙','⚡','🔥','🎯','🎁'];
+var _avPickCb=null,_avPickVal='',_avGridFilled=false,_avUploadWired=false;
+
+function emojiAvatarURI(em){
+  var svg='<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96">'
+    +'<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">'
+    +'<stop offset="0" stop-color="#4f46e5"/><stop offset="0.55" stop-color="#ec4899"/><stop offset="1" stop-color="#f97316"/>'
+    +'</linearGradient></defs>'
+    +'<circle cx="48" cy="48" r="48" fill="url(#g)"/>'
+    +'<text x="48" y="52" font-size="42" text-anchor="middle" dominant-baseline="central">'+em+'</text></svg>';
+  return 'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+}
+function hostInitial(n){n=(n||'').trim();return n?n.charAt(0):'主';}
+// 圆形头像容器：默认显示首字，有头像值则叠加 img 覆盖
+function setCircle(el,v,fb){
+  if(!el)return;
+  el.innerHTML='';
+  var sp=document.createElement('span');sp.textContent=fb||'?';sp.style.cssText='line-height:1';
+  el.appendChild(sp);
+  if(v){
+    var img=document.createElement('img');
+    img.src=v;
+    img.style.cssText='position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover;border-radius:50%';
+    img.onerror=function(){if(img.parentNode)img.parentNode.removeChild(img);};
+    el.appendChild(img);
+  }
+}
+// 回填设置页：昵称输入框 + 头像预览圆
+function renderHostProfileUI(){
+  var h=S.host||{};
+  var name=h.hostName||'主播', av=h.hostAvatar||'';
+  var inp=document.getElementById('hostNameInp');
+  if(inp&&document.activeElement!==inp)inp.value=name;
+  setCircle(document.getElementById('hostAvPrev'),av,hostInitial(name));
+}
+// onPick 回调：换头像后立即落到 S.host 并回填预览（不保存，保存走 saveHostProfile）
+function setHostAvatar(v){
+  if(!S.host)S.host={hostName:'主播',hostAvatar:''};
+  S.host.hostAvatar=v||'';
+  renderHostProfileUI();
+}
+function saveHostProfile(){
+  var inp=document.getElementById('hostNameInp');
+  var name=(((inp&&inp.value)||'').trim()||'主播').slice(0,12);
+  if(inp)inp.value=name;
+  if(!S.host)S.host={hostName:'主播',hostAvatar:''};
+  S.host.hostName=name;
+  renderHostProfileUI();
+  wsSend('update_host_profile',{hostName:name,hostAvatar:S.host.hostAvatar||''});
+}
+function openAvatarPick(onPick){
+  _avPickCb=onPick||null;
+  _avPickVal=(S.host&&S.host.hostAvatar)||'';
+  var grid=document.getElementById('avEmojiGrid');
+  if(grid&&!_avGridFilled){
+    _avGridFilled=true;
+    grid.innerHTML='';
+    AVATAR_EMOJIS.forEach(function(em){
+      var b=document.createElement('button');b.type='button';b.title='emoji 头像';
+      var img=document.createElement('img');img.src=emojiAvatarURI(em);
+      b.appendChild(img);
+      b.onclick=function(){pickAvValue(img.src,b);};
+      grid.appendChild(b);
+    });
+  }
+  syncAvPickUI();
+  wireAvUpload();
+  document.getElementById('avatarPickModal').classList.add('open');
+}
+function closeAvatarPick(){
+  document.getElementById('avatarPickModal').classList.remove('open');
+  _avPickCb=null;
+}
+function pickAvValue(val,btn){
+  _avPickVal=val||'';
+  syncAvPickUI(btn);
+}
+function confirmAvatarPick(){
+  var cb=_avPickCb;
+  closeAvatarPick();
+  if(typeof cb==='function'){try{cb(_avPickVal);}catch(e){}}
+}
+function syncAvPickUI(btn){
+  var grid=document.getElementById('avEmojiGrid');
+  if(grid){
+    var cur=(btn&&btn.parentNode===grid)?btn:null;
+    var bs=grid.children;
+    if(!cur&&_avPickVal){
+      for(var i=0;i<bs.length;i++){var im=bs[i].querySelector('img');if(im&&im.src===_avPickVal){cur=bs[i];break;}}
+    }
+    for(var j=0;j<bs.length;j++)bs[j].classList.remove('on');
+    if(cur)cur.classList.add('on');
+  }
+  var prev=document.getElementById('avPickPrev');
+  if(prev){var fb='主';if(S.host&&S.host.hostName)fb=S.host.hostName.charAt(0);setCircle(prev,_avPickVal,fb);}
+}
+function wireAvUpload(){
+  var fi=document.getElementById('avFileInput');
+  if(!fi||_avUploadWired)return;
+  _avUploadWired=true;
+  fi.addEventListener('change',function(){
+    var f=fi.files&&fi.files[0];
+    if(!f)return;
+    var hint=document.getElementById('avUploadHint');
+    if(f.size>3*1024*1024){hint.textContent='图片过大（上限 3MB）';fi.value='';return;}
+    hint.textContent='上传中…';
+    var fd=new FormData();fd.append('file',f);
+    var at=''; try{ at=localStorage.getItem('lc_auth_token')||''; }catch(e){}
+    var ah={}; if(at) ah['Authorization']='Bearer '+at;
+    fetch('/api/avatar/upload',{method:'POST',headers:ah,body:fd})
+      .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
+      .then(function(j){
+        if(j&&j.url){_avPickVal=j.url;syncAvPickUI();hint.textContent='上传成功 ✓ 点下方确认';toast('头像上传成功','success');}
+        else hint.textContent='上传失败，请重试';
+      })
+      .catch(function(){hint.textContent='上传失败，请检查网络';})
+      .then(function(){fi.value='';});
+  });
+}
+
+// ============================================================
+// Render All (initial)
+// ============================================================
+function renderAll() {
+  renderConsoleStatus(); renderStageControl(); renderProductSelect();
+  renderDmList(); updateConsoleStats(); renderTopQuestions(); renderAlerts();
+  populateScriptProdSelect(); renderScriptHistory();
+  // renderAll 同时是 switchPage('console') 和 init_state 的入口，挂这里两个时机都覆盖。
+  // 先渲染一次已有数据，再拉最新 —— 否则切回控制台会短暂显示上一场的旧订单。
+  renderSessionOrders(); loadSessionOrders();
+}
+
+// ============================================================
+// Add Product
+// ============================================================
+function showAddProduct() { document.getElementById('addProdModal').classList.add('open'); }
+function closeAddProduct() { document.getElementById('addProdModal').classList.remove('open'); }
+function addProductSubmit() {
+  var pid = document.getElementById('apId').value.trim();
+  var nm = document.getElementById('apName').value.trim();
+  var pr = parseFloat(document.getElementById('apPrice').value);
+  var st = parseInt(document.getElementById('apStock').value) || 0;
+  var ct = document.getElementById('apCategory').value.trim() || '未分类';
+  var desc = document.getElementById('apDesc').value.trim();
+  if (!pid || !nm || !pr) { toast('请填写商品ID、名称和价格','err'); return; }
+  var product = {
+    productId: pid, name: nm, price: pr, originalPrice: pr, stock: st,
+    category: ct, description: desc, specs: [], imageUrl: '', tags: [],
+    // 新建即上架：观众端只下发已上架商品，若默认 false，加完商品在观众端看不到，
+    // 页面上又没有任何「需要手动上架」的提示，只会被当成 bug。
+    isOnSale: true, addedTime: new Date().toISOString(), isInLibrary: true
+  };
+  wsSend('add_product', {product: product});
+  closeAddProduct();
+}
+// Clear form fields when opening
+var _origShow = showAddProduct;
+showAddProduct = function() {
+  ['apId','apName','apDesc'].forEach(function(id){document.getElementById(id).value=''});
+  document.getElementById('apPrice').value='';
+  document.getElementById('apStock').value='100';
+  document.getElementById('apCategory').value='未分类';
+  _origShow();
+};
+
+// ============================================================
+// Init
+// ============================================================
+// Auth check - verify token with server, redirect to login if invalid
+(function(){
+  function showApp() {
+    document.getElementById('authOverlay').style.display = 'none';
+    var appEl = document.getElementById('appContent');
+    if (appEl) appEl.style.display = '';
+  }
+
+  var t = localStorage.getItem('lc_auth_token');
+  if (!t) { window.location.href = '/login'; return; }
+
+  fetch('/auth/me', { headers: { 'Authorization': 'Bearer ' + t } })
+    .then(function(resp){
+      if (!resp.ok) {
+        localStorage.removeItem('lc_auth_token');
+        localStorage.removeItem('lc_auth_user');
+        window.location.href = '/login';
+        return;
+      }
+      return resp.json();
+    })
+    .then(function(user){
+      if (user) {
+        setAcctName(user.username);
+        try { localStorage.setItem('lc_auth_user', JSON.stringify(user)); } catch(e) {}
+        showApp();
+      }
+      startServices();
+    })
+    .catch(function(){
+      // /auth/me 没回来（网络抖动等）：退回上次缓存的用户名，别让账号区空着
+      var u = localStorage.getItem('lc_auth_user');
+      if (u) {
+        try { setAcctName(JSON.parse(u).username); } catch(e) {}
+      }
+      showApp();
+      startServices();
+    });
+})();
+
+// 连接被判为观众时弹出阻断层（token 过期/无效），避免运营台静默变成只读观众端
+function showRoleBlocked() {
+  if (document.getElementById('roleBlocked')) return;
+  var el = document.createElement('div');
+  el.id = 'roleBlocked';
+  el.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0f172a;color:#e2e8f0;'
+    + 'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;'
+    + 'text-align:center;padding:24px;font-family:inherit';
+  el.innerHTML = '<div style="font-size:34px">🔒</div>'
+    + '<div style="font-size:17px;font-weight:700">登录状态已失效</div>'
+    + '<div style="font-size:13px;color:#94a3b8;line-height:1.7;max-width:340px">'
+    + '当前连接未被识别为运营台账号，已降级为观众视角。<br>请重新登录后再操作。</div>'
+    + '<button onclick="roleBlockedRelogin()" style="margin-top:6px;background:#2563eb;color:#fff;'
+    + 'border:0;border-radius:20px;padding:10px 22px;font-size:14px;cursor:pointer">重新登录</button>';
+  document.body.appendChild(el);
+}
+
+function roleBlockedRelogin() {
+  try {
+    localStorage.removeItem('lc_auth_token');
+    localStorage.removeItem('lc_auth_user');
+  } catch (e) {}
+  // 走后端 /logout 而不是直接跳登录页：闸门 cookie 是 HttpOnly 的，JS 删不掉，
+  // 不清掉它的话下一页请求还是会带着旧身份进来。
+  window.location.href = '/logout';
+}
+
+// 侧边栏账号区：显示当前登录用户名（来源 /auth/me）
+function setAcctName(name) {
+  var el = document.getElementById('acctName');
+  if (el) el.textContent = name || '未识别账号';
+}
+
+function doLogout() {
+  localStorage.removeItem('lc_auth_token');
+  localStorage.removeItem('lc_auth_user');
+  window.location.href = '/logout';
+}
+
+function startServices() {
+  wsConn();
+  setInterval(function(){
+    if(S.liveStatus.status==='live'){wsSend('get_stats');wsSend('get_high_freq');}
+  },10000);
+  setInterval(function(){
+    if(S.curPage==='danmaku')renderDmPage();
+    if(S.curPage==='reviews')updateReviewStats();
+},5000);
+}
+</script>
+
+<!-- 添加商品模态框 -->
+<div class="lc-modal" id="addProdModal">
+  <div class="lc-modal-bd" style="width:480px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div style="font-size:16px;font-weight:700">➕ 添加商品</div>
+      <span style="font-size:20px;cursor:pointer;color:#94a3b8" onclick="closeAddProduct()">&times;</span>
+    </div>
+    <div style="display:grid;gap:10px">
+      <div><label style="font-size:12px;font-weight:600;color:#475569;display:block;margin-bottom:3px">商品ID</label><input class="lc-inp" id="apId" placeholder="如 P013"></div>
+      <div><label style="font-size:12px;font-weight:600;color:#475569;display:block;margin-bottom:3px">商品名称 *</label><input class="lc-inp" id="apName" placeholder="例：有机绿茶礼盒"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label style="font-size:12px;font-weight:600;color:#475569;display:block;margin-bottom:3px">价格 *</label><input class="lc-inp" id="apPrice" type="number" step="0.01" placeholder="199.00"></div>
+        <div><label style="font-size:12px;font-weight:600;color:#475569;display:block;margin-bottom:3px">库存</label><input class="lc-inp" id="apStock" type="number" value="100"></div>
+      </div>
+      <div><label style="font-size:12px;font-weight:600;color:#475569;display:block;margin-bottom:3px">分类</label><input class="lc-inp" id="apCategory" placeholder="如 食品茶饮"></div>
+      <div><label style="font-size:12px;font-weight:600;color:#475569;display:block;margin-bottom:3px">描述</label><textarea class="lc-inp" id="apDesc" rows="2" style="resize:vertical" placeholder="商品描述/卖点..."></textarea></div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+      <button class="lc-btn lc-btn-outline" onclick="closeAddProduct()">取消</button>
+      <button class="lc-btn lc-btn-primary" onclick="addProductSubmit()">✅ 确认添加</button>
+    </div>
+  </div>
+</div>
+
+<!-- 大模型端口 添加/编辑 模态框 -->
+<div class="lc-modal" id="llmEndpointModal">
+  <div class="lc-modal-bd" style="width:520px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div style="font-size:16px;font-weight:700" id="llmFormTitle">➕ 添加大模型端口</div>
+      <span style="font-size:20px;cursor:pointer;color:#94a3b8" onclick="closeLlmEndpointForm()">&times;</span>
+    </div>
+    <div style="display:grid;gap:10px">
+      <div>
+        <label style="font-size:12px;font-weight:600;color:#475569;display:block;margin-bottom:3px">名称</label>
+        <input class="lc-inp" id="leName" placeholder="如 DeepSeek 官方（留空则用模型名）">
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:600;color:#475569;display:block;margin-bottom:3px">Base URL *</label>
+        <input class="lc-inp" id="leBaseUrl" placeholder="https://api.deepseek.com/v1">
+        <div style="font-size:11px;color:#94a3b8;margin-top:3px">OpenAI 兼容地址，一般以 <code>/v1</code> 结尾（如 <code>https://api.siliconflow.cn/v1</code>）</div>
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:600;color:#475569;display:block;margin-bottom:3px">API Key *</label>
+        <input class="lc-inp" id="leApiKey" type="password" placeholder="sk-..." autocomplete="off">
+        <div style="font-size:11px;color:#94a3b8;margin-top:3px" id="leKeyHint">只保存在服务端，不会下发给浏览器</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 110px;gap:10px">
+        <div>
+          <label style="font-size:12px;font-weight:600;color:#475569;display:block;margin-bottom:3px">模型名 *</label>
+          <input class="lc-inp" id="leModel" placeholder="deepseek-chat">
+        </div>
+        <div>
+          <label style="font-size:12px;font-weight:600;color:#475569;display:block;margin-bottom:3px">温度</label>
+          <input class="lc-inp" id="leTemp" type="number" min="0" max="2" step="0.1" value="0.5">
+        </div>
+      </div>
+      <div id="leTestResult" style="display:none;font-size:12px;padding:8px 10px;border-radius:6px;line-height:1.6"></div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+      <button class="lc-btn lc-btn-outline" onclick="closeLlmEndpointForm()">取消</button>
+      <button class="lc-btn lc-btn-outline" id="leTestBtn" onclick="testLlmEndpointForm()">🔍 测试连接</button>
+      <button class="lc-btn lc-btn-primary" onclick="submitLlmEndpointForm()">✅ 保存</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

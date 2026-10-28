@@ -7,10 +7,12 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, WebSocket, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, WebSocket, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.routing import APIRoute
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.staticfiles import StaticFiles
 from langchain_core._api import LangChainBetaWarning
 from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
@@ -35,6 +37,13 @@ from schema import (
     StreamInput,
     UserInput,
 )
+from service.admin_routes import router as admin_router
+from service.auth import HOST_COOKIE, get_user_from_token, init_auth_db
+from service.auth_middleware import JWTAuthMiddleware
+from service.viewer_auth import init_viewer_db
+from service.auth_routes import get_current_user, router as auth_router
+from service.upload_routes import router as upload_router, UPLOADS_DIR
+from service.product_image_routes import router as product_image_router
 from service.utils import (
     convert_message_content_to_string,
     langchain_to_chat_message,
@@ -70,6 +79,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     and agents with async loading - for example for starting up MCP clients.
     """
     try:
+        # Initialize auth database (users, tokens)
+        init_auth_db()
+
+        # Initialize viewer (audience) account database — separate from auth.db
+        init_viewer_db()
+
         # Initialize both checkpointer (for short-term memory) and store (for long-term memory)
         async with initialize_database() as saver, initialize_store() as store:
             # Set up both components
@@ -100,6 +115,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 agent.checkpointer = saver
                 # Set store for long-term memory (cross-conversation knowledge)
                 agent.store = store
+            # Initialize Live Commerce data
+            try:
+                from data.live_commerce.data_manager import get_data_manager
+                dm = get_data_manager()
+                if not dm.products:
+                    dm.generate_mock_data()
+                    logger.info("Live Commerce 模拟数据已初始化")
+                else:
+                    # 每次启动都刷新弹幕/评价/会话等模拟数据（页面数据才真实）
+                    dm.generate_mock_data()
+                    logger.info("Live Commerce 数据已刷新")
+            except Exception as e:
+                logger.error(f"Live Commerce 数据管理器初始化失败: {e}")
+            except Exception as e:
+                logger.error(f"Live Commerce 数据管理器初始化失败: {e}")
             yield
     except Exception as e:
         logger.error(f"Error during database/store/agents initialization: {e}")
@@ -107,6 +137,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(lifespan=lifespan, generate_unique_id_function=custom_generate_unique_id)
+
+# 全局 JWT 校验中间件。先注册它、再注册 CORS —— Starlette 后注册的中间件在最外层，
+# 这样 401/403 响应也会带上 CORS 头，跨域前端才能读到具体错误。
+app.add_middleware(JWTAuthMiddleware)
+
+# CORS middleware - allow Streamlit frontend and other origins
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 router = APIRouter(dependencies=[Depends(verify_bearer)])
 
 
@@ -434,17 +478,121 @@ async def health_check():
     return health_status
 
 
-app.include_router(router)
+@app.get("/")
+async def root():
+    """Root endpoint — redirects to API docs."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/docs")
 
-# ── Live Commerce WebSocket 基础入口 ──
-# Round 1 只负责建立连接、心跳与错误回包；业务消息在后续迭代中扩展。
+
+# 注册 WebSocket 端点
 try:
     from service.live_commerce_ws import live_commerce_ws_handler
-
     @app.websocket("/ws/live-commerce")
     async def lc_websocket_endpoint(websocket: WebSocket):
         await live_commerce_ws_handler(websocket)
-
-    logger.info("Live Commerce WebSocket 端点已注册: /ws/live-commerce")
-except Exception as e:  # pragma: no cover - 启动期保护
+    logger.info("Live Commerce WebSocket 端点已注册")
+except Exception as e:
     logger.error(f"Live Commerce WebSocket 端点注册失败: {e}")
+
+# 注册静态文件服务（前端页面）
+import os
+
+# 观众端 · 直播间 H5 —— 独立目录 src/viewer，与运营台**不再共用目录**，
+# 可整目录拷到 nginx/OSS/CDN 单独部署：后端地址由页面内的 LC_API 配置，
+# 同源时留空即可（见 src/viewer/index.html 顶部注释）。本地仍由本服务托管。
+#
+# 【注册顺序】这一整块必须早于下面的 /live-commerce mount：Starlette 按注册顺序
+# 取首个匹配，而 Mount 会吃掉 /live-commerce/ 之后的全部路径（下面那条旧地址
+# 跳转就是被它吃掉的反例）。
+from fastapi.responses import HTMLResponse, RedirectResponse
+viewer_dir = os.path.join(os.path.dirname(__file__), "..", "viewer")
+viewer_file = os.path.join(viewer_dir, "index.html")
+if os.path.exists(viewer_file):
+    @app.get("/viewer", response_class=HTMLResponse)
+    async def viewer_page():
+        # 每次请求都从磁盘读：改完 HTML 刷新浏览器即可生效，不必重启服务
+        with open(viewer_file, "r", encoding="utf-8") as f:
+            return f.read()
+    logger.info("观众端路由: /viewer")
+
+    # 旧地址 /live-commerce/viewer.html 随文件搬走而失效，跳转一下免得老书签 404。
+    # 注册晚了它就是死代码：请求会落到 StaticFiles 上，文件已不在，答 404。
+    @app.get("/live-commerce/viewer.html")
+    async def viewer_legacy_redirect():
+        return RedirectResponse(url="/viewer")
+else:
+    logger.warning(f"观众端目录不存在: {viewer_dir}")
+
+# 运营台静态资源（viewer.html 已移出本目录，其余不动）
+live_commerce_dir = os.path.join(os.path.dirname(__file__), "..", "live_commerce")
+if os.path.exists(live_commerce_dir):
+
+    # ── 运营台首页闸门 ──
+    # 【注册顺序】必须早于下面的 mount：Starlette 按注册顺序取首个匹配，而
+    # StaticFiles(html=True) 会把 /live-commerce/ 直接映射成 index.html。抢在它
+    # 前面注册，未登录才是 302 去登录页；否则是"整页控制台先发下去、再由前端 JS
+    # 跳登录"—— curl 不带任何凭证就能把整个运营台拿走。
+    live_commerce_index = os.path.join(live_commerce_dir, "index.html")
+    if os.path.exists(live_commerce_index):
+
+        async def host_console_user(request: Request) -> dict | None:
+            """认出访问运营台的人。先看闸门 cookie（浏览器地址栏导航带不了
+            Authorization 头，只能靠它），再看 Authorization 头（方便 curl /
+            脚本）。认不出返回 None。"""
+            token = request.cookies.get(HOST_COOKIE, "")
+            if not token:
+                header = request.headers.get("authorization", "")
+                if header[:7].lower() == "bearer ":
+                    token = header[7:].strip()
+            if not token:
+                return None
+            return await get_user_from_token(token)
+
+        @app.get("/logout")
+        async def host_logout():
+            """退出运营台：清掉闸门 cookie 再回登录页。前端 localStorage 里的
+            token 由页面自己清（见 index.html 的 doLogout）。"""
+            resp = RedirectResponse(url="/login", status_code=302)
+            resp.delete_cookie(HOST_COOKIE, path="/")
+            return resp
+
+        @app.get("/live-commerce/", response_class=HTMLResponse)
+        @app.get("/live-commerce/index.html", response_class=HTMLResponse)
+        async def host_console_page(request: Request):
+            """登录才发控制台，否则一律先去登录页。"""
+            if not await host_console_user(request):
+                return RedirectResponse(url="/login", status_code=302)
+            # 每次请求都从磁盘读：改完 HTML 刷新浏览器即可生效，不必重启服务
+            with open(live_commerce_index, "r", encoding="utf-8") as f:
+                return f.read()
+
+        logger.info("运营台首页闸门已启用: /live-commerce/ 需登录，退出走 /logout")
+
+    app.mount("/live-commerce", StaticFiles(directory=live_commerce_dir, html=True), name="live_commerce")
+    logger.info(f"Live Commerce 前端已挂载: {live_commerce_dir}")
+
+    # 添加独立登录页路由（避免静态文件缓存或路径问题）
+    login_file = os.path.join(live_commerce_dir, "login.html")
+    if os.path.exists(login_file):
+        @app.get("/login", response_class=HTMLResponse)
+        async def login_page():
+            with open(login_file, "r", encoding="utf-8") as f:
+                return f.read()
+        logger.info("登录页面路由: /login")
+else:
+    logger.warning(f"Live Commerce 前端目录不存在: {live_commerce_dir}")
+
+# 头像上传：读写目录 + 静态访问 /uploads/<file>（POST 走 /api/avatar/upload）
+try:
+    os.makedirs(UPLOADS_DIR, exist_ok=True)
+    app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+    logger.info(f"头像上传目录已就绪: {UPLOADS_DIR}  → /uploads")
+except Exception as e:
+    logger.warning(f"头像上传目录初始化失败: {e}")
+
+app.include_router(auth_router)
+app.include_router(admin_router)
+app.include_router(upload_router)
+app.include_router(product_image_router)
+app.include_router(router)
