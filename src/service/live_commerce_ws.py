@@ -37,6 +37,8 @@ _VIEWER_ALLOWED: frozenset = frozenset({
     # 注意：get_stats 不在此列 —— 它含 AI 回复量、意图分、私信量等运营指标，
     # 属于主播侧数据；观众端只通过 init_state 拿 liveStatus，不需要这份统计。
     "get_products", "get_product_detail", "get_reviews", "get_product_reviews",
+    # 弹幕历史：新观众中途进入时拉取本场最近 20 条（公开数据）
+    "get_danmaku_history",
     # 账号：游客也需要能注册/登录
     "viewer_login", "viewer_register", "viewer_logout",
     # 需登录的操作：handler 内用服务端绑定身份二次校验，未登录回 viewer_auth_required
@@ -110,6 +112,10 @@ def _viewer_safe_current(dm, role: str):
     if role != "host" and not cur.isOnSale:
         return None
     return cur.model_dump()
+
+
+# 主播发言在弹幕流里使用的固定 userId（与 DataManager 的既有约定一致）
+HOST_DANMAKU_USER_ID = "host_001"
 
 
 # 观众可见的直播状态字段。DataManager.get_live_status() 里还带着 totalDanmaku /
@@ -406,6 +412,8 @@ class LiveCommerceWebSocketManager:
                 "products": _products_payload(dm, on_sale_only=(role != "host")),
                 "hostProfile": dm.get_host_profile(),
                 "allDanmaku": [d.model_dump() for d in dm.get_danmaku_list(100)],
+                # 置顶弹幕是公开信息：主播和观众都要看到同一条置顶
+                "pinnedDanmaku": dm.get_pinned_danmaku(),
             }
             if role == "host":
                 payload.update({
@@ -514,6 +522,13 @@ class LiveCommerceWebSocketManager:
             payload = msg
         else:
             payload = {k: v for k, v in msg.items() if k not in ("_toUser", "_hostOnly")}
+        # 弹幕广播补上比赛文档里的扁平字段 sender / role（与原 userName / userId 并存）。
+        # 角色取自弹幕本身的 userId，不采信发送方自报，伪造不了。
+        if to_user is None and not host_only and msg.get("type") == "new_danmaku":
+            d = dict(payload.get("data") or {})
+            d["sender"] = d.get("userName", "")
+            d["role"] = "host" if d.get("userId") == HOST_DANMAKU_USER_ID else "viewer"
+            payload = {**payload, "data": d}
         # 观众版的同一事件：只对公开广播且类型在裁剪清单里时生成一次，循环里复用。
         viewer_payload = None
         if to_user is None and not host_only and msg.get("type") in _VIEWER_TRIMMED_EVENTS:
@@ -654,6 +669,14 @@ class LiveCommerceWebSocketManager:
             msg_data = data.get("data", {})
             dm = self._data_manager
 
+            # 扁平弹幕结构兼容：{"type":"danmaku","content":"..","sender":"..","role":"viewer"}
+            # 归一到内部 send_danmaku 处理。注意 sender / role 只是展示字段 ——
+            # 真实身份仍由握手凭据决定，客户端改这两个字段伪造不了身份。
+            if msg_type == "danmaku":
+                flat = {k: v for k, v in data.items() if k not in ("type", "data")}
+                msg_data = {**flat, **msg_data}
+                msg_type = "send_danmaku"
+
             # 角色闸门（fail-closed）：未列入观众白名单的消息类型一律要求 host。
             # 新增消息类型若忘记归类，默认是「观众不可调用」，而不是默认放开。
             if self._roles.get(websocket) != "host" and msg_type not in _VIEWER_ALLOWED:
@@ -768,13 +791,30 @@ class LiveCommerceWebSocketManager:
                 history = dm.get_scripts_history()
                 await self._send(websocket, "get_scripts_history_result", {"history": history})
 
+            elif msg_type == "get_danmaku_history":
+                # 新观众进入直播间拉取本场历史弹幕（最近 20 条）+ 当前置顶
+                history = dm.get_danmaku_history(msg_data.get("limit", 20))
+                await self._send(websocket, "danmaku_history", {
+                    "history": [d.model_dump() for d in history],
+                    "pinned": dm.get_pinned_danmaku(),
+                })
+
+            elif msg_type == "pin_danmaku":
+                # 主播专用（不在 _VIEWER_ALLOWED，观众发这条会被角色闸门拦下）
+                result = dm.pin_danmaku(msg_data.get("danmakuId", ""))
+                await self._send(websocket, "pin_danmaku_result", result)
+
+            elif msg_type == "unpin_danmaku":
+                result = dm.unpin_danmaku()
+                await self._send(websocket, "unpin_danmaku_result", result)
+
             elif msg_type == "send_danmaku":
                 content = msg_data.get("content", "")
                 # 身份一律由服务端确定：运营台用主播身份，观众必须是已登录账号。
                 # 旧实现直接采信 msg_data 里的 userId/userName，任何人都能冒名发言。
                 if self._roles.get(websocket) == "host":
                     hp = dm.get_host_profile()
-                    user_id = "host_001"
+                    user_id = HOST_DANMAKU_USER_ID
                     user_name = msg_data.get("userName") or hp.get("hostName") or "主播"
                     avatar = msg_data.get("avatar") or hp.get("hostAvatar") or ""
                 else:

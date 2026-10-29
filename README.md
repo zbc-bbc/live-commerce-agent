@@ -64,8 +64,8 @@ AI Agent 在后台承担话术生成、弹幕意图识别与自动回复、高�
 - **角色由凭据决定，不由客户端自报**：握手时校验 JWT 的 `scope`，`host` → 主播，`viewer` → 观众，
   无 token 且未自称主播 → 游客；带了无效 / 过期 token 或自称 `host` 却无凭据，握手阶段直接拒绝（HTTP 403）。
 - **消息白名单**：观众连接只允许调用 `_VIEWER_ALLOWED` 中列出的消息类型，未列出的类型一律要求主播角色。
-- **按角色裁剪下发的数据**：主播 `init_state` 含 13 个键（统计、设置、敏感词、私信会话、告警等），
-  观众只拿 6 个公开键（`role` / `liveStatus` / `currentProduct` / `products` / `hostProfile` / `allDanmaku`）；
+- **按角色裁剪下发的数据**：主播 `init_state` 含 14 个键（统计、设置、敏感词、私信会话、告警等），
+  观众只拿 7 个公开键（`role` / `liveStatus` / `currentProduct` / `products` / `hostProfile` / `allDanmaku` / `pinnedDanmaku`）；
   观众侧商品列表**只含已上架商品**，运营指标（AI 回复量、意图分、私信量）不下发。
 - **推送事件同样按角色裁剪**：`status_update` 剥掉 `totalAIReplies` / `totalPrivateMessages` / `totalDanmaku`；
   `live_started` 内嵌状态同样裁剪；`live_ended`（含复盘报告）只给观众 `endTime` / `duration`；
@@ -323,8 +323,8 @@ ws://<HOST>:<PORT>/ws/live-commerce?role=viewer           # 游客（仅公开�
 
 | 连接方式 | 判定角色 | `init_state` 内容 |
 | --- | --- | --- |
-| `?token=<host JWT>` | `host` | 13 个键：统计、设置、敏感词、私信会话、告警等，商品含已下架 |
-| `?token=<viewer JWT>` | `viewer` | 6 个键，仅公开数据；商品列表只含已上架 |
+| `?token=<host JWT>` | `host` | 14 个键：统计、设置、敏感词、私信会话、告警等，商品含已下架 |
+| `?token=<viewer JWT>` | `viewer` | 7 个键，仅公开数据；商品列表只含已上架 |
 | 无 token / `?role=viewer` | 游客 `viewer` | 同 viewer，无账号绑定 |
 | 无效 / 过期 token | — | 握手被拒（HTTP 403） |
 | 自称 `?role=host` 但无 token | — | 握手被拒（HTTP 403） |
@@ -354,9 +354,9 @@ asyncio.run(main("把上一步的 access_token 粘到这里"))
 
 ```text
 # 主播 token
-role: host keys: 13 products: 14 liveStatus: ['currentStage','liveDuration','onlineCount','startTime','status','totalAIReplies','totalDanmaku','totalPrivateMessages']
+role: host keys: 14 products: 14 liveStatus: ['currentStage','liveDuration','onlineCount','startTime','status','totalAIReplies','totalDanmaku','totalPrivateMessages']
 # 观众/游客
-role: viewer keys: 6 products: 14 liveStatus: ['currentStage','liveDuration','onlineCount','startTime','status']
+role: viewer keys: 7 products: 14 liveStatus: ['currentStage','liveDuration','onlineCount','startTime','status']
 ```
 
 `totalAIReplies` / `totalPrivateMessages` / `totalDanmaku` 只出现在主播侧；观众侧商品列表只含已上架商品。
@@ -368,6 +368,44 @@ role: viewer keys: 6 products: 14 liveStatus: ['currentStage','liveDuration','on
 
 发送未知类型消息返回 `{"type":"error","data":{"message":"未知消息类型: xxx"},...}`。
 
+
+### 7. 弹幕收发与历史缓存
+
+**发送**（观众 / 主播，扁平结构，字段与比赛文档一致）：
+
+```json
+{"type":"danmaku","content":"弹幕文本","sender":"用户名","role":"viewer"}
+```
+
+- `sender` / `role` 只是展示字段，**服务端一律以握手凭据为准**，伪造无效；
+- 内部结构 `{"type":"send_danmaku","data":{"content":"..."}}` 同样可用；
+- 发送成功回 `send_danmaku_result`（含落库后的弹幕对象）。
+
+**广播**：服务端把新弹幕推给直播间**全部在线连接**（主播 + 全部观众）：
+
+```json
+{"type":"new_danmaku","data":{"danmakuId":"dm_ws_...","content":"...","sender":"用户名","role":"viewer", "...":"..."},"timestamp":"..."}
+```
+
+**历史缓存**（中途进入的观众拉取本场最近 20 条）：
+
+```json
+{"type":"get_danmaku_history","data":{"limit":20}}
+→ {"type":"danmaku_history","data":{"history":[...],"pinned":{...}}}
+```
+
+- 开播（`start_live`）时清空，之后滚动保留最近 **20** 条；`limit` 上限也是 20；
+- 新连接还会在 `init_state.allDanmaku` 里拿到最近 100 条，`pinnedDanmaku` 为当前置顶。
+
+**置顶**（仅主播）：
+
+```json
+{"type":"pin_danmaku","data":{"danmakuId":"dm_ws_..."}}     → pin_danmaku_result
+{"type":"unpin_danmaku","data":{}}                          → unpin_danmaku_result
+```
+
+置顶/取消都会向主播与观众广播 `danmaku_pinned`：`{"pinned":true,"danmakuId":"...","danmaku":{...}}`。
+观众调用 `pin_danmaku` 会被角色闸门拒绝：`{"type":"error","data":{"code":"forbidden","message":"无权调用: pin_danmaku"}}`。
 
 ### 常见问题
 
@@ -410,7 +448,8 @@ commit message 统一为 `<type>(<scope>): <中文摘要>`，`scope` 对应模�
 | 第 3 轮 | `ed5adab` | 2026-10-29 | `product` | 商品数据模型与校验、主播商品管理接口（增改 / 上下架）、上下架状态 WebSocket 广播、观众端仅下发已上架商品 |
 | 第 4 轮 | `0b11a79` | 2026-10-29 | `live` | 直播电商 AI Agent（话术 / 回复 / 摘要）、弹幕与私信、订单与充值、AI 端点管理、商品图生成、上传、运营台 9 页前端与观众端 H5 |
 | 第 5 轮 | `4227ee1` | 2026-10-29 | `docs` | 复现文档：环境、依赖、变量模板、启动与接口验证、迭代记录 |
-| 第 6 轮 | 本次提交 | 2026-10-29 | `auth` | 角色不符统一返回 401；观众侧推送事件裁剪（`status_update` 运营指标、`live_ended` 复盘报告、`stage_changed` 策略话术）；补齐观众注册 / 登录接口与鉴权自测矩阵 |
+| 第 6 轮 | `f3d54ea` | 2026-10-29 | `auth` | 角色不符统一返回 401；观众侧推送事件裁剪（`status_update` 运营指标、`live_ended` 复盘报告、`stage_changed` 策略话术）；补齐观众注册 / 登录接口与鉴权自测矩阵 |
+| 第 7 轮 | 本次提交 | 2026-10-29 | `danmaku` | 弹幕收发与全房间广播、扁平消息结构兼容（`type=danmaku`）、本场最近 20 条历史缓存与 `get_danmaku_history` 拉取、主播置顶 / 取消置顶（`pin_danmaku` / `unpin_danmaku`） |
 
 ### 评审如何核对
 

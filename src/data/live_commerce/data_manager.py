@@ -53,6 +53,9 @@ ALERT_LOW_STOCK_RATIO = 0.2
 # 保留的提示条数上限（内存与落盘一致）。前端只展示最近 20 条，
 # 但原先 append 从不裁剪，进程活得越久内存里堆得越多。
 ALERT_HISTORY_MAX = 50
+
+# 直播间弹幕历史缓冲条数：中途进入的观众最多能拉到最近 20 条本场弹幕。
+DANMAKU_HISTORY_LIMIT = 20
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
 
@@ -335,6 +338,11 @@ class LiveCommerceDataManager:
         # 弹幕数据
         self.danmaku_list: list[DanmakuItem] = []
         self._danmaku_counter = 0
+        # 直播间弹幕历史缓冲：开播时清空，之后滚动保留最近 DANMAKU_HISTORY_LIMIT 条，
+        # 供中途进入的观众拉取（get_danmaku_history / danmaku_history）。
+        self.live_danmaku_history: list[DanmakuItem] = []
+        # 当前置顶弹幕 id（空串表示无置顶）。只在本场直播内有效，开播时清空。
+        self.pinned_danmaku_id: str = ""
         # 私信数据
         self.private_messages: dict[str, list[PrivateMessageItem]] = {}
         self._msg_counter = 0
@@ -1034,6 +1042,7 @@ class LiveCommerceDataManager:
         """
         with self._lock:
             self.danmaku_list.append(danmaku)
+            self._remember_live_danmaku_locked(danmaku)
             self._danmaku_counter += 1
             if is_real_user_id(danmaku.userId) and not danmaku.isViolation:
                 self.live_state.totalDanmaku += 1
@@ -1047,6 +1056,59 @@ class LiveCommerceDataManager:
         """获取最近N条弹幕"""
         with self._lock:
             return list(self.danmaku_list[-count:])
+
+    # ── 本场弹幕历史缓冲（新观众中途进入时拉取）──────────────────────────
+    def _remember_live_danmaku_locked(self, danmaku: DanmakuItem) -> None:
+        """把一条弹幕记入本场历史缓冲（调用方需已持锁）。
+
+        只保留最近 DANMAKU_HISTORY_LIMIT 条：这是「新进直播间能看到什么」，
+        不是审计日志，没必要留全量。
+        """
+        self.live_danmaku_history.append(danmaku)
+        if len(self.live_danmaku_history) > DANMAKU_HISTORY_LIMIT:
+            del self.live_danmaku_history[:-DANMAKU_HISTORY_LIMIT]
+
+    def get_danmaku_history(self, limit: int = DANMAKU_HISTORY_LIMIT) -> list[DanmakuItem]:
+        """拉取本场最近弹幕（默认 20 条，上限也是 20 条）。"""
+        try:
+            n = int(limit)
+        except (TypeError, ValueError):
+            n = DANMAKU_HISTORY_LIMIT
+        n = max(1, min(n, DANMAKU_HISTORY_LIMIT))
+        with self._lock:
+            return list(self.live_danmaku_history[-n:])
+
+    # ── 弹幕置顶（主播操作）──────────────────────────────────────────────
+    def get_pinned_danmaku(self) -> Optional[dict]:
+        """当前置顶弹幕；没有置顶或置顶弹幕已不存在时返回 None。"""
+        with self._lock:
+            if not self.pinned_danmaku_id:
+                return None
+            for d in self.danmaku_list:
+                if d.danmakuId == self.pinned_danmaku_id:
+                    return d.model_dump()
+            return None
+
+    def pin_danmaku(self, danmaku_id: str) -> dict:
+        """置顶一条弹幕并广播给直播间所有在线用户。"""
+        with self._lock:
+            item = next((d for d in self.danmaku_list if d.danmakuId == danmaku_id), None)
+            if item is None:
+                return {"success": False, "message": "弹幕不存在"}
+            self.pinned_danmaku_id = danmaku_id
+            payload = {"pinned": True, "danmakuId": danmaku_id, "danmaku": item.model_dump()}
+        # 广播放在锁外：回调只做入队，但避免持锁期间触碰别的模块
+        self._broadcast("danmaku_pinned", payload)
+        return {"success": True, **payload}
+
+    def unpin_danmaku(self) -> dict:
+        """取消置顶并广播。"""
+        with self._lock:
+            prev = self.pinned_danmaku_id
+            self.pinned_danmaku_id = ""
+        payload = {"pinned": False, "danmakuId": prev, "danmaku": None}
+        self._broadcast("danmaku_pinned", payload)
+        return {"success": True, **payload}
 
     def danmaku_is_real(self, danmaku_id: str) -> bool:
         """这条弹幕是否来自真实观众（找不到该弹幕时返回 False）。
@@ -2032,6 +2094,9 @@ class LiveCommerceDataManager:
             self.high_freq_questions = {}
             self.virtual_freq_questions = {}
             self.violation_log.clear()
+            # 弹幕历史缓冲与置顶属于「本场」：开播即新会话边界
+            self.live_danmaku_history.clear()
+            self.pinned_danmaku_id = ""
             # 重置本场真实信号
             self._session_real_users = set()
             self._online_peak = 0
@@ -2293,6 +2358,9 @@ class LiveCommerceDataManager:
                 isReplied=False,
             )
             self.danmaku_list.append(danmaku)
+            # 虚拟弹幕同样会广播给在线观众，因此也计入本场历史缓冲，
+            # 否则中途进来的观众看到的「历史」会缺掉屏幕上刚刷过的那几条。
+            self._remember_live_danmaku_locked(danmaku)
             # 不再累加 totalDanmaku / stats.virtualDanmakuCount：
             # 前者是「真实弹幕数」口径，后者由 _recompute_real_stats_locked
             # 从列表直接数出来，两处都改由单一来源产出，避免重复计数。
