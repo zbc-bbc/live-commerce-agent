@@ -1,231 +1,235 @@
-# 🧰 AI Agent Service Toolkit
+# 直播带货管理平台 - Live Commerce Platform
 
-[![build status](https://github.com/JoshuaC215/agent-service-toolkit/actions/workflows/test.yml/badge.svg)](https://github.com/JoshuaC215/agent-service-toolkit/actions/workflows/test.yml) [![codecov](https://codecov.io/github/JoshuaC215/agent-service-toolkit/graph/badge.svg?token=5MTJSYWD05)](https://codecov.io/github/JoshuaC215/agent-service-toolkit) [![Python Version](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2FJoshuaC215%2Fagent-service-toolkit%2Frefs%2Fheads%2Fmain%2Fpyproject.toml)](https://github.com/JoshuaC215/agent-service-toolkit/blob/main/pyproject.toml)
-[![GitHub License](https://img.shields.io/github/license/JoshuaC215/agent-service-toolkit)](https://github.com/JoshuaC215/agent-service-toolkit/blob/main/LICENSE) [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_red.svg)](https://agent-service-toolkit.streamlit.app/)
+基于 Agent Service Toolkit（LangGraph + FastAPI + Streamlit）构建的 B2B 直播带货管理系统。
 
-A full toolkit for running an AI agent service built with LangGraph, FastAPI and Streamlit.
+## 项目架构
 
-It includes a [LangGraph](https://langchain-ai.github.io/langgraph/) agent, a [FastAPI](https://fastapi.tiangolo.com/) service to serve it, a client to interact with the service, and a [Streamlit](https://streamlit.io/) app that uses the client to provide a chat interface. Data structures and settings are built with [Pydantic](https://github.com/pydantic/pydantic).
+```
+┌───────────────────────────────────────────────┐
+│                 用户访问层                      │
+│  浏览器 (HTML看板)    Streamlit (中控台)       │
+└──────────┬───────────────────────┬────────────┘
+     WebSocket                    HTTP/SSE
+┌──────────▼───────────────────────▼────────────┐
+│              FastAPI 服务层                    │
+│  ┌──────────────┐ ┌──────────┐ ┌───────────┐  │
+│  │ WebSocket    │ │ Agent API│ │ Auth API  │  │
+│  │ /ws/live-    │ │ /agent/  │ │ /auth/    │  │
+│  │ commerce     │ │          │ │           │  │
+│  └──────┬───────┘ └────┬─────┘ └─────┬─────┘  │
+└─────────┼──────────────┼──────────────┼────────┘
+          │              │              │
+┌─────────▼──────────────▼──────────────▼────────┐
+│            数据管理层 (DataManager)              │
+│ 产品/弹幕/私信/会话/话术/黑名单/评价/统计      │
+└────────────────────┬───────────────────────────┘
+                     │
+┌────────────────────▼───────────────────────────┐
+│             持久化层 (JSON / SQLite)             │
+│  products / danmaku / settings / sessions       │
+└────────────────────────────────────────────────┘
+```
 
-This project offers a template for you to easily build and run your own agents using the LangGraph framework. It demonstrates a complete setup from agent definition to user interface, making it easier to get started with LangGraph-based projects by providing a full, robust toolkit.
+## 功能模块
 
-**[🎥 Watch a video walkthrough of the repo and app](https://www.youtube.com/watch?v=pdYVHw_YCNY)**
+### 1. 直播电商 Agent
+- LangGraph StateGraph 驱动，10 个工具函数
+- 商品搜索、详情查询、优惠计算、库存检查、推荐、日志、报告
 
-## Overview
+### 2. Streamlit 场控中控台
+- 商品卡片切换 / 弹幕互动 / 场控面板
+- 5 阶段直播导航（暖场→产品介绍→促销逼单→答疑互动→收尾总结）
+- 弹幕意图识别 + 异议安抚话术自动生成
+- AI 话术生成器 / 直播复盘报告
 
-### [Try the app!](https://agent-service-toolkit.streamlit.app/)
+### 3. 独立 HTML 后台看板
+- 直播控制台 / 弹幕与 AI 问答 / 商品数据分析
+- 用户评价管理 / 直播复盘报告 / 系统设置
+- ECharts 数据可视化（弹幕趋势、观众画像、高频问题）
 
-<a href="https://agent-service-toolkit.streamlit.app/"><img src="media/app_screenshot.png" width="600"></a>
+### 4. 实时 WebSocket 通信
+- 40+ 消息类型：直播控制、商品管理、弹幕互动、私信、统计等
+- 每 5 秒自动推送统计数据
 
-### Quickstart
+### 5. 用户认证系统
+- JWT Token 认证
+- 用户注册 / 登录 / Token 刷新 / 退出
+- 管理员角色权限
 
-Run directly in python
+## 项目依赖
 
-```sh
-# At least one LLM API key is required
-echo 'OPENAI_API_KEY=your_openai_api_key' >> .env
+- Python >= 3.12, < 3.15
+- FastAPI ~= 0.138.2（Web 框架）
+- Uvicorn（ASGI 服务器）
+- Streamlit ~= 1.58.0（前端界面）
+- LangGraph ~= 1.2.7（AI Agent 框架）
+- LangChain ~= 1.3.11
+- Pydantic v2（数据模型）
+- SQLite / aiosqlite（数据库）
+- python-jose + passlib（JWT 认证）
+- httpx ~= 0.28.1（HTTP 客户端）
+- python-dotenv（环境配置）
+- ECharts（前端图表，已内置）
 
-# uv is the recommended way to install agent-service-toolkit, but "pip install ." also works
-# For uv installation options, see: https://docs.astral.sh/uv/getting-started/installation/
-curl -LsSf https://astral.sh/uv/0.11.26/install.sh | sh
+完整依赖见 `pyproject.toml`
 
-# Install dependencies. "uv sync" creates .venv automatically
+## 快速启动
+
+### 1. 环境准备
+```bash
+# 安装 Python 3.12+
+# 推荐使用 uv 或 pip
+```
+
+### 2. 配置环境变量
+```bash
+# 复制环境变量模板
+cp .env.example .env
+# 编辑 .env，至少配置一个 LLM API Key
+# 例如 DeepSeek（本项目默认）：
+#   DEEPSEEK_API_KEY=你的密钥
+#   DEFAULT_MODEL=deepseek-chat
+```
+
+> 这一份 `.env` 配置只是**兜底**。运营台登录后可在「直播系统设置 → 🔌 大模型接入端口」
+> 里增删多个 OpenAI 兼容端口（DeepSeek / 通义 / 智谱 / 硅基流动 / Kimi / 本地 Ollama、vLLM…），
+> 并指定其中一个为**当前启用**。AI 的文字功能（话术生成、弹幕/私信自动回复、弹幕总结）
+> 都走当前启用的端口；一个都不配时回退到上面的 `.env` 默认模型。API Key 只存在服务端
+> （`src/data/live_commerce/data/llm_endpoints.json`），页面上只显示掩码 `sk-1***cd12`。
+
+### 3. 安装依赖
+```bash
+# 使用 uv（推荐）
 uv sync --frozen
-source .venv/bin/activate
+
+# 或使用 pip
+pip install -e .
+```
+
+### 4. 启动服务
+
+**方式一：直接运行（开发）**
+```bash
+# 终端 1：启动后端 API 服务（端口 8085）
 python src/run_service.py
 
-# In another shell
-source .venv/bin/activate
+# 终端 2：启动前端页面（端口 8501）
 streamlit run src/streamlit_app.py
 ```
 
-Run with docker
-
-```sh
-echo 'OPENAI_API_KEY=your_openai_api_key' >> .env
+**方式二：Docker 部署**
+```bash
 docker compose watch
 ```
 
-### Architecture Diagram
+### 5. 访问服务
 
-<img src="media/agent_architecture.png" width="600">
+| 服务 | 地址 |
+|------|------|
+| Streamlit 前端 | http://localhost:8501 |
+| 独立 HTML 看板（主播/运营台） | http://localhost:8085/live-commerce/ |
+| 登录页面 | http://localhost:8085/live-commerce/login.html |
+| 观众端 · 直播间 H5 | http://localhost:8085/viewer |
+| API 文档 | http://localhost:8085/docs |
+| API 健康检查 | http://localhost:8085/health |
 
-### Key Features
+### 6. 使用流程
 
-1. **LangGraph Agent and latest features**: A customizable agent built using the LangGraph framework. Implements the latest LangGraph v1.0 features including human in the loop with `interrupt()`, flow control with `Command`, long-term memory with `Store`, and `langgraph-supervisor`.
-1. **FastAPI Service**: Serves the agent with both streaming and non-streaming endpoints.
-1. **Advanced Streaming**: A novel approach to support both token-based and message-based streaming.
-1. **Streamlit Interface**: Provides a user-friendly chat interface for interacting with the agent, including voice input and output.
-1. **Multiple Agent Support**: Run multiple agents in the service and call by URL path. Available agents and models are described in `/info`
-1. **Asynchronous Design**: Utilizes async/await for efficient handling of concurrent requests.
-1. **Content Moderation**: Implements Safeguard for content moderation (requires Groq API key).
-1. **RAG Agent**: A basic RAG agent implementation using ChromaDB - see [docs](docs/RAG_Assistant.md).
-1. **Feedback Mechanism**: Includes a star-based feedback system integrated with LangSmith.
-1. **Docker Support**: Includes Dockerfiles and a docker compose file for easy development and deployment.
-1. **Testing**: Includes robust unit and integration tests for the full repo.
+1. 打开 Streamlit 前端 → 注册账号 → 选择「直播助手」
+2. 左侧下拉框选择商品 → 点击「开始直播」
+3. 输入弹幕或点击预设按钮 → AI 自动回复
+4. 使用场控面板进行阶段切换 / 促销 / 复盘
+5. 或访问独立 HTML 看板体验完整功能
 
-### Key Files
+### 7. 观众端单独部署
 
-The repository is structured as follows:
+观众端（`src/viewer/index.html`）与主播运营台**不共用目录、可分开部署**：把整个 `src/viewer/` 目录拷到
+nginx / OSS / CDN 等静态托管即可，运营台可以留在内网，两者只共享后端（WebSocket + HTTP API）。
 
-- `src/agents/`: Defines several agents with different capabilities
-- `src/schema/`: Defines the protocol schema
-- `src/core/`: Core modules including LLM definition and settings
-- `src/service/service.py`: FastAPI service to serve the agents
-- `src/client/client.py`: Client to interact with the agent service
-- `src/streamlit_app.py`: Streamlit app providing a chat interface
-- `tests/`: Unit and integration tests
+该页面是**单个自包含 HTML**：CSS/JS 全内联，无外链样式、字体、图片和第三方脚本，商品图是 `data:` URI。
+所以它没有构建步骤，直接拷文件就行。
 
-## Setup and Usage
+**配置后端地址**（页面顶部 `window.LC_API`，只有这一处要改）——两种方式，任选其一：
 
-1. Clone the repository:
+1. 把 `window.LC_API = ''` 改成后端地址，例如 `'https://api.example.com'`
+2. 页面地址后带查询参数（**优先于**上面的常量）：`https://cdn.example.com/lc-viewer/?api=https://api.example.com`
+   —— 适合同一份静态文件同时连测试/生产两套后端
 
-   ```sh
-   git clone https://github.com/JoshuaC215/agent-service-toolkit.git
-   cd agent-service-toolkit
-   ```
+留空 `''` 表示与页面同源。本地开发走这一条：页面由同一个服务在 `/viewer` 托管，行为与拆分前一致。
 
-2. Set up environment variables:
-   Create a `.env` file in the root directory. At least one LLM API key or configuration is required. See the [`.env.example` file](./.env.example) for a full list of available environment variables, including a variety of model provider API keys, header-based authentication, LangSmith tracing, testing and development modes, and OpenWeatherMap API key.
+注意：
 
-3. You can now run the agent service and the Streamlit app locally, either with Docker or just using Python. The Docker setup is recommended for simpler environment setup and immediate reloading of the services when you make changes to your code.
+- 地址请写成「协议 + 主机 [+ 端口] [+ 可选路径前缀]」，**不要带结尾斜杠**；只填裸域名（如 `192.168.1.9:8085`）会自动补当前页面的协议。
+- **HTTPS 页面只能连 https/wss 后端**，否则浏览器会拦混合内容。
+- 页面必须经 `http(s)` 打开；直接双击本地文件（`file://`）连不上后端。
+- 改了页面里的地址后，如果 CDN 有缓存要**刷一下缓存**，否则会看到"配置没生效"。
+- `/viewer` 没有结尾斜杠的那个 URL 是正规入口（可直接用）；带斜杠的 `/viewer/` 会 307 跳回 `/viewer`，属正常。
+- 跨域上传头像依赖后端已有的 CORS 配置（`allow_origins=["*"]`），无需额外设置。
 
-### Additional setup for specific AI providers
-
-- [Setting up Ollama](docs/Ollama.md)
-- [Setting up VertexAI](docs/VertexAI.md)
-- [Setting up RAG with ChromaDB](docs/RAG_Assistant.md)
-
-### Building or customizing your own agent
-
-To customize the agent for your own use case:
-
-1. Add your new agent to the `src/agents` directory. You can copy `research_assistant.py` or `chatbot.py` and modify it to change the agent's behavior and tools.
-1. Import and add your new agent to the `agents` dictionary in `src/agents/agents.py`. Your agent can be called by `/<your_agent_name>/invoke` or `/<your_agent_name>/stream`.
-1. Adjust the Streamlit interface in `src/streamlit_app.py` to match your agent's capabilities.
-
-
-### Handling Private Credential files
-
-If your agents or chosen LLM require file-based credential files or certificates, the `privatecredentials/` has been provided for your development convenience. All contents, excluding the `.gitkeep` files, are ignored by git and docker's build process. See [Working with File-based Credentials](docs/File_Based_Credentials.md) for suggested use.
-
-
-### Docker Setup
-
-This project includes a Docker setup for easy development and deployment. The `compose.yaml` file defines three services: `postgres`, `agent_service` and `streamlit_app`. The `Dockerfile` for each service is in their respective directories.
-
-For local development, we recommend using [docker compose watch](https://docs.docker.com/compose/file-watch/). This feature allows for a smoother development experience by automatically updating your containers when changes are detected in your source code.
-
-1. Make sure you have Docker and Docker Compose (>= [v2.23.0](https://docs.docker.com/compose/release-notes/#2230)) installed on your system.
-
-2. Create a `.env` file from the `.env.example`. At minimum, you need to provide an LLM API key (e.g., OPENAI_API_KEY).
-   ```sh
-   cp .env.example .env
-   # Edit .env to add your API keys
-   ```
-
-3. Build and launch the services in watch mode:
-
-   ```sh
-   docker compose watch
-   ```
-
-   This will automatically:
-   - Start a PostgreSQL database service that the agent service connects to
-   - Start the agent service with FastAPI
-   - Start the Streamlit app for the user interface
-
-4. The services will now automatically update when you make changes to your code:
-   - Changes in the relevant python files and directories will trigger updates for the relevant services.
-   - NOTE: If you make changes to the `pyproject.toml` or `uv.lock` files, you will need to rebuild the services by running `docker compose up --build`.
-
-5. Access the Streamlit app by navigating to `http://localhost:8501` in your web browser.
-
-6. The agent service API will be available at `http://0.0.0.0:8080`. You can also use the OpenAPI docs at `http://0.0.0.0:8080/redoc`.
-
-7. Use `docker compose down` to stop the services.
-
-This setup allows you to develop and test your changes in real-time without manually restarting the services.
-
-### Building other apps on the AgentClient
-
-The repo includes a generic `src/client/client.AgentClient` that can be used to interact with the agent service. This client is designed to be flexible and can be used to build other apps on top of the agent. It supports both synchronous and asynchronous invocations, and streaming and non-streaming requests.
-
-See the `src/run_client.py` file for full examples of how to use the `AgentClient`. A quick example:
-
-```python
-from client import AgentClient
-client = AgentClient()
-
-response = client.invoke("Tell me a brief joke?")
-response.pretty_print()
-# ================================== Ai Message ==================================
-#
-# A man walked into a library and asked the librarian, "Do you have any books on Pavlov's dogs and Schrödinger's cat?"
-# The librarian replied, "It rings a bell, but I'm not sure if it's here or not."
+## 项目文件结构
 
 ```
+├── src/
+│   ├── run_service.py              # 服务启动入口
+│   ├── streamlit_app.py            # Streamlit 前端（含直播中控台）
+│   ├── agents/
+│   │   ├── live_commerce_agent/    # 直播电商 Agent
+│   │   │   ├── __init__.py
+│   │   │   ├── live_commerce_agent.py
+│   │   │   └── tools.py            # 10 个工具函数
+│   │   └── agents.py               # Agent 注册中心
+│   ├── data/
+│   │   └── live_commerce/          # 直播电商数据层
+│   │       ├── __init__.py
+│   │       ├── data_manager.py     # 核心业务逻辑（1654 行）
+│   │       ├── products.py         # 12 个模拟商品
+│   │       ├── danmaku.py          # 弹幕模板
+│   │       └── data/               # JSON 持久化数据
+│   ├── schema/
+│   │   ├── live_commerce_schema.py # 直播电商数据模型
+│   │   └── auth_schema.py          # 认证数据模型
+│   ├── service/
+│   │   ├── service.py              # FastAPI 主服务
+│   │   ├── live_commerce_ws.py     # WebSocket 处理器
+│   │   ├── auth.py                 # JWT 认证
+│   │   ├── auth_routes.py          # 认证 API
+│   │   ├── admin_routes.py         # 管理员 API
+│   │   └── utils.py                # 工具函数
+│   ├── client/
+│   │   └── client.py               # API 客户端
+│   ├── core/
+│   │   ├── settings.py             # 项目配置
+│   │   └── llm.py                  # LLM 模型实例化
+│   ├── memory/                     # 数据持久化
+│   └── voice/                      # 语音功能
+├── src/live_commerce/              # 主播/运营台前端（与观众端分开部署）
+│   ├── index.html                  # 直播管理后台（1223 行）
+│   ├── login.html                  # 登录页面
+│   └── echarts.min.js              # 图表库
+├── src/viewer/                     # 观众端（自包含，可整目录单独部署）
+│   └── index.html                  # 直播间 H5（单文件，无外链资源）
+├── .env                            # 环境配置
+├── pyproject.toml                  # 项目依赖
+└── README.md                       # 本文件
+```
 
-### Development with LangGraph Studio
+## 技术栈
 
-The agent supports [LangGraph Studio](https://langchain-ai.github.io/langgraph/concepts/langgraph_studio/), the IDE for developing agents in LangGraph.
+| 层次 | 技术选型 |
+|------|---------|
+| 后端框架 | FastAPI + Uvicorn |
+| AI Agent | LangGraph StateGraph |
+| LLM 模型 | DeepSeek / OpenAI / Anthropic / Groq |
+| 前端（中控台） | Streamlit + 自定义 CSS |
+| 前端（看板） | HTML/JS + ECharts + WebSocket |
+| 实时通信 | WebSocket |
+| 数据库 | SQLite / JSON 文件 |
+| 数据模型 | Pydantic v2 |
+| 认证 | JWT（python-jose + passlib） |
 
-`langgraph-cli[inmem]` is installed with `uv sync`. You can simply add your `.env` file to the root directory as described above, and then launch LangGraph Studio with `langgraph dev`. Customize `langgraph.json` as needed. See the [local quickstart](https://langchain-ai.github.io/langgraph/cloud/how-tos/studio/quick_start/#local-development-server) to learn more.
+## 开发说明
 
-### Local development without Docker
-
-You can also run the agent service and the Streamlit app locally without Docker, just using a Python virtual environment.
-
-1. Create a virtual environment and install dependencies:
-
-   ```sh
-   uv sync --frozen
-   source .venv/bin/activate
-   ```
-
-2. Run the FastAPI server:
-
-   ```sh
-   python src/run_service.py
-   ```
-
-3. In a separate terminal, run the Streamlit app:
-
-   ```sh
-   streamlit run src/streamlit_app.py
-   ```
-
-4. Open your browser and navigate to the URL provided by Streamlit (usually `http://localhost:8501`).
-
-## Projects built with or inspired by agent-service-toolkit
-
-The following are a few of the public projects that drew code or inspiration from this repo.
-
-- **[PolyRAG](https://github.com/QuentinFuxa/PolyRAG)** - Extends agent-service-toolkit with RAG capabilities over both PostgreSQL databases and PDF documents.
-- **[alexrisch/agent-web-kit](https://github.com/alexrisch/agent-web-kit)** - A Next.JS frontend for agent-service-toolkit
-- **[raushan-in/dapa](https://github.com/raushan-in/dapa)** - Digital Arrest Protection App (DAPA) enables users to report financial scams and frauds efficiently via a user-friendly platform.
-
-**Please create a pull request editing the README or open a discussion with any new ones to be added!** Would love to include more projects.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request. Currently the tests need to be run using the local development without Docker setup. To run the tests for the agent service:
-
-1. Ensure you're in the project root directory and have activated your virtual environment.
-
-2. Install the development dependencies and pre-commit hooks:
-
-   ```sh
-   uv sync --frozen
-   pre-commit install
-   ```
-
-3. Run the tests using pytest:
-
-   ```sh
-   pytest
-   ```
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+- 服务支持热重载（`MODE=dev` 时代码变动自动重启）
+- 默认使用 DeepSeek Chat 模型；运营台「直播系统设置 → 大模型接入端口」可按当前启用的端口改走别的 OpenAI 兼容服务
+- 数据库默认使用 SQLite
+- 商品数据存储在 `src/data/live_commerce/data/products_data.json`

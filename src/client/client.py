@@ -29,6 +29,7 @@ class AgentClient:
         agent: str | None = None,
         timeout: float | None = None,
         get_info: bool = True,
+        token: str | None = None,
     ) -> None:
         """
         Initialize the client.
@@ -39,9 +40,11 @@ class AgentClient:
             timeout (float, optional): The timeout for requests.
             get_info (bool, optional): Whether to fetch agent information on init.
                 Default: True
+            token (str, optional): JWT auth token for user authentication.
         """
         self.base_url = base_url
         self.auth_secret = os.getenv("AUTH_SECRET")
+        self.token = token
         self.timeout = timeout
         self.info: ServiceMetadata | None = None
         self.agent: str | None = None
@@ -53,7 +56,9 @@ class AgentClient:
     @property
     def _headers(self) -> dict[str, str]:
         headers = {}
-        if self.auth_secret:
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        elif self.auth_secret:
             headers["Authorization"] = f"Bearer {self.auth_secret}"
         return headers
 
@@ -340,6 +345,190 @@ class AgentClient:
             except httpx.HTTPError as e:
                 raise AgentClientError(f"Error: {e}")
 
+    # ── Auth methods ──
+
+    async def aregister(self, username: str, email: str, password: str) -> dict:
+        """Register a new user account."""
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(
+                    f"{self.base_url}/auth/register",
+                    json={"username": username, "email": email, "password": password},
+                    timeout=self.timeout,
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                raise AgentClientError(f"Registration error: {e}")
+
+    def register(self, username: str, email: str, password: str) -> dict:
+        """Register a new user account (sync)."""
+        try:
+            response = httpx.post(
+                f"{self.base_url}/auth/register",
+                json={"username": username, "email": email, "password": password},
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError as e:
+            raise AgentClientError(f"Registration error: {e}")
+
+    async def alogin(self, username: str, password: str) -> dict:
+        """Login and get JWT token."""
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(
+                    f"{self.base_url}/auth/login",
+                    json={"username": username, "password": password},
+                    timeout=self.timeout,
+                )
+                response.raise_for_status()
+                data = response.json()
+                self.token = data["access_token"]
+                return data
+            except httpx.HTTPStatusError as e:
+                detail = ""
+                try:
+                    detail = e.response.json().get("detail", "")
+                except Exception:
+                    detail = e.response.text[:100]
+                raise AgentClientError(f"Login error: {detail or str(e)}")
+            except httpx.RequestError as e:
+                raise AgentClientError(f"Login error: Connection failed: {e}")
+
+    def login(self, username: str, password: str) -> dict:
+        """Login and get JWT token (sync)."""
+        try:
+            response = httpx.post(
+                f"{self.base_url}/auth/login",
+                json={"username": username, "password": password},
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            data = response.json()
+            self.token = data["access_token"]
+            return data
+        except httpx.HTTPStatusError as e:
+            detail = ""
+            try:
+                detail = e.response.json().get("detail", "")
+            except Exception:
+                detail = e.response.text[:100]
+            raise AgentClientError(f"Login error: {detail or str(e)}")
+        except httpx.RequestError as e:
+            raise AgentClientError(f"Login error: Connection failed: {e}")
+
+    async def aget_me(self) -> dict:
+        """Get current user profile."""
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(
+                    f"{self.base_url}/auth/me",
+                    headers=self._headers,
+                    timeout=self.timeout,
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                raise AgentClientError(f"Get profile error: {e}")
+
+    def get_me(self) -> dict:
+        """Get current user profile (sync)."""
+        try:
+            response = httpx.get(
+                f"{self.base_url}/auth/me",
+                headers=self._headers,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError as e:
+            raise AgentClientError(f"Get profile error: {e}")
+
+    async def alist_users(self, page: int = 1, per_page: int = 20) -> dict:
+        """List all users (admin only)."""
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(
+                    f"{self.base_url}/admin/users?page={page}&per_page={per_page}",
+                    headers=self._headers,
+                    timeout=self.timeout,
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                raise AgentClientError(f"List users error: {e}")
+
+    def list_users(self, page: int = 1, per_page: int = 20) -> dict:
+        """List all users (admin only, sync)."""
+        try:
+            response = httpx.get(
+                f"{self.base_url}/admin/users?page={page}&per_page={per_page}",
+                headers=self._headers,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError as e:
+            raise AgentClientError(f"List users error: {e}")
+
+    async def aupdate_user_role(self, user_id: int, role: str) -> dict:
+        """Update a user's role (admin only)."""
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.put(
+                    f"{self.base_url}/admin/users/{user_id}/role",
+                    json={"role": role},
+                    headers=self._headers,
+                    timeout=self.timeout,
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                raise AgentClientError(f"Update role error: {e}")
+
+    async def adelete_user(self, user_id: int) -> dict:
+        """Delete a user (admin only)."""
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.delete(
+                    f"{self.base_url}/admin/users/{user_id}",
+                    headers=self._headers,
+                    timeout=self.timeout,
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                raise AgentClientError(f"Delete user error: {e}")
+
+    def update_user_role(self, user_id: int, role: str) -> dict:
+        """Update a user's role (admin only, sync)."""
+        try:
+            response = httpx.put(
+                f"{self.base_url}/admin/users/{user_id}/role",
+                json={"role": role},
+                headers=self._headers,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError as e:
+            raise AgentClientError(f"Update role error: {e}")
+
+    def delete_user(self, user_id: int) -> dict:
+        """Delete a user (admin only, sync)."""
+        try:
+            response = httpx.delete(
+                f"{self.base_url}/admin/users/{user_id}",
+                headers=self._headers,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError as e:
+            raise AgentClientError(f"Delete user error: {e}")
+
     def get_history(self, thread_id: str) -> ChatHistory:
         """
         Get chat history.
@@ -359,4 +548,42 @@ class AgentClient:
         except httpx.HTTPError as e:
             raise AgentClientError(f"Error: {e}")
 
+
         return ChatHistory.model_validate(response.json())
+
+    # ── Live Commerce UI ──
+
+    _lc_html: str | None = None
+
+    @staticmethod
+    def get_live_commerce_html() -> str:
+        """返回直播电商管理后台的完整HTML/CSS/JS（从 live_commerce.html 文件读取）"""
+        if AgentClient._lc_html is None:
+            AgentClient._lc_html = _load_live_commerce_html()
+        return AgentClient._lc_html
+
+
+# ============================================================
+# 直播电商管理后台 HTML 加载（从项目根目录 live_commerce.html 读取）
+# ============================================================
+
+
+def _load_live_commerce_html() -> str:
+    """从 live_commerce.html（项目根目录）或 src/live_commerce/index.html 读取前端代码"""
+    candidates = [
+        os.path.join(os.path.dirname(__file__), "..", "..", "live_commerce.html"),
+        os.path.join(os.path.dirname(__file__), "..", "live_commerce", "index.html"),
+    ]
+    for path in candidates:
+        full = os.path.abspath(path)
+        if os.path.exists(full):
+            with open(full, "r", encoding="utf-8") as f:
+                return f.read()
+    return (
+        '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">'
+        '<title>Loading...</title></head><body>'
+        '<div style="padding:40px;text-align:center;color:#6b7280">'
+        '<h2>Loading Live Commerce Dashboard...</h2>'
+        '<p style="color:#9ca3af;margin-top:12px">HTML file not found.</p>'
+        '</div></body></html>'
+    )

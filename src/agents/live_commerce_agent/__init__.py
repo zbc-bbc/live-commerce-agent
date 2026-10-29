@@ -1,4 +1,3 @@
-"""Live Commerce AI 主播 Agent 包。
+from agents.live_commerce_agent.live_commerce_agent import live_commerce_agent
 
-本轮仅建立包骨架；Agent 图、工具与提示词在后续迭代中加入。
-"""
+__all__ = ["live_commerce_agent"]

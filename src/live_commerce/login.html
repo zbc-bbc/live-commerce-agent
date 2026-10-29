@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>主播端登录 - 直播电商运营台</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background:linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#0f172a 100%);
+  min-height:100vh;display:flex;align-items:center;justify-content:center;
+  padding:20px
+}
+.login-wrap{
+  background:#fff;border-radius:16px;box-shadow:0 25px 80px rgba(0,0,0,.3);
+  width:420px;max-width:100%;overflow:hidden;animation:fadeIn .4s ease
+}
+@keyframes fadeIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+.login-header{
+  background:linear-gradient(135deg,#1e40af,#2563eb);
+  padding:28px 30px 22px;text-align:center;color:#fff
+}
+.login-header .icon{font-size:42px;margin-bottom:6px}
+.login-header h1{font-size:20px;font-weight:700;letter-spacing:.02em}
+.login-header p{font-size:12px;opacity:.8;margin-top:4px}
+.login-body{padding:28px 30px 24px}
+.login-tabs{display:flex;gap:0;margin-bottom:22px;background:#f1f5f9;border-radius:8px;padding:3px}
+.login-tab{
+  flex:1;text-align:center;padding:8px 0;border-radius:6px;font-size:13px;font-weight:600;
+  cursor:pointer;color:#64748b;transition:.2s;border:none;background:transparent
+}
+.login-tab.active{background:#fff;color:#1e40af;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.form-group{margin-bottom:16px}
+.form-group label{display:block;font-size:12px;font-weight:600;color:#475569;margin-bottom:4px}
+.form-group .inp{
+  width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:8px;
+  font-size:13px;outline:none;transition:.2s;background:#fafbfc
+}
+.form-group .inp:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1);background:#fff}
+.form-group .inp.err{border-color:#ef4444;background:#fef2f2}
+.form-group .err-msg{font-size:11px;color:#ef4444;margin-top:4px;display:none}
+.form-group .err-msg.show{display:block}
+.login-btn{
+  width:100%;padding:11px;border:none;border-radius:8px;font-size:14px;font-weight:700;
+  cursor:pointer;transition:.2s;margin-top:4px
+}
+.login-btn.pri{background:#2563eb;color:#fff}
+.login-btn.pri:hover{background:#1d4ed8}
+.login-btn.pri:disabled{background:#93c5fd;cursor:not-allowed}
+.login-btn.sec{background:transparent;color:#64748b;border:1.5px solid #e2e8f0}
+.login-btn.sec:hover{background:#f1f5f9}
+.toast-global{
+  position:fixed;top:24px;left:50%;transform:translateX(-50%);z-index:2000;
+  padding:10px 22px;border-radius:8px;color:#fff;font-size:13px;font-weight:500;
+  box-shadow:0 6px 20px rgba(0,0,0,.2);display:none;animation:slideDown .3s ease
+}
+@keyframes slideDown{from{opacity:0;transform:translateX(-50%) translateY(-20px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+.toast-global.show{display:block}
+.toast-global.err{background:#ef4444}
+.toast-global.ok{background:#10b981}
+.login-footer{text-align:center;padding:16px 30px;border-top:1px solid #f1f5f9;font-size:11px;color:#94a3b8}
+.login-footer a{color:#2563eb;text-decoration:none;cursor:pointer}
+.login-footer a:hover{text-decoration:underline}
+.form-divider{text-align:center;font-size:11px;color:#94a3b8;margin:6px 0 14px}
+.password-toggle{position:relative}
+.password-toggle .toggle-eye{
+  position:absolute;right:10px;top:50%;transform:translateY(-50%);
+  cursor:pointer;color:#94a3b8;font-size:16px;user-select:none
+}
+</style>
+</head>
+<body>
+
+<div class="toast-global" id="toastGlobal"></div>
+
+<div class="login-wrap">
+  <div class="login-header">
+    <div class="icon">📺</div>
+    <h1>直播电商运营台</h1>
+    <p>主播端登录 · Host Console</p>
+  </div>
+
+  <div class="login-body">
+    <!-- Tabs -->
+    <div class="login-tabs">
+      <button class="login-tab active" onclick="switchTab('login')">登录</button>
+      <button class="login-tab" onclick="switchTab('register')">注册</button>
+    </div>
+
+    <!-- Login Form -->
+    <div id="formLogin">
+      <div class="form-group">
+        <label>账号</label>
+        <input class="inp" id="loginUser" placeholder="输入用户名" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()">
+        <div class="err-msg" id="loginUserErr"></div>
+      </div>
+      <div class="form-group">
+        <label>密码</label>
+        <div class="password-toggle">
+          <input class="inp" id="loginPass" type="password" placeholder="输入密码" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+          <span class="toggle-eye" onclick="togglePwd('loginPass',this)">👁️</span>
+        </div>
+        <div class="err-msg" id="loginPassErr"></div>
+      </div>
+      <button class="login-btn pri" id="btnLogin" onclick="doLogin()">登 录</button>
+      <div style="margin-top:10px;text-align:center;font-size:12px;color:#94a3b8">
+        还没有账号？<a onclick="switchTab('register')" style="color:#2563eb;cursor:pointer">立即注册</a>
+      </div>
+    </div>
+
+    <!-- Register Form -->
+    <div id="formRegister" style="display:none">
+      <div class="form-group">
+        <label>用户名</label>
+        <input class="inp" id="regUser" placeholder="至少3个字符" autocomplete="username">
+        <div class="err-msg" id="regUserErr"></div>
+      </div>
+      <div class="form-group">
+        <label>邮箱</label>
+        <input class="inp" id="regEmail" type="email" placeholder="your@email.com" autocomplete="email">
+        <div class="err-msg" id="regEmailErr"></div>
+      </div>
+      <div class="form-group">
+        <label>密码</label>
+        <div class="password-toggle">
+          <input class="inp" id="regPass" type="password" placeholder="至少6个字符" autocomplete="new-password">
+          <span class="toggle-eye" onclick="togglePwd('regPass',this)">👁️</span>
+        </div>
+        <div class="err-msg" id="regPassErr"></div>
+      </div>
+      <div class="form-group">
+        <label>确认密码</label>
+        <div class="password-toggle">
+          <input class="inp" id="regPass2" type="password" placeholder="再次输入密码">
+          <span class="toggle-eye" onclick="togglePwd('regPass2',this)">👁️</span>
+        </div>
+        <div class="err-msg" id="regPass2Err"></div>
+      </div>
+      <button class="login-btn pri" id="btnRegister" onclick="doRegister()">注 册</button>
+      <div style="margin-top:10px;text-align:center;font-size:12px;color:#94a3b8">
+        已有账号？<a onclick="switchTab('login')" style="color:#2563eb;cursor:pointer">去登录</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="login-footer">
+    <span id="statusText">检测服务连接中...</span>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// State
+// ============================================================
+var API_BASE = window.location.protocol + '//' + window.location.host;
+var TOKEN_KEY = 'lc_auth_token';
+var USER_KEY = 'lc_auth_user';
+var currentTab = 'login';
+
+// ============================================================
+// Toast
+// ============================================================
+function showToast(msg, type) {
+  var el = document.getElementById('toastGlobal');
+  el.textContent = msg;
+  el.className = 'toast-global show ' + (type || 'err');
+  clearTimeout(el._timer);
+  el._timer = setTimeout(function(){ el.classList.remove('show'); }, 3500);
+}
+
+// ============================================================
+// Tab switching
+// ============================================================
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.login-tab').forEach(function(b){
+    b.classList.toggle('active', b.textContent === (tab === 'login' ? '登录' : '注册'));
+  });
+  document.getElementById('formLogin').style.display = tab === 'login' ? 'block' : 'none';
+  document.getElementById('formRegister').style.display = tab === 'register' ? 'block' : 'none';
+  // Clear errors
+  document.querySelectorAll('.err-msg').forEach(function(e){ e.classList.remove('show'); e.textContent = ''; });
+  document.querySelectorAll('.inp').forEach(function(i){ i.classList.remove('err'); });
+}
+
+// ============================================================
+// Password toggle
+// ============================================================
+function togglePwd(id, el) {
+  var inp = document.getElementById(id);
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+  el.textContent = inp.type === 'password' ? '👁️' : '🙈';
+}
+
+// ============================================================
+// Field helpers
+// ============================================================
+function showErr(id, msg) {
+  var inp = document.getElementById(id);
+  inp.classList.add('err');
+  var errEl = document.getElementById(id + 'Err');
+  errEl.textContent = msg;
+  errEl.classList.add('show');
+}
+function clearErr(id) {
+  var inp = document.getElementById(id);
+  inp.classList.remove('err');
+  document.getElementById(id + 'Err').classList.remove('show');
+}
+
+// ============================================================
+// Login
+// ============================================================
+async function doLogin() {
+  var username = document.getElementById('loginUser').value.trim();
+  var password = document.getElementById('loginPass').value;
+
+  // Reset errors
+  ['loginUser','loginPass'].forEach(clearErr);
+
+  var hasErr = false;
+  if (!username) { showErr('loginUser', '请输入用户名'); hasErr = true; }
+  if (!password) { showErr('loginPass', '请输入密码'); hasErr = true; }
+  if (hasErr) return;
+
+  var btn = document.getElementById('btnLogin');
+  btn.disabled = true;
+  btn.textContent = '登录中...';
+
+  try {
+    var resp = await fetch(API_BASE + '/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({username: username, password: password})
+    });
+    var data = await resp.json();
+
+    if (resp.ok) {
+      // Save token
+      localStorage.setItem(TOKEN_KEY, data.access_token);
+      localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+      showToast('登录成功！欢迎回来 👋', 'ok');
+      // Redirect to dashboard
+      setTimeout(function(){ window.location.href = '/live-commerce/'; }, 600);
+    } else {
+      var msg = data.detail || '登录失败';
+      if (msg === 'USER_NOT_FOUND') msg = '用户不存在，请检查用户名';
+      else if (msg === 'WRONG_PASSWORD') msg = '密码错误，请重试';
+      else if (typeof msg === 'string' && msg.startsWith('WRONG_')) msg = '用户名或密码错误';
+      showErr('loginUser', msg);
+      if (msg.includes('密码')) showErr('loginPass', msg);
+      showToast(msg, 'err');
+    }
+  } catch(e) {
+    showToast('无法连接到服务器，请检查服务是否启动', 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '登 录';
+  }
+}
+
+// ============================================================
+// Register
+// ============================================================
+async function doRegister() {
+  var username = document.getElementById('regUser').value.trim();
+  var email = document.getElementById('regEmail').value.trim();
+  var password = document.getElementById('regPass').value;
+  var password2 = document.getElementById('regPass2').value;
+
+  ['regUser','regEmail','regPass','regPass2'].forEach(clearErr);
+
+  var hasErr = false;
+  if (!username || username.length < 3) { showErr('regUser', '用户名至少3个字符'); hasErr = true; }
+  if (!email || !email.includes('@')) { showErr('regEmail', '请输入有效的邮箱地址'); hasErr = true; }
+  if (!password || password.length < 6) { showErr('regPass', '密码至少6个字符'); hasErr = true; }
+  if (password !== password2) { showErr('regPass2', '两次密码不一致'); hasErr = true; }
+  if (hasErr) return;
+
+  var btn = document.getElementById('btnRegister');
+  btn.disabled = true;
+  btn.textContent = '注册中...';
+
+  try {
+    var resp = await fetch(API_BASE + '/auth/register', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({username: username, email: email, password: password})
+    });
+    var data = await resp.json();
+
+    if (resp.ok) {
+      showToast('注册成功！请登录 🎉', 'ok');
+      // Switch to login tab and fill username
+      switchTab('login');
+      document.getElementById('loginUser').value = username;
+    } else {
+      var msg = data.detail || '注册失败';
+      if (typeof msg === 'string') {
+        if (msg.includes('already exists') || msg.includes('已存在')) {
+          msg = '用户名或邮箱已被注册';
+          showErr('regUser', msg);
+        }
+      }
+      showToast(msg, 'err');
+    }
+  } catch(e) {
+    showToast('无法连接到服务器', 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '注 册';
+  }
+}
+
+// ============================================================
+// Check auth status on load
+// ============================================================
+(async function() {
+  var statusEl = document.getElementById('statusText');
+  try {
+    var resp = await fetch(API_BASE + '/auth/check');
+    var data = await resp.json();
+    if (data.first_run) {
+      statusEl.innerHTML = '🆕 首次使用，请注册一个管理员账号';
+    } else {
+      statusEl.innerHTML = '✅ 服务正常 · 已有 ' + data.user_count + ' 个用户';
+    }
+  } catch(e) {
+    statusEl.innerHTML = '❌ 无法连接到服务，请确认服务已启动';
+  }
+
+  // 是否已登录要问后端：能不能进运营台由 HttpOnly 的闸门 cookie 决定，
+  // localStorage 里那份 token JS 读得到但说了不算，拿它判断会说谎。
+  try {
+    var sr = await fetch(API_BASE + '/auth/session');
+    var sess = await sr.json();
+    if (sess.authenticated) {
+      setTimeout(function(){
+        var btn = document.querySelector('.login-btn.pri');
+        if (btn) btn.textContent = '已登录 · 进入控制台';
+        var se = document.getElementById('statusText');
+        if (se) se.innerHTML = '已登录（' + (sess.username || '') + '） | '
+          + '<a href="/live-commerce/" style="color:#2563eb;cursor:pointer">进入控制台 →</a>';
+      }, 200);
+    }
+  } catch(e) {}
+})();
+</script>
+</body>
+</html>

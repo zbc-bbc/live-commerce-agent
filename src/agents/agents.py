@@ -12,6 +12,7 @@ from agents.knowledge_base_agent import kb_agent
 from agents.langgraph_supervisor_agent import langgraph_supervisor_agent
 from agents.langgraph_supervisor_hierarchy_agent import langgraph_supervisor_hierarchy_agent
 from agents.lazy_agent import LazyLoadingAgent
+from agents.live_commerce_agent import live_commerce_agent
 from agents.rag_assistant import rag_assistant
 from agents.research_assistant import research_assistant
 from schema import AgentInfo
@@ -60,6 +61,10 @@ agents: dict[str, Agent] = {
     "github-mcp-agent": Agent(
         description="A GitHub agent with MCP tools for repository management and development workflows.",
         graph_like=github_mcp_agent,
+    ),
+    "live-commerce-agent": Agent(
+        description="A live commerce agent for livestream e-commerce: generates scripts, handles danmaku questions, calculates promotions, and produces post-session review reports.",
+        graph_like=live_commerce_agent,
     ),
 }
 

@@ -103,6 +103,13 @@ class Settings(BaseSettings):
 
     OPENWEATHERMAP_API_KEY: SecretStr | None = None
 
+    # 商品图 AI 生成。取值对应 service/image_gen.py 里注册的 provider 名字。
+    # 默认 pollinations：免费、无需 key、无需代理。换成本地 SD / 付费 API 时
+    # 只需在那里注册新 provider 并改这里的值，调用方无需改动。
+    IMAGE_PROVIDER: str = "pollinations"
+    # 单次生成的整体超时。免费端点排队时延迟会到几十秒，别设太小。
+    IMAGE_GEN_TIMEOUT: float = 60.0
+
     # MCP Configuration
     GITHUB_PAT: SecretStr | None = None
     MCP_GITHUB_SERVER_URL: str = "https://api.githubcopilot.com/mcp/"

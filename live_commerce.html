@@ -1,0 +1,1047 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>直播电商管理后台</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f3f4f6;overflow:hidden;height:100vh;min-width:1200px;color:#1e293b}
+.lc-app{display:flex;height:100vh;width:100%}
+.lc-sidebar{width:220px;min-width:220px;background:#fff;border-right:1px solid #e5e7eb;display:flex;flex-direction:column;box-shadow:2px 0 8px rgba(0,0,0,.04)}
+.lc-sb-header{padding:18px 16px 12px;border-bottom:1px solid #f1f5f9}
+.lc-sb-title{font-size:15px;font-weight:700;color:#1e40af;letter-spacing:.02em}
+.lc-sb-sub{font-size:11px;color:#94a3b8;margin-top:2px}
+.lc-sb-menu{flex:1;overflow-y:auto;padding:8px 0}
+.lc-sb-item{padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#475569;font-size:13px;transition:all .15s;border-left:3px solid transparent}
+.lc-sb-item:hover{background:#f1f5f9;color:#1e293b}
+.lc-sb-item.active{background:#eff6ff;color:#2563eb;border-left-color:#2563eb;font-weight:600}
+.lc-sb-item .icon{font-size:16px;width:20px;text-align:center}
+.lc-sb-footer{padding:12px 16px;border-top:1px solid #f1f5f9}
+#wsStatus{font-size:11px;color:#94a3b8;display:flex;align-items:center;gap:6px}
+.lc-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.lc-dot.live{background:#22c55e;animation:lcPulse 1.5s infinite}
+.lc-dot.idle{background:#94a3b8}
+.lc-dot.err{background:#ef4444}
+@keyframes lcPulse{0%,100%{opacity:1}50%{opacity:.4}}
+.lc-main{flex:1;overflow-y:auto;padding:24px;background:#f3f4f6}
+.lc-inner{max-width:1500px;margin:0 auto;display:none}
+.lc-inner.active{display:block}
+.lc-page-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:8px}
+.lc-page-hdr h2{font-size:18px;font-weight:700;color:#0f172a}
+.lc-page-hdr .sub{font-size:12px;color:#94a3b8;margin-top:2px}
+.lc-card{background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;margin-bottom:16px}
+.lc-card-title{font-size:13px;font-weight:600;color:#1e293b;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:6px}
+.lc-btn{padding:7px 16px;border-radius:6px;font-size:13px;cursor:pointer;border:none;transition:all .15s;display:inline-flex;align-items:center;gap:6px;font-weight:500}
+.lc-btn-primary{background:#2563eb;color:#fff}.lc-btn-primary:hover{background:#1d4ed8}
+.lc-btn-success{background:#10b981;color:#fff}.lc-btn-success:hover{background:#059669}
+.lc-btn-warning{background:#f59e0b;color:#fff}.lc-btn-warning:hover{background:#d97706}
+.lc-btn-danger{background:#ef4444;color:#fff}.lc-btn-danger:hover{background:#dc2626}
+.lc-btn-outline{background:transparent;color:#475569;border:1px solid #d1d5db}.lc-btn-outline:hover{background:#f1f5f9}
+.lc-btn-sm{padding:4px 10px;font-size:12px}
+.lc-inp{width:100%;padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;outline:none;transition:.2s;background:#fff}
+.lc-inp:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+.lc-sel{width:100%;padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:#fff;cursor:pointer;outline:none}
+.lc-sel:focus{border-color:#2563eb}
+.lc-tag{display:inline-flex;align-items:center;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:500;margin:2px}
+.lc-tag-blue{background:#eff6ff;color:#2563eb}
+.lc-tag-green{background:#ecfdf5;color:#059669}
+.lc-tag-red{background:#fef2f2;color:#dc2626}
+.lc-tag-yellow{background:#fffbeb;color:#d97706}
+.lc-stat{text-align:center;padding:12px}
+.lc-stat .nv{font-size:22px;font-weight:700;color:#0f172a;line-height:1.2}
+.lc-stat .lb{font-size:11px;color:#94a3b8;margin-top:2px}
+.lc-badge{padding:3px 12px;border-radius:20px;font-size:11px;font-weight:600}
+.lc-badge-live{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}
+.lc-badge-stage{background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe}
+.lc-badge-idle{background:#f1f5f9;color:#94a3b8;border:1px solid #e2e8f0}
+.lc-scroll{max-height:320px;overflow-y:auto}
+.lc-scroll::-webkit-scrollbar{width:4px}
+.lc-scroll::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:2px}
+.lc-scroll::-webkit-scrollbar-track{background:transparent}
+.lc-grid{display:grid;gap:16px}
+.lc-grid-2{grid-template-columns:1fr 1fr}
+.lc-grid-3{grid-template-columns:1fr 1fr 1fr}
+.lc-grid-4{grid-template-columns:1fr 1fr 1fr 1fr}
+.lc-modal{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:1000;display:none;align-items:center;justify-content:center}
+.lc-modal.open{display:flex}
+.lc-modal-bd{background:#fff;border-radius:8px;width:720px;max-height:80vh;overflow-y:auto;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.15)}
+.lc-tbl{width:100%;border-collapse:collapse;font-size:12px}
+.lc-tbl th{text-align:left;padding:8px 10px;color:#64748b;font-weight:600;border-bottom:2px solid #e2e8f0;font-size:11px;text-transform:uppercase}
+.lc-tbl td{padding:8px 10px;border-bottom:1px solid #f1f5f9}
+.lc-tbl tr:hover td{background:#f8fafc}
+.lc-empty{padding:40px;text-align:center;color:#94a3b8;font-size:13px}
+.lc-empty .icon{font-size:36px;margin-bottom:8px}
+.lc-q-btn{padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;border:1px solid #d1d5db;background:#fff;color:#475569;transition:.15s;white-space:nowrap}
+.lc-q-btn:hover{background:#eff6ff;border-color:#93c5fd;color:#2563eb}
+.lc-stg-btn{padding:6px 14px;border-radius:20px;font-size:12px;cursor:pointer;border:1px solid #e5e7eb;background:#fff;color:#475569;transition:.15s}
+.lc-stg-btn.active{background:#2563eb;color:#fff;border-color:#2563eb}
+.lc-stg-btn:hover:not(.active){background:#f1f5f9}
+.lc-alert-item{padding:8px 12px;border-radius:6px;margin-bottom:6px;font-size:12px;border-left:3px solid}
+.lc-alert-item.surge_up{border-color:#22c55e;background:#f0fdf4}
+.lc-alert-item.surge_down{border-color:#ef4444;background:#fef2f2}
+.lc-alert-item.low_stock{border-color:#f59e0b;background:#fffbeb}
+.lc-alert-item.hot_question{border-color:#2563eb;background:#eff6ff}
+#videoPreview{width:100%;max-height:200px;border-radius:6px;background:#000;display:block;object-fit:cover}
+.lc-stage-progress{display:flex;gap:6px;flex-wrap:wrap}
+.lc-setting-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f1f5f9}
+.lc-setting-row:last-child{border-bottom:none}
+.lc-setting-row .lbl{font-size:13px;color:#1e293b}
+.lc-setting-row .desc{font-size:11px;color:#94a3b8;margin-top:1px}
+.lc-switch{position:relative;width:40px;height:22px;background:#e2e8f0;border-radius:11px;cursor:pointer;transition:.2s;flex-shrink:0}
+.lc-switch.on{background:#2563eb}
+.lc-switch::after{content:'';position:absolute;top:2px;left:2px;width:18px;height:18px;background:#fff;border-radius:50%;transition:.2s}
+.lc-switch.on::after{left:20px}
+</style>
+</head>
+<body>
+<div class="lc-app">
+  <!-- Sidebar -->
+  <div class="lc-sidebar">
+    <div class="lc-sb-header">
+      <div class="lc-sb-title">📺 直播电商管理</div>
+      <div class="lc-sb-sub">Live Commerce Dashboard</div>
+    </div>
+    <div class="lc-sb-menu">
+      <div class="lc-sb-item active" data-page="console" onclick="switchPage('console')">
+        <span class="icon">🎮</span>直播控制台
+      </div>
+      <div class="lc-sb-item" data-page="danmaku" onclick="switchPage('danmaku')">
+        <span class="icon">💬</span>弹幕与AI问答
+      </div>
+      <div class="lc-sb-item" data-page="analysis" onclick="switchPage('analysis')">
+        <span class="icon">📊</span>商品数据分析
+      </div>
+      <div class="lc-sb-item" data-page="reviews" onclick="switchPage('reviews')">
+        <span class="icon">⭐</span>用户评价管理
+      </div>
+      <div class="lc-sb-item" data-page="report" onclick="switchPage('report')">
+        <span class="icon">📋</span>直播复盘报告
+      </div>
+      <div class="lc-sb-item" data-page="settings" onclick="switchPage('settings')">
+        <span class="icon">⚙️</span>直播系统设置
+      </div>
+    </div>
+    <div class="lc-sb-footer">
+      <div id="wsStatus"><span class="lc-dot idle"></span>正在连接服务…</div>
+      <button class="lc-btn lc-btn-outline lc-btn-sm" style="width:100%;margin-top:8px" onclick="toggleEmg()">⏸️ 一键暂停AI</button>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div class="lc-main">
+
+    <!-- ============ PAGE 1: 直播控制台 ============ -->
+    <div class="lc-inner active" id="page-console">
+      <div class="lc-page-hdr">
+        <div><h2>🎮 直播控制台</h2><div class="sub">实时控制和管理直播全流程</div></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span id="consoleStatus"><span class="lc-badge lc-badge-idle">⏸ 未开播</span></span>
+          <span id="consoleStage"></span>
+          <button class="lc-btn lc-btn-success lc-btn-sm" id="btnStartLive" onclick="startLive()">🎬 开始直播</button>
+          <button class="lc-btn lc-btn-danger lc-btn-sm" id="btnEndLive" onclick="endLive()" style="display:none">⏹ 结束直播</button>
+        </div>
+      </div>
+      <!-- Top 3-column row: Camera + Product + Stage -->
+      <div class="lc-grid lc-grid-3" style="margin-bottom:16px">
+        <!-- Camera card -->
+        <div class="lc-card">
+          <div class="lc-card-title">📷 摄像头</div>
+          <div style="margin-bottom:8px">
+            <select class="lc-sel" id="camSelect" onchange="changeCam()"></select>
+          </div>
+          <div style="display:flex;gap:6px;margin-bottom:8px">
+            <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="startCam()">📷 开启</button>
+            <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="stopCam()">⏹ 关闭</button>
+          </div>
+          <video id="videoPreview" autoplay playsinline muted></video>
+        </div>
+        <!-- Product card -->
+        <div class="lc-card">
+          <div class="lc-card-title">📦 当前商品</div>
+          <select class="lc-sel" id="prodSelect" onchange="setCurProd(this.value)"></select>
+          <div id="prodInfo" style="margin-top:10px;font-size:12px;color:#64748b">请选择商品</div>
+        </div>
+        <!-- Stage control card -->
+        <div class="lc-card">
+          <div class="lc-card-title">🎯 直播阶段</div>
+          <div class="lc-stage-progress" id="stageControl"></div>
+          <div id="stageStrategy" style="margin-top:8px;font-size:11px;color:#94a3b8;font-style:italic"></div>
+        </div>
+      </div>
+      <!-- Bottom 3-column row: Danmaku + Stats + Alerts -->
+      <div class="lc-grid lc-grid-3">
+        <div class="lc-card">
+          <div class="lc-card-title">💬 弹幕互动</div>
+          <div style="display:flex;gap:6px;margin-bottom:8px">
+            <input class="lc-inp" id="danmakuInput" placeholder="输入弹幕内容…" style="flex:1" onkeydown="if(event.key==='Enter')sendDanmaku()">
+            <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="sendDanmaku()">发送</button>
+          </div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">
+            <button class="lc-q-btn" onclick="quickDanmaku('多少钱？')">💰多少钱</button>
+            <button class="lc-q-btn" onclick="quickDanmaku('有优惠吗？')">🏷️有优惠</button>
+            <button class="lc-q-btn" onclick="quickDanmaku('怎么下单？')">🛒怎么下单</button>
+            <button class="lc-q-btn" onclick="quickDanmaku('保质期多久？')">📅保质期</button>
+            <button class="lc-q-btn" onclick="quickDanmaku('还发货吗？')">📦发货</button>
+            <button class="lc-q-btn" onclick="quickDanmaku('什么规格？')">📐规格</button>
+          </div>
+          <div class="lc-scroll" id="danmakuList" style="max-height:200px"></div>
+        </div>
+        <div class="lc-card">
+          <div class="lc-card-title">🤖 AI统计数据</div>
+          <div class="lc-grid lc-grid-2">
+            <div class="lc-stat"><div class="nv" id="statTotalDm">0</div><div class="lb">弹幕总数</div></div>
+            <div class="lc-stat"><div class="nv" id="statAiReplies">0</div><div class="lb">AI回复</div></div>
+            <div class="lc-stat"><div class="nv" id="statOnline">0</div><div class="lb">在线观众</div></div>
+            <div class="lc-stat"><div class="nv" id="statReplyRate">0%</div><div class="lb">回复成功率</div></div>
+          </div>
+          <div style="margin-top:10px">
+            <div class="lc-card-title">🏆 高频问题 TOP10</div>
+            <div id="topQuestions" style="font-size:12px"></div>
+          </div>
+        </div>
+        <div class="lc-card">
+          <div class="lc-card-title">🔔 场控面板</div>
+          <div id="alertPanel" class="lc-scroll" style="max-height:300px">
+            <div class="lc-empty"><div class="icon">📢</div>暂无场控提示</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ PAGE 2: 弹幕与AI问答 ============ -->
+    <div class="lc-inner" id="page-danmaku">
+      <div class="lc-page-hdr">
+        <div><h2>💬 弹幕与AI问答</h2><div class="sub">查看所有弹幕记录和AI回复</div></div>
+        <div style="font-size:12px;color:#64748b">
+          弹幕: <strong id="dmDmTotal">0</strong> | AI回复: <strong id="dmRepliedTotal">0</strong>
+        </div>
+      </div>
+      <div class="lc-grid lc-grid-2">
+        <div class="lc-card">
+          <div class="lc-card-title">📝 弹幕历史记录</div>
+          <div class="lc-scroll" id="dmHistoryList" style="max-height:500px">
+            <div class="lc-empty"><div class="icon">💬</div>暂无弹幕记录</div>
+          </div>
+        </div>
+        <div class="lc-card">
+          <div class="lc-card-title">🤖 AI回复记录</div>
+          <div class="lc-tab" id="aiReplyTab">
+            <button class="active" data-tab="all" onclick="switchAiTab('all')">全部</button>
+            <button data-tab="ai" onclick="switchAiTab('ai')">AI回复</button>
+            <button data-tab="pending" onclick="switchAiTab('pending')">待回复</button>
+          </div>
+          <div class="lc-scroll" id="aiReplyList" style="max-height:450px">
+            <div class="lc-empty"><div class="icon">🤖</div>暂无AI回复记录</div>
+          </div>
+        </div>
+      </div>
+      <div class="lc-card" style="margin-top:16px">
+        <div class="lc-card-title">📊 高频问题排行</div>
+        <div id="hfqChart" style="height:260px"></div>
+      </div>
+    </div>
+
+    <!-- ============ PAGE 3: 商品数据分析 ============ -->
+    <div class="lc-inner" id="page-analysis">
+      <div class="lc-page-hdr">
+        <div><h2>📊 商品数据分析</h2><div class="sub">弹幕统计、观众画像、转化率分析</div></div>
+        <div style="display:flex;gap:12px;font-size:12px;color:#64748b">
+          曝光: <strong id="anExpo">0</strong> 提及: <strong id="anMention">0</strong> 意向分: <strong id="anIntent">0</strong>
+        </div>
+      </div>
+      <div class="lc-grid lc-grid-4" style="margin-bottom:16px">
+        <div class="lc-stat lc-card"><div class="nv" id="anTotalDm">0</div><div class="lb">弹幕总数</div></div>
+        <div class="lc-stat lc-card"><div class="nv" id="anAiReplies">0</div><div class="lb">AI回复</div></div>
+        <div class="lc-stat lc-card"><div class="nv" id="anOnline">0</div><div class="lb">在线人数</div></div>
+        <div class="lc-stat lc-card"><div class="nv" id="anInquiry">0</div><div class="lb">咨询用户</div></div>
+      </div>
+      <div class="lc-grid lc-grid-2">
+        <div class="lc-card"><div class="lc-card-title">📈 弹幕趋势统计</div><div id="dmTrendChart" style="height:280px"></div></div>
+        <div class="lc-card"><div class="lc-card-title">👥 观众画像分布</div><div id="audienceChart" style="height:280px"></div></div>
+      </div>
+      <div class="lc-card" style="margin-top:16px">
+        <div class="lc-card-title">📋 本场直播数据总览</div>
+        <div id="liveDataOverview" style="font-size:13px"></div>
+      </div>
+    </div>
+
+    <!-- ============ PAGE 4: 用户评价管理 ============ -->
+    <div class="lc-inner" id="page-reviews">
+      <div class="lc-page-hdr">
+        <div><h2>⭐ 用户评价管理</h2><div class="sub">查看观众提问、历史问答和AI回复详情</div></div>
+        <div style="font-size:12px;color:#64748b">
+          总数: <strong id="rvTotal">0</strong> 好评: <strong id="rvPos" style="color:#10b981">0</strong> 差评: <strong id="rvNeg" style="color:#ef4444">0</strong>
+        </div>
+      </div>
+      <div class="lc-grid lc-grid-2">
+        <div class="lc-card">
+          <div class="lc-card-title">❓ 观众提问清单</div>
+          <div class="lc-tab">
+            <button class="active" onclick="switchReviewTab('all')">全部</button>
+            <button onclick="switchReviewTab('positive')">好评</button>
+            <button onclick="switchReviewTab('negative')">差评</button>
+            <button onclick="switchReviewTab('pending')">未处理</button>
+          </div>
+          <div class="lc-scroll" id="reviewList" style="max-height:450px">
+            <div class="lc-empty"><div class="icon">⭐</div>暂无评价数据</div>
+          </div>
+        </div>
+        <div class="lc-card">
+          <div class="lc-card-title">📝 历史问答记录</div>
+          <div class="lc-scroll" id="qaHistoryList" style="max-height:450px">
+            <div class="lc-empty"><div class="icon">💬</div>暂无问答记录</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ PAGE 5: 直播复盘报告 ============ -->
+    <div class="lc-inner" id="page-report">
+      <div class="lc-page-hdr">
+        <div><h2>📋 直播复盘报告</h2><div class="sub">自动汇总直播数据，生成带货总结和优化建议</div></div>
+        <button class="lc-btn lc-btn-primary" onclick="generateReport()">📊 生成报告</button>
+      </div>
+      <div id="reportContent">
+        <div class="lc-card">
+          <div class="lc-empty"><div class="icon">📋</div>点击「生成报告」查看本场直播复盘数据</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ PAGE 6: 直播系统设置 ============ -->
+    <div class="lc-inner" id="page-settings">
+      <div class="lc-page-hdr">
+        <div><h2>⚙️ 直播系统设置</h2><div class="sub">配置AI回复、敏感词过滤和弹幕开关</div></div>
+        <button class="lc-btn lc-btn-primary" onclick="saveSettings()">💾 保存设置</button>
+      </div>
+      <div class="lc-grid lc-grid-2">
+        <div class="lc-card">
+          <div class="lc-card-title">🤖 AI回复设置</div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">回复语气</div><div class="desc">AI自动回复的语气风格</div></div>
+            <select class="lc-sel" id="setAiStyle" style="width:140px">
+              <option value="friendly">亲切友好</option>
+              <option value="professional">专业严谨</option>
+              <option value="enthusiastic">热情活泼</option>
+            </select>
+          </div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">回复长度</div><div class="desc">回复内容的详细程度</div></div>
+            <select class="lc-sel" id="setAiLength" style="width:140px">
+              <option value="short">简洁</option>
+              <option value="medium">适中</option>
+              <option value="detailed">详细</option>
+            </select>
+          </div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">自动发送商品信息</div><div class="desc">回复时附带商品详情</div></div>
+            <div class="lc-switch on" id="switchAutoProd" onclick="toggleSwitch(this)"></div>
+          </div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">情感检测</div><div class="desc">识别用户情绪调整回复</div></div>
+            <div class="lc-switch on" id="switchEmotion" onclick="toggleSwitch(this)"></div>
+          </div>
+        </div>
+        <div class="lc-card">
+          <div class="lc-card-title">🛡️ 敏感词与安全</div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">敏感词过滤</div><div class="desc">过滤违规内容</div></div>
+            <div class="lc-switch on" id="switchSensitive" onclick="toggleSwitch(this)"></div>
+          </div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">违规拦截</div><div class="desc">拦截并标记违规弹幕</div></div>
+            <div class="lc-switch on" id="switchViolation" onclick="toggleSwitch(this)"></div>
+          </div>
+          <div style="margin-top:10px">
+            <div style="font-size:12px;font-weight:600;color:#1e293b;margin-bottom:6px">自定义敏感词（逗号分隔）</div>
+            <textarea class="lc-inp" id="setSensitiveWords" rows="3" style="resize:vertical"></textarea>
+          </div>
+        </div>
+        <div class="lc-card">
+          <div class="lc-card-title">💬 弹幕与私信</div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">虚拟弹幕</div><div class="desc">自动生成模拟弹幕</div></div>
+            <div class="lc-switch on" id="switchVdanmaku" onclick="toggleSwitch(this)"></div>
+          </div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">弹幕频率</div><div class="desc">生成速度</div></div>
+            <select class="lc-sel" id="setVdanmakuFreq" style="width:140px">
+              <option value="low">低</option>
+              <option value="medium" selected>中</option>
+              <option value="high">高</option>
+            </select>
+          </div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">私信自动回复</div><div class="desc">自动回复用户咨询</div></div>
+            <div class="lc-switch on" id="switchPvtReply" onclick="toggleSwitch(this)"></div>
+          </div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">人工转接</div><div class="desc">AI无法回答时转人工</div></div>
+            <div class="lc-switch on" id="switchHumanTransfer" onclick="toggleSwitch(this)"></div>
+          </div>
+        </div>
+        <div class="lc-card">
+          <div class="lc-card-title">⚙️ 系统选项</div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">智能提示</div><div class="desc">推送运营建议</div></div>
+            <div class="lc-switch on" id="switchAlerts" onclick="toggleSwitch(this)"></div>
+          </div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">直播计时提醒</div><div class="desc">每45分钟提醒</div></div>
+            <div class="lc-switch on" id="switchTimer" onclick="toggleSwitch(this)"></div>
+          </div>
+          <div class="lc-setting-row">
+            <div><div class="lbl">数据自动备份</div><div class="desc">结束后自动备份</div></div>
+            <div class="lc-switch" id="switchBackup" onclick="toggleSwitch(this)"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ============================================================
+// State
+// ============================================================
+var S = {
+  liveStatus: {status:'idle',onlineCount:0,totalDanmaku:0,totalPrivateMessages:0,totalAIReplies:0,liveDuration:0,currentStage:'warmup'},
+  curProd: null,
+  products: [],
+  stats: {},
+  settings: null,
+  dmList: [],
+  sessions: [],
+  alerts: [],
+  reviews: [],
+  hfq: [],
+  curPage: 'console',
+  aiReplyFilter: 'all',
+  reviewFilter: 'all',
+  isLive: false
+};
+window.__camStream = null;
+window.__camOn = false;
+
+var ws = null, wsR = null, wsA = 0, wsQ = [], LL = {}, wsConnected = false, wsInitDone = false;
+
+// ============================================================
+// WebSocket
+// ============================================================
+function wsConn() {
+  if (ws && ws.readyState === 1) return;
+  var loc = window.location;
+  var wsProto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(wsProto + '//' + loc.host + '/ws/live-commerce');
+  ws.onopen = function() {
+    wsA = 0; wsConnected = true; wsInitDone = true;
+    document.getElementById('wsStatus').innerHTML = '<span class="lc-dot live"></span>已连接 &#10003;';
+    while (wsQ.length && ws.readyState === 1) { ws.send(wsQ.shift()); }
+  };
+  ws.onclose = function(e) {
+    wsConnected = false;
+    if (e.code === 1000 || e.code === 1001) {
+      document.getElementById('wsStatus').innerHTML = '<span class="lc-dot idle"></span>连接已断开';
+      console.log('[LiveCommerce] WebSocket正常关闭');
+      return;
+    }
+    var msg = '第'+(wsA+1)+'次重连...';
+    document.getElementById('wsStatus').innerHTML = '<span class="lc-dot idle"></span>'+msg;
+    clearTimeout(wsR);
+    var delay = wsInitDone ? Math.min(1000 * Math.pow(1.3, wsA), 10000) : 200;
+    wsR = setTimeout(wsConn, delay);
+    wsA++;
+  };
+  ws.onmessage = function(e) {
+    try { var m = JSON.parse(e.data); emit(m.type, m.data||{}); emit('*', m); } catch(ex) {}
+  };
+  ws.onerror = function(e) {
+    wsConnected = false;
+    document.getElementById('wsStatus').innerHTML = '<span class="lc-dot err"></span>正在连接…';
+    console.error('[LiveCommerce] WebSocket连接失败:', e);
+  };
+}
+function wsSend(t, d) {
+  var msg = JSON.stringify({type:t,data:d||{},timestamp:new Date().toISOString()});
+  if (ws && ws.readyState === 1) { ws.send(msg); }
+  else {
+    wsQ.push(msg);
+    if (wsInitDone && wsA > 0 && wsA % 5 === 0) {
+      toast('消息已排队，等待连接恢复…','warn');
+    }
+  }
+}
+function on(e, c) { if (!LL[e]) LL[e] = []; LL[e].push(c); }
+function emit(e, d) { if (LL[e]) LL[e].forEach(function(f){try{f(d)}catch(ex){}}); }
+
+// ============================================================
+// Helpers
+// ============================================================
+function fmtNum(n) { return (n===null||n===undefined||isNaN(n))?'0':Number(n).toLocaleString(); }
+function fmtPrice(p) { return '¥' + (p||0).toFixed(0); }
+function fmtTime(t) { if(!t)return'--';try{var d=new Date(t);return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2)}catch(e){return t} }
+function esc(s) { if(!s)return'';var d=document.createElement('div');d.textContent=s;return d.innerHTML; }
+function toast(msg, type) {
+  var el=document.createElement('div');
+  el.style.cssText='position:fixed;top:80px;right:24px;z-index:1100;padding:8px 16px;border-radius:8px;color:#fff;font-size:13px;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,.15);animation:lcFade .3s;background:'+(type==='success'?'#10b981':type==='warn'?'#f59e0b':type==='err'?'#ef4444':'#2563eb');
+  el.textContent=msg;document.body.appendChild(el);
+  setTimeout(function(){el.style.opacity='0';el.style.transition='opacity .3s';setTimeout(function(){el.remove()},300)},2500);
+}
+var emg=false;
+function toggleEmg() {
+  emg=!emg;
+  var b=document.querySelector('.lc-sb-footer .lc-btn');
+  if(emg){b.style.background='#10b981';b.innerHTML='▶️ 已暂停AI';wsSend('pause_live');toast('已暂停全部AI自动功能','warn');}
+  else{b.style.background='transparent';b.innerHTML='⏸️ 一键暂停AI';wsSend('resume_live');toast('AI服务已恢复','success');}
+}
+
+// ============================================================
+// Page Switching
+// ============================================================
+function switchPage(page) {
+  S.curPage = page;
+  document.querySelectorAll('.lc-sb-item').forEach(function(el){el.classList.toggle('active',el.dataset.page===page)});
+  document.querySelectorAll('.lc-inner').forEach(function(el){el.classList.toggle('active',el.id==='page-'+page)});
+  if (page==='console') { renderAll(); }
+  if (page==='danmaku') renderDmPage();
+  if (page==='analysis') renderAnalysisPage();
+  if (page==='reviews') renderReviewsPage();
+  if (page==='settings') loadSettings();
+}
+
+// ============================================================
+// Camera
+// ============================================================
+function startCam() {
+  if (window.__camOn) return;
+  navigator.mediaDevices.getUserMedia({video:true}).then(function(stream) {
+    window.__camStream = stream; window.__camOn = true;
+    document.getElementById('videoPreview').srcObject = stream;
+  }).catch(function(e){toast('摄像头启动失败: '+e.message,'err')});
+}
+function stopCam() {
+  if (window.__camStream) { window.__camStream.getTracks().forEach(function(t){t.stop()}); window.__camStream = null; }
+  window.__camOn = false; document.getElementById('videoPreview').srcObject = null;
+}
+function changeCam() { if (window.__camOn) { stopCam(); setTimeout(startCam, 300); } }
+// Enumerate cameras
+navigator.mediaDevices.enumerateDevices().then(function(devices) {
+  var sel = document.getElementById('camSelect');
+  devices.forEach(function(d) {
+    if (d.kind==='videoinput') {
+      var o=document.createElement('option');
+      o.value=d.deviceId; o.textContent=d.label||('摄像头 '+(sel.options.length+1));
+      sel.appendChild(o);
+    }
+  });
+}).catch(function(){});
+
+// ============================================================
+// Live Controls
+// ============================================================
+function startLive() { wsSend('start_live'); }
+function endLive() {
+  if (window.__camStream) {
+    window.__camStream.getTracks().forEach(function(t){t.stop()});
+    window.__camStream=null; window.__camOn=false;
+    document.getElementById('videoPreview').srcObject=null;
+  }
+  wsSend('end_live');
+}
+function switchStage(stage) { wsSend('switch_stage',{stage:stage}); }
+
+// ============================================================
+// Product
+// ============================================================
+function setCurProd(pid) { if (pid) wsSend('set_product',{productId:pid}); }
+
+// ============================================================
+// Danmaku
+// ============================================================
+function sendDanmaku() {
+  var inp=document.getElementById('danmakuInput');
+  var text=inp.value.trim();
+  if (!text) return;
+  if (!S.curProd) { toast('请先选择商品','warn'); return; }
+  if (!wsConnected || !ws || ws.readyState !== 1) {
+    toast('服务未连接，暂时无法发送弹幕','warn');
+    return;
+  }
+  var dm = {
+    danmakuId:'dm_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+    userId:'host_001',userName:'主播',content:text,
+    timestamp:new Date().toISOString(),isVirtual:false,isReplied:false
+  };
+  S.dmList.push(dm);
+  wsSend('send_danmaku_reply',{danmakuId:dm.danmakuId,content:text});
+  inp.value=''; renderDmList(); updateConsoleStats();
+}
+function quickDanmaku(text) { document.getElementById('danmakuInput').value=text; sendDanmaku(); }
+
+// ============================================================
+// Settings
+// ============================================================
+function loadSettings() { wsSend('get_settings'); }
+function toggleSwitch(el) { el.classList.toggle('on'); }
+function saveSettings() {
+  wsSend('save_settings',{settings:{
+    aiReply:{
+      style:document.getElementById('setAiStyle').value,
+      length:document.getElementById('setAiLength').value,
+      autoSendProductInfo:document.getElementById('switchAutoProd').classList.contains('on'),
+      emotionDetectionEnabled:document.getElementById('switchEmotion').classList.contains('on'),
+      sensitiveFilterEnabled:document.getElementById('switchSensitive').classList.contains('on'),
+      violationFilterEnabled:document.getElementById('switchViolation').classList.contains('on'),
+      customSensitiveWords:document.getElementById('setSensitiveWords').value.split(/[,，]/).map(function(s){return s.trim()}).filter(Boolean)
+    },
+    virtualDanmaku:{
+      enabled:document.getElementById('switchVdanmaku').classList.contains('on'),
+      frequency:document.getElementById('setVdanmakuFreq').value
+    },
+    privateMessage:{
+      enabled:document.getElementById('switchPvtReply').classList.contains('on'),
+      humanTransferEnabled:document.getElementById('switchHumanTransfer').classList.contains('on')
+    },
+    system:{
+      smartAlertEnabled:document.getElementById('switchAlerts').classList.contains('on'),
+      liveDurationReminderEnabled:document.getElementById('switchTimer').classList.contains('on'),
+      dataAutoBackup:document.getElementById('switchBackup').classList.contains('on')
+    }
+  }});
+}
+
+// ============================================================
+// Report
+// ============================================================
+function generateReport() { wsSend('request_report'); }
+
+// ============================================================
+// Tab switching
+// ============================================================
+function switchAiTab(tab) {
+  S.aiReplyFilter=tab;
+  document.querySelectorAll('#aiReplyTab button').forEach(function(b){b.classList.toggle('active',b.dataset.tab===tab)});
+  renderAiReplyList();
+}
+function switchReviewTab(tab) {
+  S.reviewFilter=tab;
+  document.querySelectorAll('#reviews .lc-tab button').forEach(function(b,i){
+    b.classList.toggle('active',(i===0&&tab==='all')||b.textContent.includes({all:'全部',positive:'好评',negative:'差评',pending:'未处理'}[tab]));
+  });
+  renderReviewList();
+}
+
+// ============================================================
+// Rendering: Console
+// ============================================================
+function renderConsoleStatus() {
+  var ls=S.liveStatus;
+  var isLive=ls.status==='live',isPaused=ls.status==='paused';
+  S.isLive=isLive||isPaused;
+  var se=document.getElementById('consoleStatus');
+  if(isLive) se.innerHTML='<span class="lc-badge lc-badge-live">● 直播中</span>';
+  else if(isPaused) se.innerHTML='<span class="lc-badge" style="background:#fffbeb;color:#d97706;border-color:#fde68a">⏸ 已暂停</span>';
+  else se.innerHTML='<span class="lc-badge lc-badge-idle">⏸ 未开播</span>';
+  document.getElementById('btnStartLive').style.display=(isLive||isPaused)?'none':'';
+  document.getElementById('btnEndLive').style.display=(isLive||isPaused)?'':'none';
+  var stageLabels={warmup:'🔥 预热',flash_sale:'⚡ 秒杀',deep_dive:'🎯 深度',interact:'💰 互动',closing:'👋 收尾'};
+  var se2=document.getElementById('consoleStage');
+  if(isLive) se2.innerHTML='<span class="lc-badge lc-badge-stage">'+(stageLabels[ls.currentStage]||ls.currentStage)+'</span>';
+  else se2.innerHTML='';
+}
+function renderStageControl() {
+  var stages=[{k:'warmup',l:'预热'},{k:'flash_sale',l:'秒杀'},{k:'deep_dive',l:'深度'},{k:'interact',l:'互动'},{k:'closing',l:'收尾'}];
+  var cur=S.liveStatus.currentStage||'warmup';
+  var idx=stages.findIndex(function(x){return x.k===cur});
+  document.getElementById('stageControl').innerHTML=stages.map(function(s,i){
+    var cls=i<idx?'done':s.k===cur?'active':'pending';
+    return '<div class="lc-stg-btn '+cls+'" onclick="switchStage(\''+s.k+'\')">'+s.l+'</div>';
+  }).join('');
+  var strats={warmup:'预热阶段：侧重介绍商品亮点',flash_sale:'秒杀阶段：强调限时优惠',deep_dive:'深度讲解：详细展示商品细节',interact:'互动促单：引导下单',closing:'收尾总结：汇总本场直播'};
+  document.getElementById('stageStrategy').textContent=strats[cur]||'';
+}
+function renderProductSelect() {
+  var sel=document.getElementById('prodSelect');
+  sel.innerHTML='<option value="">-- 选择商品 --</option>';
+  S.products.forEach(function(p){
+    var o=document.createElement('option');o.value=p.productId;
+    o.textContent=p.name+' '+fmtPrice(p.price);
+    if(S.curProd&&p.productId===S.curProd.productId) o.selected=true;
+    sel.appendChild(o);
+  });
+  renderProductInfo();
+}
+function renderProductInfo() {
+  var p=S.curProd;
+  var el=document.getElementById('prodInfo');
+  if(!p){el.innerHTML='<div style="color:#94a3b8">请选择商品</div>';return;}
+  var desc=p.description?esc(p.description).slice(0,60):'';
+  el.innerHTML='<div style="font-size:15px;font-weight:700;color:#0f172a">'+esc(p.name)+'</div>'+
+    '<div style="display:flex;gap:12px;margin:4px 0;font-size:12px">'+
+    '<span style="color:#64748b">'+(p.category||'')+'</span>'+
+    '<span style="color:#dc2626;font-weight:600">'+fmtPrice(p.price)+'</span>'+
+    '<span style="color:#475569">库存 '+fmtNum(p.stock)+'</span></div>'+
+    '<div style="font-size:11px;color:#94a3b8;margin-top:4px">'+desc+'</div>';
+}
+function renderDmList() {
+  var list=S.dmList;
+  var el=document.getElementById('danmakuList');
+  if(!list.length){el.innerHTML='<div class="lc-empty"><div class="icon">💬</div>暂无弹幕</div>';return;}
+  el.innerHTML=list.slice(-50).reverse().map(function(d){
+    return '<div class="lc-dm-item">'+
+      '<span style="font-weight:600;color:#1e293b;font-size:11px">'+esc(d.userName)+'</span> '+
+      '<span style="color:#475569">'+esc(d.content)+'</span>'+
+      (d.isReplied&&d.replyContent?'<div class="lc-dm-reply">🤖 '+esc(d.replyContent)+'</div>':'')+
+      '<span style="float:right;color:#cbd5e1;font-size:10px">'+fmtTime(d.timestamp)+'</span></div>';
+  }).join('');
+}
+function updateConsoleStats() {
+  var ls=S.liveStatus;
+  var total=S.dmList.length;
+  var replied=S.dmList.filter(function(d){return d.isReplied}).length;
+  document.getElementById('statTotalDm').textContent=fmtNum(total||ls.totalDanmaku);
+  document.getElementById('statAiReplies').textContent=fmtNum(replied||ls.totalAIReplies);
+  document.getElementById('statOnline').textContent=fmtNum(ls.onlineCount);
+  var rate=total?Math.round(replied/total*100):0;
+  document.getElementById('statReplyRate').textContent=rate+'%';
+  document.getElementById('dmDmTotal').textContent=fmtNum(total||ls.totalDanmaku);
+  document.getElementById('dmRepliedTotal').textContent=fmtNum(replied||ls.totalAIReplies);
+}
+function renderTopQuestions() {
+  var list=S.hfq;
+  var el=document.getElementById('topQuestions');
+  if(!list||!list.length){el.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:8px 0">暂无数据</div>';return;}
+  el.innerHTML=list.slice(0,10).map(function(q,i){
+    return '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f8fafc;font-size:12px">'+
+      '<span>#'+(i+1)+' '+esc(q.question)+'</span>'+
+      '<span style="font-weight:600;color:#2563eb">'+q.count+'次</span></div>';
+  }).join('');
+}
+function renderAlerts() {
+  var el=document.getElementById('alertPanel');
+  var list=S.alerts;
+  if(!list||!list.length){el.innerHTML='<div class="lc-empty"><div class="icon">📢</div>暂无场控提示</div>';return;}
+  el.innerHTML=list.slice(-20).reverse().map(function(a){
+    return '<div class="lc-alert-item '+(a.type||'hot_question')+'">'+
+      '<div style="font-weight:600;font-size:12px">'+esc(a.title||'')+'</div>'+
+      '<div style="font-size:11px;color:#475569">'+esc(a.message||'')+'</div>'+
+      '<div style="font-size:10px;color:#94a3b8;margin-top:2px">'+fmtTime(a.timestamp)+'</div></div>';
+  }).join('');
+}
+
+// ============================================================
+// Rendering: Danmaku Page
+// ============================================================
+function renderDmPage() {
+  renderDmHistoryList();
+  renderAiReplyList();
+  renderTopQuestionsChart();
+  updateConsoleStats();
+}
+function renderDmHistoryList() {
+  var list=S.dmList;
+  var el=document.getElementById('dmHistoryList');
+  if(!list.length){el.innerHTML='<div class="lc-empty"><div class="icon">💬</div>暂无弹幕记录</div>';return;}
+  el.innerHTML=list.slice().reverse().map(function(d){
+    return '<div class="lc-dm-item">'+
+      '<span style="font-weight:600;color:#1e293b;font-size:11px">'+esc(d.userName)+'</span> '+
+      '<span style="color:#475569">'+esc(d.content)+'</span>'+
+      (d.isReplied?'<span class="lc-tag lc-tag-green" style="margin-left:6px">已回复</span>':'<span class="lc-tag lc-tag-yellow" style="margin-left:6px">待回复</span>')+
+      '<span style="float:right;color:#cbd5e1;font-size:10px">'+fmtTime(d.timestamp)+'</span>'+
+      (d.isReplied&&d.replyContent?'<div class="lc-dm-reply">🤖 '+esc(d.replyContent)+'</div>':'')+'</div>';
+  }).join('');
+}
+function renderAiReplyList() {
+  var list=S.dmList;
+  if(S.aiReplyFilter==='ai') list=list.filter(function(d){return d.isReplied});
+  else if(S.aiReplyFilter==='pending') list=list.filter(function(d){return !d.isReplied});
+  var el=document.getElementById('aiReplyList');
+  if(!list.length){el.innerHTML='<div class="lc-empty"><div class="icon">🤖</div>暂无记录</div>';return;}
+  el.innerHTML=list.slice().reverse().map(function(d){
+    return '<div class="lc-dm-item">'+
+      '<div><span style="font-weight:600;color:#1e293b;font-size:11px">'+esc(d.userName)+'</span> '+
+      '<span style="color:#475569;font-size:12px">问：'+esc(d.content)+'</span></div>'+
+      (d.isReplied?'<div class="lc-dm-reply">🤖 答：'+esc(d.replyContent)+'</div>':'<div style="color:#94a3b8;font-size:11px;margin-left:24px">⏳ 待回复</div>')+
+      '<span style="float:right;color:#cbd5e1;font-size:10px">'+fmtTime(d.timestamp)+'</span></div>';
+  }).join('');
+}
+function renderTopQuestionsChart() {
+  var list=S.hfq;
+  var el=document.getElementById('hfqChart');
+  if(!list||!list.length){el.innerHTML='<div style="text-align:center;padding:60px 0;color:#94a3b8">暂无数据</div>';return;}
+  try {
+    if(window.__hfqChart) window.__hfqChart.dispose();
+    var chart=echarts.init(el); window.__hfqChart=chart;
+    var top10=list.slice(0,10);
+    chart.setOption({
+      tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
+      grid:{left:120,right:20,top:20,bottom:30},
+      xAxis:{type:'value'},
+      yAxis:{type:'category',data:top10.map(function(q){return q.question.length>12?q.question.slice(0,12)+'…':q.question}),axisLabel:{fontSize:11}},
+      series:[{type:'bar',data:top10.map(function(q){return q.count}),itemStyle:{color:function(p){var c=['#2563eb','#3b82f6','#60a5fa','#93c5fd','#bfdbfe'];return c[p.dataIndex%c.length]}},barMaxWidth:24}]
+    });
+  }catch(e){}
+}
+
+// ============================================================
+// Rendering: Analysis Page
+// ============================================================
+function renderAnalysisPage() {
+  var ls=S.liveStatus, st=S.stats;
+  document.getElementById('anTotalDm').textContent=fmtNum(ls.totalDanmaku||0);
+  document.getElementById('anAiReplies').textContent=fmtNum(ls.totalAIReplies||0);
+  document.getElementById('anOnline').textContent=fmtNum(ls.onlineCount||0);
+  document.getElementById('anInquiry').textContent=fmtNum(ls.totalPrivateMessages||0);
+  document.getElementById('anExpo').textContent=fmtNum(st.exposureCount||0);
+  document.getElementById('anMention').textContent=fmtNum(st.mentionCount||0);
+  document.getElementById('anIntent').textContent=fmtNum(Math.round(st.intentScore||0));
+  renderDmTrendChart(); renderAudienceChart(); renderLiveOverview();
+}
+function renderDmTrendChart() {
+  try {
+    if(window.__dmTrendChart) window.__dmTrendChart.dispose();
+    var chart=echarts.init(document.getElementById('dmTrendChart'));
+    window.__dmTrendChart=chart;
+    var data=S.dmList.slice(-30);
+    var times=data.map(function(d){return fmtTime(d.timestamp)});
+    var counts=data.map(function(_,i){return i+1});
+    chart.setOption({
+      tooltip:{trigger:'axis'},grid:{left:40,right:20,top:20,bottom:30},
+      xAxis:{type:'category',data:times.length>10?times.filter(function(_,i){return i%Math.ceil(times.length/10)===0}):times,axisLabel:{fontSize:10}},
+      yAxis:{type:'value'},
+      series:[{type:'line',data:counts,smooth:true,lineStyle:{color:'#2563eb',width:2},areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'rgba(37,99,235,.2)'},{offset:1,color:'rgba(37,99,235,0)']}},symbol:'circle',symbolSize:6}]
+    });
+  }catch(e){}
+}
+function renderAudienceChart() {
+  try {
+    if(window.__audChart) window.__audChart.dispose();
+    var chart=echarts.init(document.getElementById('audienceChart'));
+    window.__audChart=chart;
+    chart.setOption({
+      tooltip:{trigger:'item',formatter:'{b}: {c} ({d}%)'},
+      series:[{type:'pie',radius:['30%','60%'],center:['50%','50%'],
+        data:[
+          {name:'高意向',value:35,itemStyle:{color:'#2563eb'}},
+          {name:'潜力用户',value:25,itemStyle:{color:'#3b82f6'}},
+          {name:'观望中',value:20,itemStyle:{color:'#60a5fa'}},
+          {name:'挑剔型',value:12,itemStyle:{color:'#93c5fd'}},
+          {name:'随便看看',value:8,itemStyle:{color:'#bfdbfe'}}
+        ],
+        label:{fontSize:12,formatter:'{b}\n{d}%'},
+        emphasis:{itemStyle:{shadowBlur:10,shadowColor:'rgba(0,0,0,.15)'}}
+      }]
+    });
+  }catch(e){}
+}
+function renderLiveOverview() {
+  var ls=S.liveStatus,st=S.stats;
+  var dur=ls.liveDuration||0;
+  var h=Math.floor(dur/3600),m=Math.floor((dur%3600)/60);
+  var ds=(h>0?h+'小时':'')+m+'分钟';
+  document.getElementById('liveDataOverview').innerHTML=
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">'+
+    '<div class="lc-stat lc-card"><div class="nv">'+ds+'</div><div class="lb">直播时长</div></div>'+
+    '<div class="lc-stat lc-card"><div class="nv">'+fmtNum(ls.totalDanmaku||0)+'</div><div class="lb">弹幕互动</div></div>'+
+    '<div class="lc-stat lc-card"><div class="nv">'+fmtNum(ls.totalAIReplies||0)+'</div><div class="lb">AI回复</div></div>'+
+    '<div class="lc-stat lc-card"><div class="nv">'+fmtNum(st.virtualDanmakuCount||0)+'</div><div class="lb">虚拟弹幕</div></div>'+
+    '<div class="lc-stat lc-card"><div class="nv">'+fmtNum(Math.round(st.aiReplySuccessRate||0))+'%</div><div class="lb">回复成功率</div></div>'+
+    '<div class="lc-stat lc-card"><div class="nv">'+fmtNum(st.potentialOrderCount||0)+'</div><div class="lb">潜在订单</div></div></div>';
+}
+
+// ============================================================
+// Rendering: Reviews Page
+// ============================================================
+function renderReviewsPage() { renderReviewList(); renderQAList(); updateReviewStats(); }
+function renderReviewList() {
+  var list=S.reviews;
+  var f=S.reviewFilter;
+  if(f==='positive') list=list.filter(function(r){return r.sentiment==='positive'});
+  else if(f==='negative') list=list.filter(function(r){return r.sentiment==='negative'});
+  else if(f==='pending') list=list.filter(function(r){return !r.isHandled});
+  var el=document.getElementById('reviewList');
+  if(!list.length){el.innerHTML='<div class="lc-empty"><div class="icon">⭐</div>暂无评价</div>';return;}
+  el.innerHTML=list.slice().reverse().map(function(r){
+    var stars='★'.repeat(r.rating||0)+'☆'.repeat(5-(r.rating||0));
+    var stags={positive:'<span class="lc-tag lc-tag-green">好评</span>',negative:'<span class="lc-tag lc-tag-red">差评</span>',neutral:'<span class="lc-tag lc-tag-yellow">中评</span>'};
+    return '<div class="lc-dm-item">'+
+      '<div style="display:flex;justify-content:space-between">'+
+      '<span style="font-weight:600;font-size:12px">'+esc(r.userName||'匿名')+'</span>'+
+      '<span style="color:#f59e0b;font-size:12px">'+stars+'</span></div>'+
+      '<div style="font-size:12px;color:#475569;margin:2px 0">'+esc(r.content)+'</div>'+
+      '<div style="display:flex;gap:6px;font-size:11px;color:#94a3b8">'+
+      (stags[r.sentiment]||'')+
+      (r.productName?'<span>'+esc(r.productName)+'</span>':'')+
+      '<span>'+fmtTime(r.timestamp)+'</span></div></div>';
+  }).join('');
+}
+function renderQAList() {
+  var list=S.dmList.filter(function(d){return d.isReplied});
+  var el=document.getElementById('qaHistoryList');
+  if(!list.length){el.innerHTML='<div class="lc-empty"><div class="icon">💬</div>暂无问答</div>';return;}
+  el.innerHTML=list.slice(-30).reverse().map(function(d){
+    return '<div class="lc-dm-item">'+
+      '<div style="font-size:12px"><span style="font-weight:600">Q: </span>'+esc(d.content)+'</div>'+
+      '<div class="lc-dm-reply" style="margin-left:0;margin-top:4px"><span style="font-weight:600">A: </span>'+esc(d.replyContent||'')+'</div>'+
+      '<div style="font-size:10px;color:#94a3b8;margin-top:2px">'+fmtTime(d.timestamp)+'</div></div>';
+  }).join('');
+}
+function updateReviewStats() {
+  var list=S.reviews;
+  document.getElementById('rvTotal').textContent=list.length;
+  document.getElementById('rvPos').textContent=list.filter(function(r){return r.sentiment==='positive'}).length;
+  document.getElementById('rvNeg').textContent=list.filter(function(r){return r.sentiment==='negative'}).length;
+}
+
+// ============================================================
+// Render Report
+// ============================================================
+function renderReport(data) {
+  var el=document.getElementById('reportContent');
+  if(!data||!data.liveDuration){
+    el.innerHTML='<div class="lc-card"><div class="lc-empty"><div class="icon">📋</div>暂无报告数据，请先开始直播</div></div>';
+    return;
+  }
+  var dur=data.liveDuration||0;
+  var h=Math.floor(dur/3600),m=Math.floor((dur%3600)/60);
+  var ds=(h>0?h+'小时':'')+m+'分钟';
+  var c1=data.chapter1_overview||{};
+  var c1a=c1.audience||{}, c1i=c1.interaction||{};
+  el.innerHTML=
+    '<div class="lc-grid lc-grid-2">'+
+    '<div class="lc-card"><div class="lc-card-title">📊 直播概况</div>'+
+    '<table class="lc-tbl"><tr><td>直播时长</td><td><strong>'+ds+'</strong></td></tr>'+
+    '<tr><td>在线峰值</td><td><strong>'+fmtNum(c1a.peakOnline||0)+'</strong> 人</td></tr>'+
+    '<tr><td>弹幕总数</td><td><strong>'+fmtNum(c1i.totalDanmaku||0)+'</strong> 条</td></tr>'+
+    '<tr><td>AI回复</td><td><strong>'+fmtNum(c1i.totalAIReplies||0)+'</strong> 次</td></tr>'+
+    '<tr><td>综合评价</td><td><span class="lc-badge lc-badge-live">'+(data.grade||'B')+'</span></td></tr></table></div>'+
+    '<div class="lc-card"><div class="lc-card-title">🏆 带货总结</div>'+
+    '<div style="font-size:13px;line-height:1.7">'+
+    ((data.summary&&data.summary.highlights)?data.summary.highlights.map(function(h){return '✅ '+h+'<br>'}).join(''):'✅ 暂无总结数据<br>')+
+    '</div></div></div>'+
+    '<div class="lc-card"><div class="lc-card-title">💡 优化建议</div>'+
+    '<div style="font-size:13px;line-height:1.7;color:#475569">'+
+    ((data.summary&&data.summary.improvements)?data.summary.improvements.map(function(s){return '👉 '+s+'<br>'}).join(''):'👉 暂无优化建议')+
+    '</div></div>'+
+    '<div class="lc-card"><div class="lc-card-title">🔍 完整数据</div>'+
+    '<pre style="font-size:11px;color:#64748b;max-height:400px;overflow-y:auto;background:#f8fafc;padding:12px;border-radius:6px">'+esc(JSON.stringify(data,null,2))+'</pre></div>';
+}
+
+// ============================================================
+// Event Handlers
+// ============================================================
+on('init_state',function(d){
+  if(d.liveStatus) Object.assign(S.liveStatus,d.liveStatus);
+  if(d.products) S.products=d.products;
+  if(d.stats) S.stats=d.stats;
+  if(d.settings) S.settings=d.settings;
+  if(d.allDanmaku) S.dmList=d.allDanmaku;
+  if(d.sessions) S.sessions=d.sessions;
+  if(d.alerts) S.alerts=d.alerts;
+  if(d.highFreqQuestions) S.hfq=d.highFreqQuestions;
+  if(d.reviews) S.reviews=d.reviews;
+  if(d.currentProduct) S.curProd=d.currentProduct;
+  renderAll();
+});
+on('live_started',function(d){S.liveStatus.status='live';S.liveStatus.startTime=d.startTime;renderConsoleStatus();renderStageControl();toast('直播已开始！','success');});
+on('live_paused',function(d){S.liveStatus.status='paused';renderConsoleStatus();toast('直播已暂停','warn');});
+on('live_resumed',function(d){S.liveStatus.status='live';renderConsoleStatus();toast('直播已恢复','success');});
+on('live_ended',function(d){S.liveStatus.status='ended';renderConsoleStatus();if(d.report){S.lastReport=d.report;if(S.curPage==='report')renderReport(d.report);}toast('直播已结束','success');});
+on('start_live_result',function(d){if(!d.success) toast(d.message||'开始失败','err');});
+on('end_live_result',function(d){if(d.report){S.lastReport=d.report;if(S.curPage==='report')renderReport(d.report);}});
+
+on('new_danmaku',function(d){
+  var exists=S.dmList.some(function(x){return x.danmakuId===d.danmakuId});
+  if(!exists) S.dmList.push(d);
+  if(S.curPage==='console'){renderDmList();updateConsoleStats();}
+});
+on('danmaku_reply',function(d){
+  for(var i=0;i<S.dmList.length;i++){if(S.dmList[i].danmakuId===d.danmakuId){S.dmList[i].isReplied=true;S.dmList[i].replyContent=d.replyContent;S.dmList[i].replyTime=d.replyTime;break;}}
+  if(S.curPage==='console'){renderDmList();updateConsoleStats();}
+  if(S.curPage==='danmaku'){renderDmPage();}
+});
+on('stage_changed',function(d){S.liveStatus.currentStage=d.stage;renderConsoleStatus();renderStageControl();toast('已切换阶段','success');});
+on('product_on_sale',function(d){
+  var p=S.products.find(function(x){return x.productId===d.productId});
+  if(p){S.curProd=p;renderProductSelect();}
+});
+on('set_product_result',function(d){
+  if(d.success&&d.product){S.curProd=d.product;renderProductSelect();toast('已切换商品','success');}
+  else toast('商品切换失败','err');
+});
+on('status_update',function(d){
+  if(d.onlineCount!==undefined) S.liveStatus.onlineCount=d.onlineCount;
+  if(d.liveDuration!==undefined) S.liveStatus.liveDuration=d.liveDuration;
+  if(S.curPage==='console') document.getElementById('statOnline').textContent=fmtNum(S.liveStatus.onlineCount);
+});
+on('stats_update',function(d){S.stats=d;if(S.curPage==='console')updateConsoleStats();if(S.curPage==='analysis')renderAnalysisPage();});
+on('new_alert',function(d){S.alerts.push(d);if(S.curPage==='console')renderAlerts();});
+on('new_review',function(d){if(d.reviewId&&!S.reviews.find(function(r){return r.reviewId===d.reviewId})){S.reviews.push(d);if(S.curPage==='reviews')renderReviewsPage();}});
+on('high_freq_update',function(d){if(d.questions)S.hfq=d.questions;if(S.curPage==='console')renderTopQuestions();});
+on('get_high_freq_result',function(d){if(d.questions)S.hfq=d.questions;if(S.curPage==='console')renderTopQuestions();if(S.curPage==='danmaku')renderTopQuestionsChart();});
+on('get_stats_result',function(d){if(d.stats)S.stats=d.stats;if(d.liveStatus)Object.assign(S.liveStatus,d.liveStatus);if(S.curPage==='console')updateConsoleStats();if(S.curPage==='analysis')renderAnalysisPage();});
+on('get_settings_result',function(d){if(d.settings){S.settings=d.settings;applySettings(d.settings);}});
+on('save_settings_result',function(d){if(d.success)toast('设置已保存','success');});
+on('request_report_result',function(d){if(d.success&&d.report){S.lastReport=d.report;renderReport(d.report);toast('报告生成成功','success');}else toast(d.message||'报告生成失败','err');});
+on('generate_report_result',function(d){if(d.success&&d.report){S.lastReport=d.report;renderReport(d.report);toast('报告生成成功','success');}});
+on('get_reviews_result',function(d){if(d.reviews)S.reviews=d.reviews;if(S.curPage==='reviews')renderReviewsPage();});
+on('get_products_result',function(d){if(d.products)S.products=d.products;renderProductSelect();});
+
+// ============================================================
+// Apply Settings
+// ============================================================
+function applySettings(s) {
+  if(!s)return;
+  if(s.aiReply){
+    if(s.aiReply.style) document.getElementById('setAiStyle').value=s.aiReply.style;
+    if(s.aiReply.length) document.getElementById('setAiLength').value=s.aiReply.length;
+    setSwitch('switchAutoProd',s.aiReply.autoSendProductInfo!==false);
+    setSwitch('switchEmotion',s.aiReply.emotionDetectionEnabled!==false);
+    setSwitch('switchSensitive',s.aiReply.sensitiveFilterEnabled!==false);
+    setSwitch('switchViolation',s.aiReply.violationFilterEnabled!==false);
+    if(s.aiReply.customSensitiveWords&&s.aiReply.customSensitiveWords.length){
+      document.getElementById('setSensitiveWords').value=s.aiReply.customSensitiveWords.join(', ');
+    }
+  }
+  if(s.virtualDanmaku){
+    setSwitch('switchVdanmaku',s.virtualDanmaku.enabled!==false);
+    if(s.virtualDanmaku.frequency) document.getElementById('setVdanmakuFreq').value=s.virtualDanmaku.frequency;
+  }
+  if(s.privateMessage){
+    setSwitch('switchPvtReply',s.privateMessage.enabled!==false);
+    setSwitch('switchHumanTransfer',s.privateMessage.humanTransferEnabled!==false);
+  }
+  if(s.system){
+    setSwitch('switchAlerts',s.system.smartAlertEnabled!==false);
+    setSwitch('switchTimer',s.system.liveDurationReminderEnabled!==false);
+    setSwitch('switchBackup',s.system.dataAutoBackup===true);
+  }
+}
+function setSwitch(id,on){var el=document.getElementById(id);if(el)el.classList.toggle('on',!!on);}
+
+// ============================================================
+// Render All (initial)
+// ============================================================
+function renderAll() {
+  renderConsoleStatus(); renderStageControl(); renderProductSelect();
+  renderDmList(); updateConsoleStats(); renderTopQuestions(); renderAlerts();
+}
+
+// ============================================================
+// Init
+// ============================================================
+wsConn();
+setInterval(function(){
+  if(S.liveStatus.status==='live'){wsSend('get_stats');wsSend('get_high_freq');}
+},10000);
+setInterval(function(){
+  if(S.curPage==='danmaku')renderDmPage();
+  if(S.curPage==='reviews')updateReviewStats();
+},5000);
+</script>
+</body>
+</html>

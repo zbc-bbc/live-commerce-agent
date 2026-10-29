@@ -1,4 +1,13 @@
-"""Live Commerce 数据层包。
+from data.live_commerce.products import ALL_PRODUCTS, Product, Promotion, get_product, search_products, list_categories
+from data.live_commerce.danmaku import DANMAKU_QUESTIONS, Danmaku
 
-本轮仅建立包骨架；商品、弹幕、设置、订单等数据模块在后续迭代中加入。
-"""
+__all__ = [
+    "ALL_PRODUCTS",
+    "Product",
+    "Promotion",
+    "get_product",
+    "search_products",
+    "list_categories",
+    "DANMAKU_QUESTIONS",
+    "Danmaku",
+]
