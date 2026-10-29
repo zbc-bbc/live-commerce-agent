@@ -156,7 +156,15 @@ class JWTAuthMiddleware:
             return
 
         if required != "any" and identity["role"] != required:
-            await _send_json(send, 403, f"{required} role required")
+            # 角色不符一律回 401（与「未携带 token」同一出口），按参赛文档约定：
+            # 主播页面无 token 或角色不对都返回 401。带 www-authenticate 让客户端
+            # 知道该重新登录，而不是把它当成「已登录但没权限」继续用旧 token。
+            await _send_json(
+                send,
+                401,
+                f"{required} role required",
+                [(b"www-authenticate", b"Bearer")],
+            )
             return
 
         await self.app(scope, receive, send)

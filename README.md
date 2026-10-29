@@ -62,11 +62,14 @@ AI Agent 在后台承担话术生成、弹幕意图识别与自动回复、高�
 ### 权限与数据隔离
 
 - **角色由凭据决定，不由客户端自报**：握手时校验 JWT 的 `scope`，`host` → 主播，`viewer` → 观众，
-  无 token 且未自称主播 → 游客；带了无效 / 过期 token 或自称 `host` 却无凭据，握手阶段直接关闭（`1008`）。
+  无 token 且未自称主播 → 游客；带了无效 / 过期 token 或自称 `host` 却无凭据，握手阶段直接拒绝（HTTP 403）。
 - **消息白名单**：观众连接只允许调用 `_VIEWER_ALLOWED` 中列出的消息类型，未列出的类型一律要求主播角色。
 - **按角色裁剪下发的数据**：主播 `init_state` 含 13 个键（统计、设置、敏感词、私信会话、告警等），
   观众只拿 6 个公开键（`role` / `liveStatus` / `currentProduct` / `products` / `hostProfile` / `allDanmaku`）；
   观众侧商品列表**只含已上架商品**，运营指标（AI 回复量、意图分、私信量）不下发。
+- **推送事件同样按角色裁剪**：`status_update` 剥掉 `totalAIReplies` / `totalPrivateMessages` / `totalDanmaku`；
+  `live_started` 内嵌状态同样裁剪；`live_ended`（含复盘报告）只给观众 `endTime` / `duration`；
+  `stage_changed` 只给阶段名，不下发阶段策略话术。
 - **观众操作身份服务端绑定**：`send_danmaku` / `place_order` / `recharge` 等不采信客户端自报 `userId`，
   统一由服务端从握手身份取值，避免越权读取他人余额、订单。
 
@@ -260,11 +263,44 @@ curl -X POST http://127.0.0.1:8080/auth/register \
 curl -X POST http://127.0.0.1:8080/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"host01","password":"host123456"}'
-# → {"access_token":"eyJ...","token_type":"bearer","expires_in":604800,...}
+# → {"access_token":"eyJ...","token_type":"bearer","role":"host","expires_in":604800,...}
+#    expires_in=604800 = 7 天
 
-# ⑤ 未登录访问运营台应被拦截
+# ⑤ 注册 / 登录观众账号（viewer JWT，24 小时）
+curl -X POST http://127.0.0.1:8080/auth/viewer/register \
+  -H "Content-Type: application/json" \
+  -d '{"nickname":"viewer01","password":"viewer123456"}'
+# → 201 {"access_token":"eyJ...","role":"viewer","expires_in":86400,...}
+
+curl -X POST http://127.0.0.1:8080/auth/viewer/login \
+  -H "Content-Type: application/json" \
+  -d '{"nickname":"viewer01","password":"viewer123456"}'
+# → 200 {"access_token":"eyJ...","role":"viewer",...}
+
+# ⑥ 未登录访问运营台应被拦截
 curl -i http://127.0.0.1:8080/live-commerce/
-# → HTTP/1.1 401 Unauthorized（登录后为 200）
+# → HTTP/1.1 401 Unauthorized（携带 host token 时为 200）
+```
+
+**角色权限矩阵**（`HOST` / `VIEWER` 为上两步拿到的 `access_token`）：
+
+| 请求 | 携带凭据 | 预期 |
+| --- | --- | --- |
+| `GET /live-commerce/` | 无 | **401** |
+| `GET /live-commerce/` | viewer JWT | **401**（角色不符） |
+| `GET /live-commerce/` | host JWT | 200 |
+| `GET /auth/me` | viewer JWT | 401 |
+| `GET /auth/me` | host JWT | 200 |
+| `GET /auth/viewer/me` | host JWT | 401 |
+| `GET /auth/viewer/me` | viewer JWT | 200 |
+| `GET /admin/users` | viewer JWT | 401 |
+
+```bash
+HOST=...; VIEWER=...
+curl -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8080/live-commerce/
+curl -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $VIEWER" http://127.0.0.1:8080/live-commerce/
+curl -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $HOST"   http://127.0.0.1:8080/live-commerce/
+# 依次输出 401 / 401 / 200
 ```
 
 浏览器验证（推荐）：
@@ -280,9 +316,18 @@ curl -i http://127.0.0.1:8080/live-commerce/
 浏览器 WS API 无法设置请求头，因此 token 走 query 参数：
 
 ```text
-ws://<HOST>:<PORT>/ws/live-commerce?token=<JWT>        # 带 token：按 scope 判定主播/观众
-ws://<HOST>:<PORT>/ws/live-commerce?role=viewer        # 游客：仅公开数据
+ws://<HOST>:<PORT>/ws/live-commerce?token=<host JWT>      # 主播
+ws://<HOST>:<PORT>/ws/live-commerce?token=<viewer JWT>    # 观众（绑定账号）
+ws://<HOST>:<PORT>/ws/live-commerce?role=viewer           # 游客（仅公开数据）
 ```
+
+| 连接方式 | 判定角色 | `init_state` 内容 |
+| --- | --- | --- |
+| `?token=<host JWT>` | `host` | 13 个键：统计、设置、敏感词、私信会话、告警等，商品含已下架 |
+| `?token=<viewer JWT>` | `viewer` | 6 个键，仅公开数据；商品列表只含已上架 |
+| 无 token / `?role=viewer` | 游客 `viewer` | 同 viewer，无账号绑定 |
+| 无效 / 过期 token | — | 握手被拒（HTTP 403） |
+| 自称 `?role=host` 但无 token | — | 握手被拒（HTTP 403） |
 
 命令行快速验证（使用 `uvicorn[standard]` 已附带的 `websockets`）：
 
@@ -293,18 +338,36 @@ import asyncio, json, websockets
 async def main(token: str):
     url = f"ws://127.0.0.1:8080/ws/live-commerce?token={token}"
     async with websockets.connect(url) as ws:
-        msg = json.loads(await ws.recv())
-        print(msg["type"], msg["data"]["role"], len(msg["data"]["products"]))
+        while True:                      # 首帧可能是 status_update，需等到 init_state
+            msg = json.loads(await ws.recv())
+            if msg["type"] == "init_state":
+                data = msg["data"]
+                print("role:", data["role"], "keys:", len(data),
+                      "products:", len(data["products"]),
+                      "liveStatus:", sorted(data["liveStatus"]))
+                break
 
 asyncio.run(main("把上一步的 access_token 粘到这里"))
 ```
 
-预期输出：`init_state host 14`（主播收到 13 个键的完整状态；游客只收到 6 个公开键，
-商品列表仅含已上架商品）。发送未知类型消息会返回：
+预期输出：
+
+```text
+# 主播 token
+role: host keys: 13 products: 14 liveStatus: ['currentStage','liveDuration','onlineCount','startTime','status','totalAIReplies','totalDanmaku','totalPrivateMessages']
+# 观众/游客
+role: viewer keys: 6 products: 14 liveStatus: ['currentStage','liveDuration','onlineCount','startTime','status']
+```
+
+`totalAIReplies` / `totalPrivateMessages` / `totalDanmaku` 只出现在主播侧；观众侧商品列表只含已上架商品。
+观众连接调用主播专用消息（如 `start_live` / `end_live` / `get_stats` / `switch_stage`）会被拒绝：
 
 ```json
-{"type":"error","data":{"message":"未知消息类型: xxx"},"timestamp":"..."}
+{"type":"error","data":{"code":"forbidden","message":"无权调用: start_live"},"timestamp":"..."}
 ```
+
+发送未知类型消息返回 `{"type":"error","data":{"message":"未知消息类型: xxx"},...}`。
+
 
 ### 常见问题
 
@@ -346,7 +409,8 @@ commit message 统一为 `<type>(<scope>): <中文摘要>`，`scope` 对应模�
 | 第 2 轮 | `4523386` | 2026-10-28 | `auth` | JWT 双角色鉴权（主播 7 天 / 观众 24 小时）、全局 JWT 中间件、WebSocket 握手身份校验与消息白名单、运营台整页登录闸门 |
 | 第 3 轮 | `ed5adab` | 2026-10-29 | `product` | 商品数据模型与校验、主播商品管理接口（增改 / 上下架）、上下架状态 WebSocket 广播、观众端仅下发已上架商品 |
 | 第 4 轮 | `0b11a79` | 2026-10-29 | `live` | 直播电商 AI Agent（话术 / 回复 / 摘要）、弹幕与私信、订单与充值、AI 端点管理、商品图生成、上传、运营台 9 页前端与观众端 H5 |
-| 第 5 轮 | 本次提交 | 2026-10-29 | `docs` | 复现文档：环境、依赖、变量模板、启动与接口验证、迭代记录 |
+| 第 5 轮 | `4227ee1` | 2026-10-29 | `docs` | 复现文档：环境、依赖、变量模板、启动与接口验证、迭代记录 |
+| 第 6 轮 | 本次提交 | 2026-10-29 | `auth` | 角色不符统一返回 401；观众侧推送事件裁剪（`status_update` 运营指标、`live_ended` 复盘报告、`stage_changed` 策略话术）；补齐观众注册 / 登录接口与鉴权自测矩阵 |
 
 ### 评审如何核对
 

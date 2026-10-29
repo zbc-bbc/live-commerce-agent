@@ -112,6 +112,42 @@ def _viewer_safe_current(dm, role: str):
     return cur.model_dump()
 
 
+# 观众可见的直播状态字段。DataManager.get_live_status() 里还带着 totalDanmaku /
+# totalPrivateMessages / totalAIReplies 三个**运营指标**，它们只应出现在运营台。
+# 观众端实际消费的只有开播状态、阶段、开播时间、时长、在线人数。
+_VIEWER_LIVE_FIELDS = ("status", "currentStage", "startTime", "liveDuration", "onlineCount")
+
+# 这些广播事件对观众要做负载裁剪（其余事件本来就是公开信息，原样下发）。
+_VIEWER_TRIMMED_EVENTS = frozenset({"status_update", "live_started", "live_ended", "stage_changed"})
+
+
+def _viewer_safe_live_status(status: dict) -> dict:
+    """直播状态的观众安全版：只保留公开字段，剥掉运营统计。"""
+    return {k: status[k] for k in _VIEWER_LIVE_FIELDS if k in status}
+
+
+def _viewer_safe_event(msg_type: str, data: dict) -> dict:
+    """把主播侧事件裁剪成观众可见版本。
+
+    * status_update    —— 三个运营统计剥掉
+    * live_started     —— 内嵌的 liveStatus 同样裁剪
+    * live_ended       —— **复盘报告不下发**（含 GMV、转化、AI 统计等运营数据）
+    * stage_changed    —— 阶段策略话术（strategy）是运营台内部提示，观众只要阶段名
+    """
+    if msg_type == "status_update":
+        return _viewer_safe_live_status(data)
+    if msg_type == "live_started":
+        return {
+            "startTime": data.get("startTime"),
+            "liveStatus": _viewer_safe_live_status(data.get("liveStatus") or {}),
+        }
+    if msg_type == "live_ended":
+        return {"endTime": data.get("endTime"), "duration": data.get("duration")}
+    if msg_type == "stage_changed":
+        return {"stage": data.get("stage")}
+    return data
+
+
 class LiveCommerceWebSocketManager:
     """
     WebSocket连接管理器
@@ -358,11 +394,14 @@ class LiveCommerceWebSocketManager:
         try:
             dm = self._data_manager
             role = self._roles.get(websocket, "viewer")
+            live_status = dm.get_live_status()
             payload = {
                 # role 必须下发：运营台 token 过期后若静默退化成只读观众端会极难排查，
                 # 前端据此弹阻断层并跳登录页
                 "role": role,
-                "liveStatus": dm.get_live_status(),
+                # 观众只拿公开字段：totalAIReplies / totalPrivateMessages / totalDanmaku
+                # 属于运营指标，不该随初始状态一起下发。
+                "liveStatus": live_status if role == "host" else _viewer_safe_live_status(live_status),
                 "currentProduct": _viewer_safe_current(dm, role),
                 "products": _products_payload(dm, on_sale_only=(role != "host")),
                 "hostProfile": dm.get_host_profile(),
@@ -475,12 +514,22 @@ class LiveCommerceWebSocketManager:
             payload = msg
         else:
             payload = {k: v for k, v in msg.items() if k not in ("_toUser", "_hostOnly")}
+        # 观众版的同一事件：只对公开广播且类型在裁剪清单里时生成一次，循环里复用。
+        viewer_payload = None
+        if to_user is None and not host_only and msg.get("type") in _VIEWER_TRIMMED_EVENTS:
+            viewer_payload = {
+                **payload,
+                "data": _viewer_safe_event(msg.get("type", ""), payload.get("data") or {}),
+            }
         for ws in list(self._connections):
             # 运营台始终可见全部（它是工作台，订单/私信都要看）
             if self._roles.get(ws) != "host":
                 if host_only:
                     continue
                 if to_user is not None and self._user_ids.get(ws) != to_user:
+                    continue
+                if viewer_payload is not None:
+                    self._put(ws, viewer_payload)
                     continue
             self._put(ws, payload)
 
