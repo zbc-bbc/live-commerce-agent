@@ -94,6 +94,11 @@ button{font-family:inherit;cursor:pointer;border:none;background:none}
 .ch-main.self .ch-text{color:#1e3a8a}
 .ch-host{background:#fef3f2;border:1px solid #ffe0de}
 .ch-host .ch-text{color:#9f1e1e}
+/* 置顶（主播操作）：顶部固定条 + 列表中对应行的高亮 */
+.pin-bar{flex-shrink:0;display:flex;align-items:center;gap:6px;margin:8px 12px 0;padding:5px 9px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;font-size:12px;color:#92400e;line-height:1.4}
+.pin-bar .t{font-weight:700;flex-shrink:0}
+.pin-bar .c{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ch-row.pinned .ch-main{background:#fffbeb;box-shadow:inset 3px 0 0 #f59e0b}
 .host-tag{font-size:9px;background:#ffd7d5;color:#c0342f;padding:0 5px;border-radius:6px;margin-right:5px;font-weight:600}
 .sys-row{display:flex;justify-content:center;margin:7px 0}
 .sys-tag{font-size:10px;color:#7c8aa5;background:#eef1f6;border-radius:9px;padding:2px 9px}
@@ -295,6 +300,9 @@ button{font-family:inherit;cursor:pointer;border:none;background:none}
     <div class="rail" id="rail"></div>
   </section>
 
+  <!-- 主播置顶的弹幕（固定条，不随聊天滚动） -->
+  <div class="pin-bar" id="pinBar" style="display:none"></div>
+
   <!-- 弹幕 / 聊天 -->
   <section class="chat" id="chat">
     <div class="chat-hdr">
@@ -365,6 +373,7 @@ var S = {
   pendingCurrent: null,  // 讲解广播先到、列表还没回来时暂存 productId，见 get_products_result
   products: [],          // product list (with salesQty 等聚合)
   danmaku: [],           // 本端弹幕展示数组
+  pinned: null,          // 主播置顶的弹幕（init_state.pinnedDanmaku / danmaku_pinned）
   nick: '', userId: '', avatar: '', avatarSeed: 0,
   host: {hostName:'主播', hostAvatar:''},   // 主播对外资料（后端 init_state.hostProfile / host_profile）
   likes: 0,
@@ -712,6 +721,27 @@ function addDanmaku(dm){
   // 控制条数：保留 header + 最近 220 条
   var chat=$('chat'); while(chat.children.length>221){ chat.removeChild(chat.children[1]); }
   chat.scrollTop = chat.scrollHeight;
+  renderPinned();
+}
+function renderPinned(){
+  // 顶部固定条展示主播置顶的那条弹幕，同时在聊天列表里高亮对应行。
+  // 置顶状态完全来自服务端广播，观众端没有、也不应有修改入口。
+  var bar=$('pinBar');
+  var d=S.pinned;
+  if(bar){
+    if(!d){ bar.style.display='none'; bar.innerHTML=''; }
+    else {
+      bar.style.display='flex';
+      bar.innerHTML='<span class="t">📌 置顶</span><span class="c">'+
+        esc(d.userName||'观众')+'：'+esc(d.content||'')+'</span>';
+    }
+  }
+  var chat=$('chat');
+  if(!chat) return;
+  var rows=chat.querySelectorAll('.ch-row[data-dm-id]');
+  for(var i=0;i<rows.length;i++){
+    rows[i].classList.toggle('pinned', !!d && rows[i].dataset.dmId===d.danmakuId);
+  }
 }
 function applyReply(danmakuId, content){
   var chat=$('chat');
@@ -734,6 +764,8 @@ function handle(m){
       S.products = d.products||[];
       if (d.hostProfile) S.host={hostName:(d.hostProfile.hostName||'主播'),hostAvatar:(d.hostProfile.hostAvatar||'')};
       initWall(d.allDanmaku||[]);
+      S.pinned = d.pinnedDanmaku || null;
+      renderPinned();
       onLoginUI();
       renderAll();
       if (isLive()) sysRow('你进入了直播间 · 欢迎互动');
@@ -748,6 +780,7 @@ function handle(m){
     else if (t==='live_paused'){ if(S.live) S.live.status='paused'; renderAll(); sysRow('⏸️ 主播暂时离开，稍等片刻'); }
     else if (t==='live_ended'){ if(S.live) S.live.status='ended'; renderAll(); sysRow('📢 本场直播已结束，感谢观看'); }
     else if (t==='new_danmaku'){ addDanmaku(d); }
+    else if (t==='danmaku_pinned'){ S.pinned=(d&&d.pinned&&d.danmaku)?d.danmaku:null; renderPinned(); }
     else if (t==='danmaku_reply'){ applyReply(d.danmakuId, d.replyContent); }
     else if (t==='product_on_sale'){
       if (d.productId){

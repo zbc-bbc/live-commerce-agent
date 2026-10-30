@@ -407,6 +407,12 @@ role: viewer keys: 7 products: 14 liveStatus: ['currentStage','liveDuration','on
 置顶/取消都会向主播与观众广播 `danmaku_pinned`：`{"pinned":true,"danmakuId":"...","danmaku":{...}}`。
 观众调用 `pin_danmaku` 会被角色闸门拒绝：`{"type":"error","data":{"code":"forbidden","message":"无权调用: pin_danmaku"}}`。
 
+前端表现（两端都只读广播、各自渲染，不自行改状态）：
+
+- 主播运营台「直播控制台 → 弹幕互动」：每条弹幕右侧有「置顶 / 取消置顶」按钮，卡片顶部显示当前置顶条；
+- 观众 H5：直播间商品横条下方出现固定的 `📌 置顶` 条，聊天列表里对应弹幕高亮；
+- 新连接重连后从 `init_state.pinnedDanmaku` 恢复置顶展示，开播（`start_live`）时两端同时清空。
+
 ### 常见问题
 
 | 现象 | 原因 / 解决 |

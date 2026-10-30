@@ -102,7 +102,15 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .lc-tab button:hover:not(.active){background:#f1f5f9}
 .lc-dm-item{padding:6px 8px;border-bottom:1px solid #f1f5f9;font-size:12px;line-height:1.5}
 .lc-dm-item:last-child{border-bottom:none}
+.lc-dm-item.pinned{background:#fffbeb}
 .lc-dm-reply{background:#f0f7ff;margin:4px 0 4px 20px;padding:4px 8px;border-radius:4px;font-size:11px;color:#2563eb;border-left:2px solid #2563eb}
+/* 弹幕置顶：列表内的小按钮 + 卡片顶部的当前置顶条 */
+.lc-dm-pin{border:1px solid #e2e8f0;background:#fff;color:#64748b;font-size:10px;border-radius:8px;padding:0 5px;cursor:pointer;margin-right:4px}
+.lc-dm-pin:hover{border-color:#f59e0b;color:#b45309}
+.lc-dm-pin.on{background:#fef3c7;border-color:#f59e0b;color:#b45309}
+.lc-pin-bar{display:flex;align-items:center;gap:6px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:4px 8px;font-size:11px;color:#92400e;margin-bottom:6px}
+.lc-pin-bar .t{font-weight:700;flex-shrink:0}
+.lc-pin-bar .c{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lc-setting-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f1f5f9}
 .lc-setting-row:last-child{border-bottom:none}
 .lc-setting-row .lbl{font-size:13px;color:#1e293b}
@@ -288,6 +296,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
             <button class="lc-q-btn" onclick="quickDanmaku('还发货吗？')">📦发货</button>
             <button class="lc-q-btn" onclick="quickDanmaku('什么规格？')">📐规格</button>
           </div>
+          <div id="pinnedDmBar" style="display:none"></div>
           <div class="lc-scroll" id="danmakuList" style="max-height:200px"></div>
         </div>
         <div class="lc-card">
@@ -828,6 +837,7 @@ var S = {
   stats: {},
   settings: null,
   dmList: [],
+  pinnedDm: null,       // 当前置顶弹幕（后端 danmaku_pinned / init_state.pinnedDanmaku）
   sessions: [],
   alerts: [],
   reviews: [],
@@ -1626,16 +1636,35 @@ function renderDetailReviews() {
   }).join('');
 }
 function renderDmList() {
+  renderPinnedDm();
   var list=S.dmList;
   var el=document.getElementById('danmakuList');
   if(!list.length){el.innerHTML='<div class="lc-empty"><div class="icon">💬</div>暂无弹幕</div>';return;}
+  var pid=S.pinnedDm?S.pinnedDm.danmakuId:'';
   el.innerHTML=list.slice(-50).reverse().map(function(d){
-    return '<div class="lc-dm-item">'+
+    var isPinned=d.danmakuId===pid;
+    // 置顶按钮走 WS 接口：后端会广播 danmaku_pinned，主播/观众两端状态以广播为准
+    var pinBtn='<button class="lc-dm-pin'+(isPinned?' on':'')+'" onclick="'+
+      (isPinned?'unpinDm()':'pinDm(\''+esc(d.danmakuId)+'\')')+'">'+
+      (isPinned?'取消置顶':'置顶')+'</button>';
+    return '<div class="lc-dm-item'+(isPinned?' pinned':'')+'">'+
       '<span style="font-weight:600;color:#1e293b;font-size:11px">'+esc(d.userName)+'</span> '+
       '<span style="color:#475569">'+esc(d.content)+'</span>'+
       (d.isReplied&&d.replyContent?'<div class="lc-dm-reply">🤖 '+esc(d.replyContent)+'</div>':'')+
-      '<span style="float:right;color:#cbd5e1;font-size:10px">'+fmtTime(d.timestamp)+'</span></div>';
+      '<span style="float:right;color:#cbd5e1;font-size:10px">'+pinBtn+fmtTime(d.timestamp)+'</span></div>';
   }).join('');
+}
+function pinDm(id) { if(id) wsSend('pin_danmaku',{danmakuId:id}); }
+function unpinDm() { wsSend('unpin_danmaku',{}); }
+function renderPinnedDm() {
+  var el=document.getElementById('pinnedDmBar');
+  if(!el) return;
+  var d=S.pinnedDm;
+  if(!d){el.style.display='none';el.innerHTML='';return;}
+  el.style.display='block';
+  el.innerHTML='<div class="lc-pin-bar"><span class="t">📌 置顶</span>'+
+    '<span class="c">'+esc(d.userName||'观众')+'：'+esc(d.content||'')+'</span>'+
+    '<button class="lc-dm-pin on" onclick="unpinDm()">取消</button></div>';
 }
 function updateConsoleStats() {
   var ls=S.liveStatus;
@@ -2724,6 +2753,7 @@ on('init_state',function(d){
   if(d.stats) S.stats=d.stats;
   if(d.settings) S.settings=d.settings;
   if(d.allDanmaku) S.dmList=d.allDanmaku;
+  S.pinnedDm=d.pinnedDanmaku||null;
   if(d.sessions) S.sessions=d.sessions;
   if(d.alerts) S.alerts=d.alerts;
   if(d.highFreqQuestions) S.hfq=d.highFreqQuestions;
@@ -2751,7 +2781,8 @@ on('live_started',function(d){
     S.liveStatus.totalDanmaku=0;S.liveStatus.totalAIReplies=0;
     S.liveStatus.totalPrivateMessages=0;S.liveStatus.liveDuration=0;
   }
-  S.dmList=[];S.alerts=[];S.hfq=[];S.reviews=[];
+  // 新一场直播：后端已清空本场弹幕缓冲和置顶，前端同步清掉，别留上一场的置顶条
+  S.dmList=[];S.pinnedDm=null;S.alerts=[];S.hfq=[];S.reviews=[];
   // 新的一场：本场订单也必须清空重拉，否则上一场的成交会挂在控制台上
   // —— 后端的会话边界已经换了（新 startTime），前端不清就是两份口径对不上。
   S.sessionOrders=[];S.sessionOrderStats=null;
@@ -2779,6 +2810,20 @@ on('danmaku_reply',function(d){
   for(var i=0;i<S.dmList.length;i++){if(S.dmList[i].danmakuId===d.danmakuId){S.dmList[i].isReplied=true;S.dmList[i].replyContent=d.replyContent;S.dmList[i].replyTime=d.replyTime;break;}}
   if(S.curPage==='console'){renderDmList();updateConsoleStats();}
   if(S.curPage==='danmaku'){renderDmPage();}
+});
+// 置顶状态以广播为准：主播和所有观众收到的是同一条 danmaku_pinned，
+// 端口 UI 只是它的渲染结果，不在本地自行改状态。
+on('danmaku_pinned',function(d){
+  S.pinnedDm=(d&&d.pinned&&d.danmaku)?d.danmaku:null;
+  if(S.curPage==='console')renderDmList();
+  if(S.curPage==='danmaku')renderDmPage();
+});
+on('pin_danmaku_result',function(d){
+  if(d&&d.success)toast('已置顶','success');
+  else toast((d&&d.message)||'置顶失败','err');
+});
+on('unpin_danmaku_result',function(d){
+  if(d&&d.success)toast('已取消置顶','success');
 });
 on('stage_changed',function(d){S.liveStatus.currentStage=d.stage;renderConsoleStatus();renderStageControl();toast('已切换阶段','success');});
 on('product_on_sale',function(d){
