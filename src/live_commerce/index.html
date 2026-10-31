@@ -254,6 +254,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
           <div id="stageStrategy" style="margin-top:8px;font-size:11px;color:#94a3b8;font-style:italic"></div>
         </div>
       </div>
+      <!-- 直播间商品挂载 + 商品卡片推送 -->
+      <div class="lc-card" style="margin-bottom:16px">
+        <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <span>🏷️ 直播间商品挂载 <span style="font-weight:400;font-size:11px;color:#94a3b8">挂载后观众端立即可见；「推送」会向所有在线观众弹出商品卡片</span></span>
+          <div style="display:flex;gap:8px;align-items:center;font-weight:400">
+            <select class="lc-sel" id="mountProductSelect" style="width:240px"></select>
+            <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="mountSelectedProduct()">⬆ 挂载到直播间</button>
+          </div>
+        </div>
+        <div id="liveMountList" style="display:flex;gap:10px;overflow-x:auto;padding:4px 0 8px"></div>
+        <div id="liveRoomStatBar" style="font-size:12px;color:#475569;margin-top:6px;padding-top:8px;border-top:1px dashed #e2e8f0">本场点击 -- · 下单 -- · GMV --</div>
+      </div>
+
       <!-- AI 话术生成器 -->
       <div class="lc-card" style="margin-bottom:16px">
         <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center">
@@ -527,6 +540,15 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
       <div class="lc-card" style="margin-top:16px">
         <div class="lc-card-title">📋 本场直播数据总览</div>
         <div id="liveDataOverview" style="font-size:13px"></div>
+      </div>
+      <!-- 本场商品点击与转化 -->
+      <div class="lc-card" style="margin-top:16px">
+        <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center">
+          <span>🛒 本场商品点击与转化</span>
+          <span style="font-size:11px;font-weight:400;color:#94a3b8">点击 = 观众打开商品详情 / 点击推送卡片；下单只含真实注册观众</span>
+        </div>
+        <div class="lc-grid lc-grid-4" id="liveRoomStatRow" style="margin-top:6px"></div>
+        <div class="lc-scroll" style="margin-top:12px;max-height:300px" id="liveRoomProductStats"></div>
       </div>
       <!-- 商单成交区块 -->
       <div class="lc-card" style="margin-top:16px">
@@ -853,6 +875,8 @@ var S = {
   // S.orders / S.orderStats（今日/累计、全部订单）是两套东西，别互相覆盖。
   sessionOrders: [],
   sessionOrderStats: null,
+  // 本场直播商品点击 / 下单 / GMV 统计（来自 get_live_room_stats / 实时广播）
+  liveRoomStats: null,
   scriptHistory: [],
   prodFilter: {cat:'all', state:'all', kw:''},
   editingProductId: null,
@@ -1832,7 +1856,8 @@ function renderAnalysisPage() {
   document.getElementById('anMention').textContent=fmtNum(st.mentionCount||0);
   document.getElementById('anIntent').textContent=fmtNum(Math.round(st.intentScore||0));
   renderDmTrendChart(); renderAudienceChart(); renderLiveOverview();
-  if (S.curPage==='analysis') loadOrderData();
+  renderLiveRoomStats();
+  if (S.curPage==='analysis') { loadLiveRoomStats(); loadOrderData(); }
 }
 // ===== 商单成交 =====
 var S_orderFilter='all';
@@ -1934,6 +1959,108 @@ function renderSessionOrders(){
       '<span style="color:#cbd5e1;font-size:10px">'+fmtTime(o.createTime)+'</span></div>';
   }).join('');
 }
+// ============================================================
+// 直播间商品挂载 / 商品卡片推送 / 本场数据统计
+// ============================================================
+function mountedProducts(){
+  return (S.products||[]).filter(function(p){ return p.isOnSale; });
+}
+function renderLiveMountSelect(){
+  var sel=document.getElementById('mountProductSelect');
+  if(!sel) return;
+  var off=(S.products||[]).filter(function(p){ return !p.isOnSale; });
+  var prev=sel.value;
+  sel.innerHTML='<option value="">选择要挂载的商品（未挂载 '+off.length+' 个）</option>'+
+    off.map(function(p){
+      return '<option value="'+esc(p.productId)+'">'+esc(p.name)+' '+fmtPrice(p.price)+'</option>';
+    }).join('');
+  if(prev) sel.value=prev;
+}
+function renderLiveMountList(){
+  var el=document.getElementById('liveMountList');
+  if(!el) return;
+  renderLiveMountSelect();
+  var list=mountedProducts();
+  if(!list.length){
+    el.innerHTML='<div style="font-size:12px;color:#94a3b8;padding:12px 0">直播间还没有挂载商品，从右上角选择商品挂载后观众端即可看到</div>';
+  } else {
+    el.innerHTML=list.map(function(p){
+      var isCur=S.curProd&&S.curProd.productId===p.productId;
+      return '<div style="min-width:210px;max-width:250px;flex-shrink:0;border:1px solid '+(isCur?'#2563eb':'#eef2f7')+';border-radius:10px;padding:10px;background:#fff">'+
+        '<div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline">'+
+          '<span style="font-size:13px;font-weight:600;color:#1e293b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(p.name)+'">'+esc(p.name)+'</span>'+
+          (isCur?'<span style="font-size:10px;color:#2563eb;flex-shrink:0">讲解中</span>':'')+
+        '</div>'+
+        '<div style="font-size:12px;color:#dc2626;font-weight:700;margin-top:4px">'+fmtPrice(p.price)+
+          '<span style="color:#94a3b8;font-weight:400;margin-left:8px">库存 '+fmtNum(p.stock)+'</span></div>'+
+        '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">'+
+          '<button class="lc-mini-btn" style="border-color:#2563eb;color:#2563eb" onclick="pushProductCard(\''+esc(p.productId)+'\')">📢 推送弹窗</button>'+
+          '<button class="lc-mini-btn" onclick="setCurProdFromMgr(\''+esc(p.productId)+'\')">🎯 讲解</button>'+
+          '<button class="lc-mini-btn" style="border-color:#ef4444;color:#ef4444" onclick="unmountLiveProduct(\''+esc(p.productId)+'\')">撤下</button>'+
+        '</div></div>';
+    }).join('');
+  }
+  renderLiveRoomStatBar();
+}
+function mountSelectedProduct(){
+  var sel=document.getElementById('mountProductSelect');
+  var pid=sel&&sel.value;
+  if(!pid){ toast('请先选择要挂载的商品','warn'); return; }
+  wsSend('mount_live_product',{productId:pid});
+}
+function unmountLiveProduct(pid){
+  if(!confirm('确定把该商品从直播间撤下吗？观众端将立即看不到它。')) return;
+  wsSend('unmount_live_product',{productId:pid});
+}
+function pushProductCard(pid){ wsSend('push_product_card',{productId:pid}); }
+function loadLiveRoomStats(){ wsSend('get_live_room_stats'); }
+function renderLiveRoomStatBar(){
+  var el=document.getElementById('liveRoomStatBar');
+  if(!el) return;
+  var st=S.liveRoomStats;
+  if(!st){ el.textContent='本场点击 -- · 下单 -- · GMV --'; return; }
+  if(!st.startTime){
+    el.innerHTML='未开播 · 已挂载 <strong>'+fmtNum(st.mountedCount||0)+'</strong> 件商品';
+    return;
+  }
+  el.innerHTML='本场点击 <strong style="color:#2563eb">'+fmtNum(st.clickCount||0)+'</strong> · '+
+    '点击人数 <strong>'+fmtNum(st.clickViewerCount||0)+'</strong> · '+
+    '下单 <strong style="color:#d97706">'+fmtNum(st.orderCount||0)+'</strong> · '+
+    '已付款 <strong>'+fmtNum(st.paidOrderCount||0)+'</strong> · '+
+    'GMV <strong style="color:#dc2626">¥'+fmtNum(st.gmv||0)+'</strong>';
+}
+function renderLiveRoomStats(){
+  renderLiveRoomStatBar();
+  var row=document.getElementById('liveRoomStatRow');
+  var st=S.liveRoomStats||{};
+  if(row){
+    row.innerHTML=statCard('商品点击', st.clickCount||0, '#2563eb')+
+      statCard('点击人数', st.clickViewerCount||0, '#0891b2')+
+      statCard('本场下单', st.orderCount||0, '#d97706')+
+      statCard('已付款单', st.paidOrderCount||0, '#059669')+
+      statCard('成交金额', '¥'+fmtNum(st.gmv||0), '#dc2626')+
+      statCard('点击→下单', (st.clickToOrderRate||0)+'%', '#7c3aed');
+  }
+  var el=document.getElementById('liveRoomProductStats');
+  if(!el) return;
+  var list=st.productStats||[];
+  if(!list.length){
+    el.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:10px 0">本场暂无商品点击或订单</div>';
+    return;
+  }
+  el.innerHTML='<table class="lc-tbl2"><tr><th>商品</th><th>挂载</th><th>点击</th><th>下单</th><th>已付款</th><th>件数</th><th>GMV</th></tr>'+
+    list.slice(0,20).map(function(r){
+      return '<tr>'+
+        '<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis">'+esc(r.name||r.productId)+'</td>'+
+        '<td>'+(r.mounted?'✅':'—')+'</td>'+
+        '<td style="color:#2563eb;font-weight:600">'+fmtNum(r.clicks||0)+'</td>'+
+        '<td>'+fmtNum(r.orderCount||0)+'</td>'+
+        '<td>'+fmtNum(r.paidCount||0)+'</td>'+
+        '<td>'+fmtNum(r.qty||0)+'</td>'+
+        '<td style="color:#dc2626">¥'+fmtNum(r.gmv||0)+'</td></tr>';
+    }).join('')+'</table>';
+}
+
 // 订单是否属于真实用户。与后端 order_is_real 同源的判据是 userId 前缀，
 // 这里用「非空且非 v_ 开头即非真实」的等价写法；isVirtual 仅作兜底提示。
 function orderIsReal(o){
@@ -2759,6 +2886,7 @@ on('init_state',function(d){
   if(d.highFreqQuestions) S.hfq=d.highFreqQuestions;
   if(d.reviews) S.reviews=d.reviews;
   if(d.currentProduct) S.curProd=d.currentProduct;
+  if(d.liveRoomStats) S.liveRoomStats=d.liveRoomStats;
   if(d.hostProfile) S.host={hostName:(d.hostProfile.hostName||'主播'),hostAvatar:(d.hostProfile.hostAvatar||'')};
   renderHostProfileUI();
   renderAll();
@@ -2786,6 +2914,8 @@ on('live_started',function(d){
   // 新的一场：本场订单也必须清空重拉，否则上一场的成交会挂在控制台上
   // —— 后端的会话边界已经换了（新 startTime），前端不清就是两份口径对不上。
   S.sessionOrders=[];S.sessionOrderStats=null;
+  // 商品点击 / 下单统计同样是本场口径：新一场从 0 开始
+  S.liveRoomStats=null;renderLiveRoomStats();loadLiveRoomStats();
   renderConsoleStatus();renderStageControl();renderDmList();
   updateConsoleStats();renderAlerts();renderTopQuestions();
   renderSessionOrders();loadSessionOrders();
@@ -2794,7 +2924,7 @@ on('live_started',function(d){
 });
 on('live_paused',function(d){S.liveStatus.status='paused';renderConsoleStatus();toast('直播已暂停','warn');});
 on('live_resumed',function(d){S.liveStatus.status='live';renderConsoleStatus();toast('直播已恢复','success');});
-on('live_ended',function(d){S.liveStatus.status='ended';renderConsoleStatus();if(d.report){S.lastReport=d.report;if(S.curPage==='report')renderReport(d.report);}toast('直播已结束','success');});
+on('live_ended',function(d){S.liveStatus.status='ended';renderConsoleStatus();loadLiveRoomStats();if(d.report){S.lastReport=d.report;if(S.curPage==='report')renderReport(d.report);}toast('直播已结束','success');});
 on('start_live_result',function(d){if(!d.success) toast(d.message||'开始失败','err');});
 on('end_live_result',function(d){if(d.report){S.lastReport=d.report;if(S.curPage==='report')renderReport(d.report);}});
 
@@ -2832,8 +2962,54 @@ on('product_on_sale',function(d){
   if(S.curPage==='products')renderProductsPage();
 });
 on('product_updated',function(d){
-  // 商品发生变更（上下架/编辑等）：刷新商品列表
+  // 商品发生变更（上下架/编辑等）：刷新商品列表与直播间挂载区
   wsSend('get_products');
+  renderLiveMountList();
+});
+// ---- 直播间商品挂载 / 商品卡片推送 ----
+on('live_product_mounted',function(d){
+  if(d&&d.product){
+    var i=S.products.findIndex(function(p){return p.productId===d.product.productId;});
+    if(i>=0) S.products[i]=d.product; else S.products.push(d.product);
+  }
+  wsSend('get_products');loadLiveRoomStats();
+  if(S.curPage==='console')renderLiveMountList();
+});
+on('live_product_unmounted',function(d){
+  if(d&&d.productId){
+    S.products.forEach(function(p){if(p.productId===d.productId)p.isOnSale=false;});
+    if(S.curProd&&S.curProd.productId===d.productId)S.curProd=null;
+  }
+  wsSend('get_products');loadLiveRoomStats();
+  if(S.curPage==='console'){renderLiveMountList();renderProductSelect();}
+});
+on('mount_live_product_result',function(d){
+  if(d.success){toast(d.message||'商品已挂载','success');wsSend('get_products');loadLiveRoomStats();}
+  else toast(d.message||'挂载失败','err');
+});
+on('unmount_live_product_result',function(d){
+  if(d.success){toast(d.message||'商品已撤下','success');wsSend('get_products');loadLiveRoomStats();}
+  else toast(d.message||'撤下失败','err');
+});
+on('push_product_card_result',function(d){
+  if(d.success)toast(d.message||'商品卡片已推送','success');
+  else toast(d.message||'推送失败','err');
+});
+on('live_product_clicked',function(d){
+  if(d&&d.stats)S.liveRoomStats=d.stats;
+  if(S.curPage==='console')renderLiveRoomStatBar();
+  if(S.curPage==='analysis')renderLiveRoomStats();
+});
+on('live_room_stats_updated',function(d){
+  // 数据层直接广播 stats 本体；兼容 {stats:{...}} 包装
+  if(d&&d.productStats!==undefined)S.liveRoomStats=d;
+  else if(d&&d.stats)S.liveRoomStats=d.stats;
+  if(S.curPage==='console')renderLiveRoomStatBar();
+  if(S.curPage==='analysis')renderLiveRoomStats();
+});
+on('get_live_room_stats_result',function(d){
+  if(d&&d.stats)S.liveRoomStats=d.stats;
+  renderLiveRoomStats();
 });
 on('set_product_result',function(d){
   if(d.success&&d.product){S.curProd=d.product;renderProductSelect();toast('已切换商品','success');}
@@ -2985,6 +3161,7 @@ on('get_products_result',function(d){
     if(S.curProd){S.curProd=S.products.find(function(p){return p.productId===S.curProd.productId;})||S.curProd;}
   }
   renderProductSelect();
+  renderLiveMountList();
   if(S.curPage==='products')renderProductsPage();
 });
 on('add_product_result',function(d){if(d.success){toast('商品添加成功','success');wsSend('get_products');}else toast('商品添加失败','err');});
@@ -3048,11 +3225,13 @@ on('order_new',function(d){
   // 主播不用切页就能看到刚成交的那一单。
   if(S.curPage==='analysis'){wsSend('get_orders',{limit:40});wsSend('get_order_stats');}
   if(S.curPage==='console')loadSessionOrders();
+  loadLiveRoomStats();
   wsSend('get_products');
 });
 on('order_updated',function(d){
   if(S.curPage==='analysis'){wsSend('get_orders',{limit:40});wsSend('get_order_stats');}
   if(S.curPage==='console')loadSessionOrders();
+  loadLiveRoomStats();
 });
 on('update_order_status_result',function(d){
   if(d.success) toast('订单状态已更新','success');
@@ -3378,6 +3557,7 @@ function wireAvUpload(){
 // ============================================================
 function renderAll() {
   renderConsoleStatus(); renderStageControl(); renderProductSelect();
+  renderLiveMountList(); renderLiveRoomStats();
   renderDmList(); updateConsoleStats(); renderTopQuestions(); renderAlerts();
   populateScriptProdSelect(); renderScriptHistory();
   // renderAll 同时是 switchPage('console') 和 init_state 的入口，挂这里两个时机都覆盖。

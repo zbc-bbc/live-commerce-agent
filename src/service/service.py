@@ -45,6 +45,7 @@ from service.auth_routes import get_current_user, router as auth_router
 from service.upload_routes import router as upload_router, UPLOADS_DIR
 from service.product_image_routes import router as product_image_router
 from service.product_routes import router as product_router
+from service.live_room_routes import router as live_room_router
 from service.utils import (
     convert_message_content_to_string,
     langchain_to_chat_message,
@@ -597,4 +598,5 @@ app.include_router(admin_router)
 app.include_router(upload_router)
 app.include_router(product_image_router)
 app.include_router(product_router)
+app.include_router(live_room_router)
 app.include_router(router)

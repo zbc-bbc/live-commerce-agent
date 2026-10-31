@@ -366,6 +366,15 @@ class LiveCommerceDataManager:
         self._order_counter = 0
         # 观众账户（钱包）
         self.viewers: dict[str, ViewerAccount] = {}
+        # ── 直播间商品挂载 / 本场点击埋点 ──
+        # 挂载状态本身与商品的 isOnSale 同步（isOnSale=True 即挂载到直播间），
+        # 这样观众端沿用既有「只下发已上架商品」的过滤规则，不会出现两套口径。
+        # _mounted_at 只负责记录挂载顺序，开播/重启后按 isOnSale 重建，不单独落盘。
+        self._mounted_at: dict[str, str] = {}
+        # 本场商品点击：productId -> 点击次数。开播时清空，属于会话级统计。
+        self._product_clicks: dict[str, int] = {}
+        # 本场点击过商品的真实观众（去重）；游客没有 userId，不计入「点击人数」。
+        self._click_viewers: set[str] = set()
         # AI 话术生成历史（内存，不入盘）
         self.scripts_history: list[dict] = []
         # 直播状态
@@ -425,6 +434,12 @@ class LiveCommerceDataManager:
         self._alert_running = False
         # 加载数据
         self._load_all()
+        # 挂载状态没有独立落盘：重启后以「已上架」的商品为准重建挂载顺序，
+        # 用商品自带的 addedTime 作为排序依据（旧商品在前）。
+        self._mounted_at = {
+            p.productId: (p.addedTime or "")
+            for p in self.products.values() if p.isOnSale
+        }
         # 设置已从文件加载完毕，据此确定模拟热度基数并算出在线人数初值
         self._online_base = self._online_base_from_settings()
         self._refresh_online_locked()
@@ -1006,6 +1021,11 @@ class LiveCommerceDataManager:
                 return None
             p = self.products[product_id]
             p.isOnSale = on_sale
+            # 挂载状态跟随 isOnSale：上架即挂载，下架即从直播间撤下。
+            if on_sale:
+                self._mounted_at.setdefault(product_id, datetime.now().isoformat())
+            else:
+                self._mounted_at.pop(product_id, None)
             # 若下架的是当前讲解商品，则取消 current_product_id
             if not on_sale and self.current_product_id == product_id:
                 self.current_product_id = ""
@@ -1030,6 +1050,238 @@ class LiveCommerceDataManager:
             # 上下架在观众端是同一件事（不在列表里了），所以复用 product_updated。
             self._broadcast("product_updated", {"productId": product_id})
             return True
+
+    # ============================================================
+    # 直播间商品挂载 / 商品卡片推送
+    # ============================================================
+    def get_mounted_products(self) -> list[ProductItem]:
+        """当前直播间已挂载的商品（按挂载时间排序，旧挂载在前）。
+
+        挂载状态 = 商品已上架。观众端商品列表、舞台当前商品、下单校验用的都是
+        同一个 isOnSale 字段，因此这里不需要再维护一份独立的白名单 —— 两套集合
+        迟早会不同步，而下单/支付服务端只认 isOnSale。
+        """
+        with self._lock:
+            items = [p for p in self.products.values() if p.isOnSale]
+            items.sort(key=lambda p: (
+                self._mounted_at.get(p.productId, ""),
+                p.addedTime or "",
+                p.productId,
+            ))
+            return items
+
+    def mount_live_product(self, product_id: str) -> tuple[Optional[ProductItem], str]:
+        """把商品挂载到直播间（幂等）。返回 (product, 错误原因)。
+
+        挂载 = 上架：成功后观众端立刻能通过 get_products 拿到该商品，并收到
+        ``live_product_mounted`` 事件（含商品快照，可直接渲染）。
+        """
+        with self._lock:
+            product = self.products.get(product_id)
+            if product is None:
+                return None, "商品不存在"
+            already = product.isOnSale
+            product.isOnSale = True
+            mounted_at = self._mounted_at.setdefault(
+                product_id, datetime.now().isoformat()
+            )
+            if not already:
+                self._save_products()
+            snapshot = product.model_dump()
+        # 上下架事件是老前端（商品管理页）认的刷新信号，保留；挂载事件带完整
+        # 商品快照，供直播间控制台与观众端即时插入列表，不必等一次往返。
+        self._broadcast("product_updated", {
+            "productId": product_id,
+            "isOnSale": True,
+        })
+        self._broadcast("live_product_mounted", {
+            "product": snapshot,
+            "mountedAt": mounted_at,
+            "alreadyMounted": already,
+        })
+        return product, ""
+
+    def unmount_live_product(self, product_id: str) -> tuple[Optional[ProductItem], str]:
+        """把商品从直播间撤下（幂等）。返回 (product, 错误原因)。
+
+        撤下 = 下架：观众端列表立即过滤掉该商品；若它正是当前讲解商品，
+        同时清空 current_product_id，避免舞台继续展示一个买不到的商品。
+        """
+        with self._lock:
+            product = self.products.get(product_id)
+            if product is None:
+                return None, "商品不存在"
+            already = not product.isOnSale
+            product.isOnSale = False
+            self._mounted_at.pop(product_id, None)
+            cleared_current = self.current_product_id == product_id
+            if cleared_current:
+                self.current_product_id = ""
+            if not already:
+                self._save_products()
+            name = product.name
+        self._broadcast("product_updated", {
+            "productId": product_id,
+            "isOnSale": False,
+        })
+        self._broadcast("live_product_unmounted", {
+            "productId": product_id,
+            "name": name,
+            "clearedCurrent": cleared_current,
+            "alreadyUnmounted": already,
+        })
+        return product, ""
+
+    def build_product_card(self, product_id: str) -> tuple[Optional[dict], str]:
+        """构造要推送给观众的商品卡片快照（只读，不广播）。"""
+        with self._lock:
+            product = self.products.get(product_id)
+            if product is None:
+                return None, "商品不存在"
+            if not product.isOnSale:
+                return None, "商品未挂载到直播间，请先挂载"
+            card = product.model_dump()
+            sales = self.get_product_sales_map().get(product_id) or {}
+            # 与观众端商品卡同口径：展示销量 = 真实成交 + 展示基数
+            card["salesQty"] = sales.get("qty", 0) + (product.soldBase or 0)
+            card["salesAmount"] = sales.get("amount", 0.0)
+            card["pushedAt"] = datetime.now().isoformat()
+            card["pushId"] = f"push_{int(time.time() * 1000)}"
+            return card, ""
+
+    def push_product_card(self, product_id: str) -> tuple[Optional[dict], str]:
+        """主播向所有在线观众推送一张商品卡片（弹窗）。
+
+        只允许推送已挂载商品：未上架商品的内容不应借弹窗泄露给观众。
+        """
+        card, reason = self.build_product_card(product_id)
+        if card is None:
+            return None, reason
+        self._broadcast("product_card_push", card)
+        return card, ""
+
+    # ============================================================
+    # 本场商品点击 / 直播数据基础统计
+    # ============================================================
+    def record_product_click(self, product_id: str, user_id: str = "") -> dict:
+        """记录一次观众端商品点击（打开详情 / 点击推送卡片）。
+
+        只有直播进行中（live/paused）才计入本场统计；未开播时的浏览不计入，
+        否则主播看到的「本场点击数」会混进开播前的闲逛。游客点击也计数，
+        但「点击人数」只统计已登录的真实观众，避免把无身份连接算成人。
+        """
+        with self._lock:
+            product = self.products.get(product_id)
+            if product is None:
+                return {"success": False, "counted": False, "message": "商品不存在"}
+            if not product.isOnSale:
+                return {"success": False, "counted": False, "message": "商品未挂载到直播间"}
+            counting = (
+                self.live_state.status in ("live", "paused")
+                and bool(self.live_state.startTime)
+            )
+            if not counting:
+                return {
+                    "success": True,
+                    "counted": False,
+                    "productId": product_id,
+                    "message": "当前未开播，本次点击不计入本场统计",
+                }
+            self._product_clicks[product_id] = (
+                self._product_clicks.get(product_id, 0) + 1
+            )
+            if is_real_user_id(user_id):
+                self._click_viewers.add(user_id)
+            count = self._product_clicks[product_id]
+        stats = self.get_live_room_stats()
+        # 只广播给运营台：点击明细属于主播侧数据，不能回灌观众端。
+        self._broadcast("live_product_clicked", {
+            "productId": product_id,
+            "productClicks": count,
+            "stats": stats,
+        }, host_only=True)
+        return {
+            "success": True,
+            "counted": True,
+            "productId": product_id,
+            "productClicks": count,
+        }
+
+    def get_live_room_stats(self) -> dict:
+        """本场直播数据基础统计：商品点击、下单数量、成交金额与单品转化。
+
+        口径与运营台「本场订单」一致（``_session_orders_locked(real_only=True)``）：
+        只统计真实注册观众、且落在当前 startTime 之后的订单。未开播时订单维度
+        全部为 0，但已挂载商品仍会列出（方便主播开播前检查挂载情况）。
+        """
+        with self._lock:
+            mounted = [p for p in self.products.values() if p.isOnSale]
+            orders = self._session_orders_locked(real_only=True)
+            paid_statuses = ("paid", "shipped", "completed")
+            paid = [o for o in orders if o.status in paid_statuses]
+
+            # 单品行：已挂载商品全部列出（哪怕 0 点击 0 单），再补上「有历史
+            # 点击/订单但已被撤下」的商品 —— 撤下不应让本场数据凭空消失。
+            rows: dict[str, dict] = {}
+
+            def _row(product_id: str, name: str = "", price: float = 0.0) -> dict:
+                return rows.setdefault(product_id, {
+                    "productId": product_id,
+                    "name": name,
+                    "price": price,
+                    "mounted": False,
+                    "clicks": 0,
+                    "orderCount": 0,
+                    "paidCount": 0,
+                    "qty": 0,
+                    "gmv": 0.0,
+                })
+
+            for p in mounted:
+                r = _row(p.productId, p.name, p.price)
+                r["mounted"] = True
+                r["stock"] = p.stock
+            for product_id, clicks in self._product_clicks.items():
+                p = self.products.get(product_id)
+                r = _row(product_id, p.name if p else "", p.price if p else 0.0)
+                r["clicks"] = clicks
+                if p is not None:
+                    r["stock"] = p.stock
+            for o in orders:
+                r = _row(o.productId, o.productName, o.unitPrice)
+                r["orderCount"] += 1
+                if o.status in paid_statuses:
+                    r["paidCount"] += 1
+                    r["qty"] += o.quantity
+                    r["gmv"] = round(r["gmv"] + o.totalAmount, 2)
+
+            product_stats = sorted(
+                rows.values(),
+                key=lambda r: (-r["clicks"], -r["orderCount"], r["productId"]),
+            )
+            click_count = sum(self._product_clicks.values())
+            order_count = len(orders)
+            paid_count = len(paid)
+            gmv = round(sum(o.totalAmount for o in paid), 2)
+            return {
+                "startTime": self.live_state.startTime or "",
+                "status": self.live_state.status,
+                "liveDuration": self.live_state.liveDuration,
+                "onlineCount": self.live_state.onlineCount,
+                "mountedCount": len(mounted),
+                "clickCount": click_count,
+                "clickViewerCount": len(self._click_viewers),
+                "orderCount": order_count,
+                "paidOrderCount": paid_count,
+                "pendingPayCount": sum(1 for o in orders if o.status == "pending_pay"),
+                "paidQty": sum(o.quantity for o in paid),
+                "gmv": gmv,
+                # 点击→下单转化率：下单数 / 点击数。没有点击时恒为 0，不虚构成 100%。
+                "clickToOrderRate": (
+                    round(order_count / click_count * 100, 1) if click_count else 0.0
+                ),
+                "productStats": product_stats,
+            }
 
     # ============================================================
     # 弹幕管理
@@ -1801,6 +2053,9 @@ class LiveCommerceDataManager:
             self.orders[order.orderId] = order
             self._save_orders()
             self._broadcast_order("order_new", order)
+            # 下单数量是本场数据统计的一项，实时推给运营台（不下发观众）。
+            self._broadcast("live_room_stats_updated", self.get_live_room_stats(),
+                            host_only=True)
             return order, ""
 
     def pay_order(self, order_id: str, user_id: str) -> tuple[Optional[OrderItem], str]:
@@ -1840,6 +2095,9 @@ class LiveCommerceDataManager:
             self._save_orders()
             self._broadcast_order("order_updated", order)
             self._broadcast_product_sales(order.productId)
+            # 付款后 GMV / 已付款单数变化，运营台的「本场数据」立即刷新
+            self._broadcast("live_room_stats_updated", self.get_live_room_stats(),
+                            host_only=True)
             return order, ""
 
     def confirm_receipt(self, order_id: str, user_id: str) -> tuple[Optional[OrderItem], str]:
@@ -2099,6 +2357,9 @@ class LiveCommerceDataManager:
             self.pinned_danmaku_id = ""
             # 重置本场真实信号
             self._session_real_users = set()
+            # 商品点击是本场会话级统计，新一场从 0 开始
+            self._product_clicks.clear()
+            self._click_viewers.clear()
             self._online_peak = 0
             self._online_real_peak = 0
             self._online_sum = 0

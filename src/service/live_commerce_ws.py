@@ -37,6 +37,8 @@ _VIEWER_ALLOWED: frozenset = frozenset({
     # 注意：get_stats 不在此列 —— 它含 AI 回复量、意图分、私信量等运营指标，
     # 属于主播侧数据；观众端只通过 init_state 拿 liveStatus，不需要这份统计。
     "get_products", "get_product_detail", "get_reviews", "get_product_reviews",
+    # 直播间挂载商品列表：与 get_products 同为公开只读数据（只含已挂载/已上架）
+    "get_live_products", "click_live_product",
     # 弹幕历史：新观众中途进入时拉取本场最近 20 条（公开数据）
     "get_danmaku_history",
     # 账号：游客也需要能注册/登录
@@ -61,6 +63,11 @@ _PM_MAX_LEN = 300
 # 单个连接两次发私信之间的最小间隔（秒）。弹幕是公屏广播，没设闸；
 # 私信会直插主播工作台的收件箱，不设闸等于开了一条刷屏通道。
 _PM_MIN_INTERVAL = 1.0
+
+# 观众端两次商品点击埋点的最小间隔（秒）：详情弹层反复开合不该刷高本场点击数。
+_PRODUCT_CLICK_MIN_INTERVAL = 0.5
+# 主播两次商品卡片推送的最小间隔（秒）：卡片弹窗会打断观众，连点等于刷屏。
+_CARD_PUSH_MIN_INTERVAL = 2.0
 
 
 def _products_payload(dm, on_sale_only: bool = False) -> list[dict]:
@@ -172,6 +179,9 @@ class LiveCommerceWebSocketManager:
         self._last_recharge: dict[WebSocket, float] = {}
         # 每连接最近一次发私信时间（防刷屏）—— 断开时必须一并 pop，见 _cleanup
         self._last_pm: dict[WebSocket, float] = {}
+        # 每连接最近一次商品点击埋点 / 主播商品卡片推送时间（限流用）
+        self._last_product_click: dict[WebSocket, float] = {}
+        self._last_card_push: dict[WebSocket, float] = {}
         # 每连接一个发送队列（由后台线程/事件循环 put，主循环发送 task 串行消费）
         self._send_queues: dict[WebSocket, "asyncio.Queue[dict | None]"] = {}
         self._send_tasks: dict[WebSocket, "asyncio.Task"] = {}
@@ -313,6 +323,8 @@ class LiveCommerceWebSocketManager:
         self._roles.pop(websocket, None)
         self._last_recharge.pop(websocket, None)
         self._last_pm.pop(websocket, None)
+        self._last_product_click.pop(websocket, None)
+        self._last_card_push.pop(websocket, None)
         self._unbind_user(websocket)
         # 若发送 task 仍在运行（外部清理场景），取消它
         task = self._send_tasks.pop(websocket, None)
@@ -334,6 +346,8 @@ class LiveCommerceWebSocketManager:
         self._roles.pop(websocket, None)
         self._last_recharge.pop(websocket, None)
         self._last_pm.pop(websocket, None)
+        self._last_product_click.pop(websocket, None)
+        self._last_card_push.pop(websocket, None)
         self._unbind_user(websocket)
         task = self._send_tasks.pop(websocket, None)
         q = self._send_queues.pop(websocket, None)
@@ -426,6 +440,8 @@ class LiveCommerceWebSocketManager:
                     # （观众端要看全量评价走 get_reviews 这条消息，不受此处影响。）
                     "reviews": [r.model_dump() for r in dm.get_reviews(source="user")],
                     "onlineBreakdown": dm.get_online_breakdown(),
+                    # 本场直播数据（商品点击 / 下单数量 / GMV），仅运营台可见
+                    "liveRoomStats": dm.get_live_room_stats(),
                 })
             await self._send(websocket, "init_state", payload)
         except Exception as e:
@@ -762,6 +778,43 @@ class LiveCommerceWebSocketManager:
                     "product": product.model_dump() if product else None,
                 })
 
+            # ========== 主播端 · 直播间商品挂载 / 商品卡片推送 ==========
+            elif msg_type == "mount_live_product":
+                product_id = str(msg_data.get("productId", "") or "")
+                product, reason = dm.mount_live_product(product_id)
+                await self._send(websocket, "mount_live_product_result", {
+                    "success": product is not None,
+                    "product": product.model_dump() if product else None,
+                    "message": "商品已挂载到直播间" if product else (reason or "挂载失败"),
+                })
+
+            elif msg_type == "unmount_live_product":
+                product_id = str(msg_data.get("productId", "") or "")
+                product, reason = dm.unmount_live_product(product_id)
+                await self._send(websocket, "unmount_live_product_result", {
+                    "success": product is not None,
+                    "productId": product_id,
+                    "message": "商品已从直播间撤下" if product else (reason or "下架失败"),
+                })
+
+            elif msg_type == "push_product_card":
+                product_id = str(msg_data.get("productId", "") or "")
+                now_ts = time.monotonic()
+                if now_ts - self._last_card_push.get(websocket, 0.0) < _CARD_PUSH_MIN_INTERVAL:
+                    await self._send(websocket, "push_product_card_result", {
+                        "success": False,
+                        "message": "推送太频繁，请稍后再试",
+                    })
+                    return
+                card, reason = dm.push_product_card(product_id)
+                if card is not None:
+                    self._last_card_push[websocket] = now_ts
+                await self._send(websocket, "push_product_card_result", {
+                    "success": card is not None,
+                    "card": card,
+                    "message": "商品卡片已推送给所有在线观众" if card else (reason or "推送失败"),
+                })
+
             elif msg_type == "generate_script":
                 product_id = msg_data.get("productId", "")
                 script_type = msg_data.get("scriptType", "product_intro")
@@ -1006,6 +1059,14 @@ class LiveCommerceWebSocketManager:
                     "products": _products_payload(dm, on_sale_only=not is_host),
                 })
 
+            elif msg_type == "get_live_products":
+                # 直播间挂载商品（= 已上架），主播与观众拿同一份公开数据
+                products = _products_payload(dm, on_sale_only=True)
+                await self._send(websocket, "get_live_products_result", {
+                    "products": products,
+                    "total": len(products),
+                })
+
             elif msg_type == "get_reviews":
                 sentiment = msg_data.get("sentiment", "")
                 product_id = msg_data.get("productId", "")
@@ -1215,6 +1276,13 @@ class LiveCommerceWebSocketManager:
                     "stats": dm.get_order_stats(real_only=True),
                 })
 
+            elif msg_type == "get_live_room_stats":
+                # 本场商品点击 / 下单数量 / GMV。**不进观众白名单**：
+                # 点击明细与转化率属于主播侧经营数据。
+                await self._send(websocket, "get_live_room_stats_result", {
+                    "stats": dm.get_live_room_stats(),
+                })
+
             # ⚠️ 这里曾有 simulate_orders / buy_product 两条「凭空造单」的消息：
             # 前者由运营台一颗按钮触发、一次生成 5 张随机成交单，后者给任意连接发一张
             # userId="" 的已付款假单。两者都会直接改商品 stock/soldCount 并广播 order_new，
@@ -1387,6 +1455,32 @@ class LiveCommerceWebSocketManager:
                     "success": True,
                     "balance": new_balance,
                 })
+
+            elif msg_type == "click_live_product":
+                # 观众端商品点击埋点：打开详情 / 点击主播推送的卡片时上报。
+                # 只统计 viewer 角色连接 —— 运营台浏览商品不算观众点击。
+                product_id = str(msg_data.get("productId", "") or "")
+                role = self._roles.get(websocket, "viewer")
+                if role != "viewer":
+                    await self._send(websocket, "click_live_product_result", {
+                        "success": False,
+                        "counted": False,
+                        "message": "仅观众端点击计入统计",
+                    })
+                    return
+                now_ts = time.monotonic()
+                if now_ts - self._last_product_click.get(websocket, 0.0) < _PRODUCT_CLICK_MIN_INTERVAL:
+                    await self._send(websocket, "click_live_product_result", {
+                        "success": True,
+                        "counted": False,
+                        "message": "点击太频繁，已忽略",
+                    })
+                    return
+                self._last_product_click[websocket] = now_ts
+                result = dm.record_product_click(
+                    product_id, self._user_ids.get(websocket) or ""
+                )
+                await self._send(websocket, "click_live_product_result", result)
 
             elif msg_type == "place_order":
                 # 观众下单：生成「待付款」订单（不扣钱包/库存），随后由 pay_order 付款

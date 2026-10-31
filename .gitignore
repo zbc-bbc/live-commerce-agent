@@ -205,3 +205,5 @@ src/data/live_commerce/archives/*
 # 本地临时目录 / 构建产物
 .tmp_manual/
 .tmp_shots/
+.tmp_pdf/
+.tmp_e2e/

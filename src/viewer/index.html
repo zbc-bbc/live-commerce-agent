@@ -389,6 +389,7 @@ var S = {
   payCtx: null,          // 收银台上下文 {order}
   payAfterRecharge: null,// 收银台余额不足 → 自动补差额充值后待结算的订单
   placing: null,         // place_order 请求上下文 {p}
+  pushCard: null,        // 主播推送的商品卡片快照（product_card_push）
   reviewCtx: null,       // 正在评价的订单
   rvRate: 5,             // 当前评价星级
   // ---- 账号：身份由服务端凭据提供，客户端只持 token ----
@@ -793,6 +794,26 @@ function handle(m){
       else { fetchProducts(); }
     }
     else if (t==='product_updated'){ fetchProducts(); }
+    else if (t==='live_product_mounted'){
+      // 主播挂载商品：带完整快照，先本地插入即时可见，再拉一次服务端列表兜平
+      if(d && d.product){
+        var mp=findProd(d.product.productId);
+        if(mp) Object.assign(mp,d.product); else S.products.push(d.product);
+        renderAll();
+      }
+      fetchProducts();
+    }
+    else if (t==='live_product_unmounted'){
+      // 主播撤下商品：本地先移除，避免详情弹层还挂着一个买不到的商品
+      if(d && d.productId){
+        S.products=S.products.filter(function(p){return p.productId!==d.productId;});
+        if(S.current && S.current.productId===d.productId) S.current=null;
+        renderAll();
+      }
+      fetchProducts();
+    }
+    else if (t==='product_card_push'){ onProductCardPush(d); }
+    else if (t==='click_live_product_result'){ /* 埋点回执：静默，失败不影响观看 */ }
     else if (t==='order_new'){
       fetchProducts();
       if(meOrder(d)) resyncMe(true);        // 我的新订单（含待支付）→ 静默刷新订单与余额
@@ -1358,8 +1379,58 @@ function meListHtml(){
 // ============================================================
 // 两步下单：place_order(待支付) → pay_order(钱包付款)
 // ============================================================
+// 商品点击埋点（观众端）：打开详情 / 点击主播推送卡片时上报。
+function trackProductClick(p, source){
+  if(!p || !p.productId) return;
+  wsSend('click_live_product', { productId:p.productId, source:source||'detail' });
+}
+
+// 主播推送的商品卡片弹窗（product_card_push）。
+// 收银台/登录/评价进行中不抢占弹层，只给一条轻提示，避免打断交易。
+function onProductCardPush(d){
+  if(!d || !d.productId) return;
+  if(S.sheetMode==='checkout' || S.sheetMode==='auth' || S.sheetMode==='review'){
+    toast('主播推荐了「'+(d.name||'商品')+'」，可在商品条查看','ok');
+    return;
+  }
+  S.pushCard=d; S.sheetMode='push';
+  var cm=catMeta(d.category);
+  var img=(d.images&&d.images.length&&d.images[0])||d.imageUrl||'';
+  var imgHtml=img
+    ? '<img src="'+esc(assetUrl(img))+'" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display=\'none\'">'
+    : '<div style="font-size:46px">'+cm.emoji+'</div>';
+  var sl=prodSales(d);
+  $('sheet').innerHTML=
+    '<div class="hd"><b>📢 主播推荐</b><button class="x" onclick="closeSheet()">✕</button></div>'+
+    '<div style="display:flex;gap:12px;align-items:center;padding:8px 0 4px">'+
+      '<div style="width:92px;height:92px;border-radius:12px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0">'+imgHtml+'</div>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:16px;font-weight:700;line-height:1.35">'+esc(d.name||'商品')+'</div>'+
+        '<div style="font-size:12px;color:#64748b;margin-top:5px">🔥 已售 '+fmtNum(sl.qty)+' 件 · 库存 '+fmtNum(d.stock||0)+'</div>'+
+        '<div style="font-size:20px;font-weight:800;color:#ef4444;margin-top:6px">¥'+fmtPrice(d.price)+
+          (d.originalPrice&&Number(d.originalPrice)>Number(d.price)?'<s style="font-size:12px;color:#94a3b8;font-weight:400;margin-left:6px">¥'+fmtPrice(d.originalPrice)+'</s>':'')+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+    (d.description?'<div style="background:#f8fafc;border-radius:10px;padding:10px 12px;font-size:12px;color:#475569;line-height:1.7;margin:10px 0">'+esc(d.description)+'</div>':'')+
+    '<button class="big-buy" id="pushBuyBtn">🛒 立即查看并下单</button>'+
+    '<button style="width:100%;margin-top:8px;padding:11px;border-radius:22px;border:1px solid #d1d5db;color:#475569;font-size:14px;background:none" onclick="closeSheet()">稍后看看</button>';
+  openMask();
+  $('pushBuyBtn').onclick=function(){ openPushedProduct(); };
+}
+function openPushedProduct(){
+  var d=S.pushCard;
+  if(!d) return;
+  var p=findProd(d.productId) || d;
+  closeSheet();
+  openProduct(p);
+}
+
 function openProduct(p){
   if(!p) return;
+  // 商品点击埋点：打开详情就是一次「商品点击」。服务端按连接限流，
+  // 且只在直播中计入本场统计（开播前浏览不计）。
+  trackProductClick(p, 'detail');
   S.sheetMode='product';
   var cm=catMeta(p.category); var sl=prodSales(p);
   var specsHtml='';
