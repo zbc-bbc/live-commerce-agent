@@ -89,13 +89,32 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .lc-stg-btn{padding:6px 14px;border-radius:20px;font-size:12px;cursor:pointer;border:1px solid #e5e7eb;background:#fff;color:#475569;transition:.15s}
 .lc-stg-btn.active{background:#2563eb;color:#fff;border-color:#2563eb}
 .lc-stg-btn:hover:not(.active){background:#f1f5f9}
-.lc-alert-item{padding:8px 12px;border-radius:6px;margin-bottom:6px;font-size:12px;border-left:3px solid}
+.lc-alert-item{padding:8px 12px;border-radius:6px;margin-bottom:6px;font-size:12px;border-left:3px solid;cursor:pointer;transition:opacity .15s,transform .15s}
+.lc-alert-item:hover{transform:translateX(2px);box-shadow:0 2px 8px rgba(15,23,42,.06)}
+.lc-alert-item.acked{opacity:.5}
 .lc-alert-item.surge_up{border-color:#22c55e;background:#f0fdf4}
 .lc-alert-item.surge_down{border-color:#ef4444;background:#fef2f2}
 .lc-alert-item.low_stock{border-color:#f59e0b;background:#fffbeb}
 .lc-alert-item.hot_question{border-color:#2563eb;background:#eff6ff}
+.lc-alert-actions{display:flex;justify-content:flex-end;margin-top:5px}
+.lc-alert-ack{font-size:10px;color:#059669;font-weight:600;flex-shrink:0}
 #videoPreview{width:100%;height:480px;border-radius:6px;background:#000;display:block;object-fit:cover}
 .lc-stage-progress{display:flex;gap:6px;flex-wrap:wrap}
+/* ── 直播控制台改版：左侧固定画面，右侧高频区 + 下方低频滚动区 ── */
+#page-console.active{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(420px,1fr);grid-template-rows:auto minmax(0,1fr);gap:16px;height:calc(100vh - 48px)}
+#page-console>.lc-page-hdr{grid-column:1/-1;margin-bottom:0}
+.lc-console-stage{grid-column:1;grid-row:2;min-width:0;min-height:0}
+.lc-console-stage>.lc-card{height:100%;margin-bottom:0;display:flex;flex-direction:column}
+.lc-console-stage #videoPreview{flex:1 1 auto;height:auto;min-height:240px}
+.lc-console-side{grid-column:2;grid-row:2;min-width:0;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:16px;padding-right:4px}
+.lc-console-side::-webkit-scrollbar{width:5px}
+.lc-console-side::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:3px}
+.lc-console-high,.lc-console-low{display:flex;flex-direction:column;gap:16px;flex:0 0 auto}
+.lc-console-high>.lc-card,.lc-console-low>.lc-card{margin-bottom:0}
+.lc-console-low-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+.lc-console-low-grid>.lc-card{margin-bottom:0}
+.lc-console-script .lc-script-area{min-height:120px;height:140px}
+@media (max-width:1300px){#page-console.active{grid-template-columns:minmax(0,1fr) minmax(400px,1fr)}}
 .lc-tab{display:flex;gap:4px;margin-bottom:10px}
 .lc-tab button{padding:4px 14px;border-radius:16px;font-size:12px;cursor:pointer;border:1px solid #e2e8f0;background:#fff;color:#64748b;transition:.15s}
 .lc-tab button.active{background:#2563eb;color:#fff;border-color:#2563eb}
@@ -222,13 +241,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
           <button class="lc-btn lc-btn-danger lc-btn-sm" id="btnEndLive" onclick="endLive()" style="display:none">⏹ 结束直播</button>
         </div>
       </div>
-      <!-- Top: Camera full-width row -->
-      <div style="margin-bottom:16px">
-        <!-- Camera card -->
+      <!-- 左侧：固定直播画面（右侧滚动时保持可见） -->
+      <div class="lc-console-stage">
         <div class="lc-card">
-          <div class="lc-card-title">📷 摄像头</div>
+          <div class="lc-card-title">📷 直播画面</div>
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
-            <select class="lc-sel" id="camSelect" onchange="changeCam()" style="width:240px"></select>
+            <select class="lc-sel" id="camSelect" onchange="changeCam()" style="width:200px"></select>
             <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="startCam()">📷 开启</button>
             <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="stopCam()">⏹ 关闭</button>
           </div>
@@ -236,107 +254,111 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
           <div id="camHint" style="margin-top:6px;font-size:12px;color:#059669;display:none">📡 摄像头画面正在实时推送给观众端（画面帧转发）</div>
         </div>
       </div>
-      <!-- Middle: Product + Stage 2-column -->
-      <div class="lc-grid lc-grid-2" style="margin-bottom:16px">
-        <!-- Product card -->
-        <div class="lc-card">
-          <div class="lc-card-title" style="display:flex;align-items:center;justify-content:space-between">
-            <span>📦 当前商品</span>
-            <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="openProductForm()">➕ 添加商品</button>
-          </div>
-          <select class="lc-sel" id="prodSelect" onchange="setCurProd(this.value)"></select>
-          <div id="prodInfo" style="margin-top:10px;font-size:12px;color:#64748b">请选择商品</div>
-        </div>
-        <!-- Stage control card -->
-        <div class="lc-card">
-          <div class="lc-card-title">🎯 直播阶段</div>
-          <div class="lc-stage-progress" id="stageControl"></div>
-          <div id="stageStrategy" style="margin-top:8px;font-size:11px;color:#94a3b8;font-style:italic"></div>
-        </div>
-      </div>
-      <!-- 直播间商品挂载 + 商品卡片推送 -->
-      <div class="lc-card" style="margin-bottom:16px">
-        <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-          <span>🏷️ 直播间商品挂载 <span style="font-weight:400;font-size:11px;color:#94a3b8">挂载后观众端立即可见；「推送」会向所有在线观众弹出商品卡片</span></span>
-          <div style="display:flex;gap:8px;align-items:center;font-weight:400">
-            <select class="lc-sel" id="mountProductSelect" style="width:240px"></select>
-            <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="mountSelectedProduct()">⬆ 挂载到直播间</button>
-          </div>
-        </div>
-        <div id="liveMountList" style="display:flex;gap:10px;overflow-x:auto;padding:4px 0 8px"></div>
-        <div id="liveRoomStatBar" style="font-size:12px;color:#475569;margin-top:6px;padding-top:8px;border-top:1px dashed #e2e8f0">本场点击 -- · 下单 -- · GMV --</div>
-      </div>
 
-      <!-- AI 话术生成器 -->
-      <div class="lc-card" style="margin-bottom:16px">
-        <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center">
-          <span>🎙️ AI 主播话术生成</span>
-          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-weight:400">
-            <span style="font-size:11px;color:#94a3b8" id="scriptModelHint">用大模型一键生成直播口播稿</span>
+      <!-- 右侧：上方高频功能无需滚动，下方低频功能滚动访问 -->
+      <div class="lc-console-side">
+        <div class="lc-console-high">
+          <!-- 当前商品 + 直播挂载（合并为同一张卡，消除重复） -->
+          <div class="lc-card">
+            <div class="lc-card-title" style="justify-content:space-between;align-items:flex-start">
+              <span style="display:block">📦 当前商品 · 直播挂载
+                <span style="display:block;font-weight:400;font-size:11px;color:#94a3b8;margin-top:2px">选择商品即切换讲解并同步挂载；「📢 推送」向观众弹出商品卡片</span>
+              </span>
+              <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="openProductForm()" style="flex-shrink:0">➕ 添加商品</button>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <select class="lc-sel" id="prodSelect" onchange="onProdSelectChange(this.value)"></select>
+              <button class="lc-btn lc-btn-primary lc-btn-sm" id="prodActionBtn" onclick="applySelectedProduct()" style="white-space:nowrap;flex-shrink:0">🎯 设为讲解</button>
+            </div>
+            <div id="prodInfo" style="margin-top:8px;font-size:12px;color:#64748b;min-height:38px">请选择商品</div>
+            <div style="margin-top:8px;padding-top:8px;border-top:1px dashed #e2e8f0">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
+                <span style="font-size:12px;color:#475569;font-weight:600">🏷️ 已挂载 <span id="mountedCount">0</span> 件</span>
+                <span style="font-size:11px;color:#94a3b8">当前讲解商品以蓝色边框标出</span>
+              </div>
+              <div id="liveMountList" style="display:flex;gap:8px;overflow-x:auto;padding:2px 0 6px"></div>
+              <div id="liveRoomStatBar" style="font-size:11px;color:#475569;padding-top:6px;border-top:1px dashed #e2e8f0">本场点击 -- · 下单 -- · GMV --</div>
+            </div>
+          </div>
+
+          <!-- AI 话术生成器 -->
+          <div class="lc-card lc-console-script">
+            <div class="lc-card-title" style="justify-content:space-between;align-items:center">
+              <span>🎙️ AI 主播话术生成</span>
+              <span style="font-size:11px;color:#94a3b8;font-weight:400" id="scriptModelHint">用大模型一键生成直播口播稿</span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <select class="lc-sel" id="scriptProd" style="width:170px"></select>
+              <select class="lc-sel" id="scriptType" style="width:145px">
+                <option value="opening">🎤 开场暖场</option>
+                <option value="product_intro" selected>📦 商品介绍</option>
+                <option value="promo">⚡ 促销逼单</option>
+                <option value="interact">💬 互动提问</option>
+                <option value="objection">🤝 异议安抚</option>
+                <option value="closing">👋 收尾下播</option>
+              </select>
+              <button class="lc-btn lc-btn-primary lc-btn-sm" id="btnGenScript" onclick="generateScriptNow()">✨ 生成话术</button>
+              <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="copyScript()">📋 复制</button>
+            </div>
+            <div style="margin-top:8px">
+              <textarea class="lc-script-area" id="scriptOutput" placeholder="点击「✨ 生成话术」，AI 将结合商品信息为你写一段自然带货口播…"></textarea>
+            </div>
+            <div id="scriptHistory" style="margin-top:6px;font-size:12px"></div>
           </div>
         </div>
-        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <select class="lc-sel" id="scriptProd" style="width:220px"></select>
-          <select class="lc-sel" id="scriptType" style="width:170px">
-            <option value="opening">🎤 开场暖场</option>
-            <option value="product_intro" selected>📦 商品介绍</option>
-            <option value="promo">⚡ 促销逼单</option>
-            <option value="interact">💬 互动提问</option>
-            <option value="objection">🤝 异议安抚</option>
-            <option value="closing">👋 收尾下播</option>
-          </select>
-          <button class="lc-btn lc-btn-primary lc-btn-sm" id="btnGenScript" onclick="generateScriptNow()">✨ 生成话术</button>
-          <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="copyScript()">📋 复制</button>
-        </div>
-        <div style="margin-top:10px">
-          <textarea class="lc-script-area" id="scriptOutput" placeholder="点击「✨ 生成话术」，AI 将结合商品信息为你写一段自然带货口播…"></textarea>
-        </div>
-        <div id="scriptHistory" style="margin-top:8px;font-size:12px"></div>
-      </div>
-      <!-- Bottom 4-column row: Danmaku + Stats + Alerts + Session Orders -->
-      <div class="lc-grid lc-grid-4">
-        <div class="lc-card">
-          <div class="lc-card-title">💬 弹幕互动</div>
-          <div style="display:flex;gap:6px;margin-bottom:8px">
-            <input class="lc-inp" id="danmakuInput" placeholder="输入弹幕内容…" style="flex:1" onkeydown="if(event.key==='Enter')sendDanmaku()">
-            <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="sendDanmaku()">发送</button>
+
+        <!-- 下方：低频次要功能（需滚动右侧面板访问） -->
+        <div class="lc-console-low">
+          <div class="lc-card">
+            <div class="lc-card-title">🎯 直播阶段</div>
+            <div class="lc-stage-progress" id="stageControl"></div>
+            <div id="stageStrategy" style="margin-top:8px;font-size:11px;color:#94a3b8;font-style:italic"></div>
           </div>
-          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">
-            <button class="lc-q-btn" onclick="quickDanmaku('多少钱？')">💰多少钱</button>
-            <button class="lc-q-btn" onclick="quickDanmaku('有优惠吗？')">🏷️有优惠</button>
-            <button class="lc-q-btn" onclick="quickDanmaku('怎么下单？')">🛒怎么下单</button>
-            <button class="lc-q-btn" onclick="quickDanmaku('保质期多久？')">📅保质期</button>
-            <button class="lc-q-btn" onclick="quickDanmaku('还发货吗？')">📦发货</button>
-            <button class="lc-q-btn" onclick="quickDanmaku('什么规格？')">📐规格</button>
-          </div>
-          <div id="pinnedDmBar" style="display:none"></div>
-          <div class="lc-scroll" id="danmakuList" style="max-height:200px"></div>
-        </div>
-        <div class="lc-card">
-          <div class="lc-card-title">🤖 AI统计数据</div>
-          <div class="lc-grid lc-grid-2">
-            <div class="lc-stat"><div class="nv" id="statTotalDm">0</div><div class="lb">弹幕总数</div></div>
-            <div class="lc-stat"><div class="nv" id="statAiReplies">0</div><div class="lb">AI回复</div></div>
-            <div class="lc-stat"><div class="nv" id="statOnline">0</div><div class="lb">在线观众</div></div>
-            <div class="lc-stat"><div class="nv" id="statReplyRate">0%</div><div class="lb">回复成功率</div></div>
-          </div>
-          <div style="margin-top:10px">
-            <div class="lc-card-title">🏆 高频问题 TOP10</div>
-            <div id="topQuestions" style="font-size:12px"></div>
-          </div>
-        </div>
-        <div class="lc-card">
-          <div class="lc-card-title">🔔 场控面板</div>
-          <div id="alertPanel" class="lc-scroll" style="max-height:300px">
-            <div class="lc-empty"><div class="icon">📢</div>暂无场控提示</div>
-          </div>
-        </div>
-        <div class="lc-card">
-          <div class="lc-card-title">🛒 本场订单</div>
-          <!-- 汇总条：主播一眼要看的三个数。挤在一行小字里，因为它下方才是列表 -->
-          <div id="sessionOrderSum" style="font-size:12px;color:#475569;margin-bottom:8px">未开播</div>
-          <div id="sessionOrderList" class="lc-scroll" style="max-height:260px">
-            <div class="lc-empty"><div class="icon">🛒</div>开播后这里显示本场订单</div>
+          <div class="lc-console-low-grid">
+            <div class="lc-card">
+              <div class="lc-card-title">💬 弹幕互动</div>
+              <div style="display:flex;gap:6px;margin-bottom:8px">
+                <input class="lc-inp" id="danmakuInput" placeholder="输入弹幕内容…" style="flex:1" onkeydown="if(event.key==='Enter')sendDanmaku()">
+                <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="sendDanmaku()">发送</button>
+              </div>
+              <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">
+                <button class="lc-q-btn" onclick="quickDanmaku('多少钱？')">💰多少钱</button>
+                <button class="lc-q-btn" onclick="quickDanmaku('有优惠吗？')">🏷️有优惠</button>
+                <button class="lc-q-btn" onclick="quickDanmaku('怎么下单？')">🛒怎么下单</button>
+                <button class="lc-q-btn" onclick="quickDanmaku('保质期多久？')">📅保质期</button>
+                <button class="lc-q-btn" onclick="quickDanmaku('还发货吗？')">📦发货</button>
+                <button class="lc-q-btn" onclick="quickDanmaku('什么规格？')">📐规格</button>
+              </div>
+              <div id="pinnedDmBar" style="display:none"></div>
+              <div class="lc-scroll" id="danmakuList" style="max-height:200px"></div>
+            </div>
+            <div class="lc-card">
+              <div class="lc-card-title">🤖 AI统计数据</div>
+              <div class="lc-grid lc-grid-2">
+                <div class="lc-stat"><div class="nv" id="statTotalDm">0</div><div class="lb">弹幕总数</div></div>
+                <div class="lc-stat"><div class="nv" id="statAiReplies">0</div><div class="lb">AI回复</div></div>
+                <div class="lc-stat"><div class="nv" id="statOnline">0</div><div class="lb">在线观众</div></div>
+                <div class="lc-stat"><div class="nv" id="statReplyRate">0%</div><div class="lb">回复成功率</div></div>
+              </div>
+              <div style="margin-top:10px">
+                <div class="lc-card-title">🏆 高频问题 TOP10</div>
+                <div id="topQuestions" style="font-size:12px"></div>
+              </div>
+            </div>
+            <div class="lc-card">
+              <div class="lc-card-title">🔔 场控面板</div>
+              <div id="alertPanel" class="lc-scroll" style="max-height:300px">
+                <div class="lc-empty"><div class="icon">📢</div>暂无场控提示</div>
+              </div>
+            </div>
+            <div class="lc-card">
+              <div class="lc-card-title">🛒 本场订单</div>
+              <!-- 汇总条：主播一眼要看的三个数。挤在一行小字里，因为它下方才是列表 -->
+              <div id="sessionOrderSum" style="font-size:12px;color:#475569;margin-bottom:8px">未开播</div>
+              <div id="sessionOrderList" class="lc-scroll" style="max-height:260px">
+                <div class="lc-empty"><div class="icon">🛒</div>开播后这里显示本场订单</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -863,6 +885,7 @@ var S = {
   pinnedDm: null,       // 当前置顶弹幕（后端 danmaku_pinned / init_state.pinnedDanmaku）
   sessions: [],
   alerts: [],
+  alertAcked: {},   // 场控提示已处理标记 { alertId: true }
   reviews: [],
   hfq: [],
   curPage: 'console',
@@ -1083,7 +1106,79 @@ function switchStage(stage) { wsSend('switch_stage',{stage:stage}); }
 // ============================================================
 // Product
 // ============================================================
-function setCurProd(pid) { if (pid) wsSend('set_product',{productId:pid}); }
+// 待挂载后自动切换讲解的商品（选中了未挂载商品时暂存）
+var _pendingCurProdId = null;
+
+// 所有商品相关 UI 的唯一刷新入口：下拉选择、当前商品信息、讲解标识、
+// 挂载列表、话术生成器的商品选择，全部一起同步，避免某处残留旧状态。
+function syncProductLinkage() {
+  if (S.curProd) {
+    var fresh = (S.products||[]).find(function(p){ return p.productId === S.curProd.productId; });
+    if (fresh) S.curProd = fresh;
+  }
+  renderProductSelect();
+  renderLiveMountList();
+  var sp = document.getElementById('scriptProd');
+  if (sp && S.curProd && sp.options.length) sp.value = S.curProd.productId;
+  var sel = document.getElementById('prodSelect');
+  updateProdActionBtn(sel ? sel.value : '');
+}
+
+// 切换当前讲解商品：先在本地立即更新（乐观更新），再发给后端确认，
+// 这样「当前商品信息」和「讲解中」标识不用等 WS 回包就能实时变化。
+function setCurProd(pid) {
+  if (!pid) return;
+  var p = (S.products||[]).find(function(x){ return x.productId === pid; });
+  if (p && p.isOnSale) {
+    // 记住切换前的商品，后端拒绝时能回滚，避免界面停在一个并未生效的商品上
+    if (!S.curProd || S.curProd.productId !== pid) S._prevCurProd = S.curProd;
+    S.curProd = p;
+  }
+  syncProductLinkage();
+  wsSend('set_product', {productId:pid});
+}
+
+// 下拉框选择商品：已挂载的直接切换讲解；未挂载的先上架再自动切换。
+function onProdSelectChange(pid) {
+  if (!pid) { updateProdActionBtn(''); return; }
+  var p = (S.products||[]).find(function(x){ return x.productId === pid; });
+  if (!p) return;
+  if (p.isOnSale) {
+    _pendingCurProdId = null;
+    setCurProd(pid);
+  } else {
+    _pendingCurProdId = pid;
+    updateProdActionBtn(pid);
+    toast('「'+p.name+'」尚未挂载，正在上架并切换讲解…','info');
+    wsSend('mount_live_product', {productId:pid});
+  }
+  updateProdActionBtn(pid);
+}
+
+// 右侧操作按钮：按选中商品状态显示「设为讲解 / 上架并讲解 / 讲解中」
+function applySelectedProduct() {
+  var sel = document.getElementById('prodSelect');
+  if (!sel || !sel.value) { toast('请先选择商品','warn'); return; }
+  onProdSelectChange(sel.value);
+}
+
+function updateProdActionBtn(pid) {
+  var btn = document.getElementById('prodActionBtn');
+  if (!btn) return;
+  var sel = document.getElementById('prodSelect');
+  var target = pid || (sel ? sel.value : '');
+  var p = (S.products||[]).find(function(x){ return x.productId === target; });
+  if (!p) { btn.disabled = true; btn.textContent = '🎯 设为讲解'; return; }
+  if (_pendingCurProdId === target) {
+    btn.disabled = true; btn.textContent = '⏳ 上架中…';
+  } else if (!p.isOnSale) {
+    btn.disabled = false; btn.textContent = '⬆ 上架并讲解';
+  } else if (S.curProd && S.curProd.productId === p.productId) {
+    btn.disabled = true; btn.textContent = '✅ 讲解中';
+  } else {
+    btn.disabled = false; btn.textContent = '🎯 设为讲解';
+  }
+}
 
 // ============================================================
 // Danmaku
@@ -1242,25 +1337,43 @@ function renderStageControl() {
 }
 function renderProductSelect() {
   var sel=document.getElementById('prodSelect');
+  if(!sel) return;
   sel.innerHTML='<option value="">-- 选择商品 --</option>';
-  S.products.forEach(function(p){
+  (S.products||[]).forEach(function(p){
     var o=document.createElement('option');o.value=p.productId;
-    o.textContent=p.name+' '+fmtPrice(p.price);
-    if(S.curProd&&p.productId===S.curProd.productId) o.selected=true;
+    var isCur=S.curProd&&p.productId===S.curProd.productId;
+    var tag=isCur?'🎯 讲解中':(p.isOnSale?'✅ 已挂载 - ':'⛔ 未挂载 - ');
+    o.textContent=tag+p.name+' '+fmtPrice(p.price);
+    if(isCur) o.selected=true;
     sel.appendChild(o);
   });
+  // 上架中：保持用户刚选的那一项，不要被列表刷新弹回旧商品
+  if(_pendingCurProdId && Array.prototype.some.call(sel.options,function(o){return o.value===_pendingCurProdId;})) {
+    sel.value=_pendingCurProdId;
+  }
   renderProductInfo();
+  updateProdActionBtn(sel.value);
 }
 function renderProductInfo() {
   var p=S.curProd;
+  // 上架中的商品还没成为当前讲解商品，但先展示它的信息，避免下拉框
+  // 已经选中新商品、下方信息却还是旧商品。
+  if(_pendingCurProdId){
+    var pp=(S.products||[]).find(function(x){return x.productId===_pendingCurProdId;});
+    if(pp) p=pp;
+  }
   var el=document.getElementById('prodInfo');
   if(!p){el.innerHTML='<div style="color:#94a3b8">请选择商品</div>';return;}
   var desc=p.description?esc(p.description).slice(0,60):'';
+  var status=(_pendingCurProdId===p.productId)
+    ? '<span style="color:#2563eb">⏳ 上架中，即将设为讲解</span>'
+    : (p.isOnSale?'<span style="color:#059669">✅ 已挂载直播间</span>':'<span style="color:#94a3b8">⛔ 未挂载</span>');
   el.innerHTML='<div style="font-size:15px;font-weight:700;color:#0f172a">'+esc(p.name)+'</div>'+
-    '<div style="display:flex;gap:12px;margin:4px 0;font-size:12px">'+
+    '<div style="display:flex;gap:12px;margin:4px 0;font-size:12px;align-items:center;flex-wrap:wrap">'+
     '<span style="color:#64748b">'+(p.category||'')+'</span>'+
     '<span style="color:#dc2626;font-weight:600">'+fmtPrice(p.price)+'</span>'+
-    '<span style="color:#475569">库存 '+fmtNum(p.stock)+'</span></div>'+
+    '<span style="color:#475569">库存 '+fmtNum(p.stock)+'</span>'+
+    '<span style="font-size:11px">'+status+'</span></div>'+
     '<div style="font-size:11px;color:#94a3b8;margin-top:4px">'+desc+'</div>';
 }
 // ============================================================
@@ -1496,7 +1609,7 @@ function statCard(label, val, color) {
   return '<div class="lc-card"><div class="lc-stat"><div class="nv" style="color:'+color+'">'+fmtNum(val)+'</div><div class="lb">'+label+'</div></div></div>';
 }
 // 商品管理操作
-function setCurProdFromMgr(pid) { wsSend('set_product',{productId:pid}); }
+function setCurProdFromMgr(pid) { setCurProd(pid); }
 function toggleOnSale(pid, on) { wsSend('on_sale_product',{productId:pid,onSale:on}); }
 function deleteProduct(pid) {
   if(!confirm('确定删除该商品吗？此操作不可恢复。')) return;
@@ -1692,16 +1805,62 @@ function renderTopQuestions() {
       '<span style="font-weight:600;color:#2563eb">'+q.count+'次</span></div>';
   }).join('');
 }
+// 场控提示：每条都可点击处理。alertId 由后端生成；无 id 时退回数组下标，
+// 数组只追加不删，所以下标是稳定的。
+function alertKey(a, i) {
+  return (a && a.alertId) ? ('id:'+a.alertId) : ('idx:'+i);
+}
+function findAlertByKey(key) {
+  var list=S.alerts||[];
+  for (var i=list.length-1;i>=0;i--) {
+    if (alertKey(list[i], i) === key) return list[i];
+  }
+  return null;
+}
+function alertActionLabel(type) {
+  return {low_stock:'去补库存', hot_question:'去回复', concern:'去查看',
+          surge_up:'抓住热度', surge_down:'做促销'}[type] || '去处理';
+}
 function renderAlerts() {
   var el=document.getElementById('alertPanel');
+  if(!el) return;
   var list=S.alerts;
   if(!list||!list.length){el.innerHTML='<div class="lc-empty"><div class="icon">📢</div>暂无场控提示</div>';return;}
   el.innerHTML=list.slice(-20).reverse().map(function(a){
-    return '<div class="lc-alert-item '+(a.type||'hot_question')+'">'+
-      '<div style="font-weight:600;font-size:12px">'+esc(a.title||'')+'</div>'+
+    var i=list.indexOf(a);
+    var key=alertKey(a,i);
+    var acked=!!S.alertAcked[key];
+    return '<div class="lc-alert-item '+(a.type||'hot_question')+(acked?' acked':'')+'" onclick="handleAlertAction(\''+esc(key)+'\')" title="点击处理此提示">'+
+      '<div style="font-weight:600;font-size:12px">'+esc(a.title||'')+
+        (acked?' <span class="lc-alert-ack">✓ 已处理</span>':'')+'</div>'+
       '<div style="font-size:11px;color:#475569">'+esc(a.message||'')+'</div>'+
-      '<div style="font-size:10px;color:#94a3b8;margin-top:2px">'+fmtTime(a.timestamp)+'</div></div>';
+      '<div class="lc-alert-actions">'+
+        '<span style="font-size:10px;color:#94a3b8;margin-right:auto">'+fmtTime(a.timestamp)+'</span>'+
+        (acked?'':'<button class="lc-mini-btn" onclick="event.stopPropagation();handleAlertAction(\''+esc(key)+'\')">'+alertActionLabel(a.type)+'</button>')+
+      '</div></div>';
   }).join('');
+}
+// 处理一条场控提示：标记为已处理，并按类型把主播带到对应功能。
+function handleAlertAction(key) {
+  var a=findAlertByKey(key);
+  if(!a) return;
+  S.alertAcked[key]=true;
+  renderAlerts();
+  var type=a.type||'hot_question';
+  if (type==='low_stock') {
+    toast('已跳转到商品管理，请补充库存','info');
+    switchPage('products');
+  } else if (type==='hot_question' || type==='concern') {
+    toast('已跳转到弹幕页，可查看并回复观众','info');
+    switchPage('danmaku');
+  } else {
+    // 人气涨/跌：留在控制台，直接把话术生成器切到对应类型并滚回高频区
+    var st=document.getElementById('scriptType');
+    if (st) st.value = (type==='surge_up') ? 'product_intro' : 'promo';
+    var side=document.querySelector('.lc-console-side');
+    if (side) side.scrollTo({top:0,behavior:'smooth'});
+    toast(type==='surge_up'?'在线人数上涨，建议趁热讲解主推商品':'在线人数下滑，建议用促销话术拉回观众','info');
+  }
 }
 
 // ============================================================
@@ -1945,48 +2104,32 @@ function renderSessionOrders(){
 function mountedProducts(){
   return (S.products||[]).filter(function(p){ return p.isOnSale; });
 }
-function renderLiveMountSelect(){
-  var sel=document.getElementById('mountProductSelect');
-  if(!sel) return;
-  var off=(S.products||[]).filter(function(p){ return !p.isOnSale; });
-  var prev=sel.value;
-  sel.innerHTML='<option value="">选择要挂载的商品（未挂载 '+off.length+' 个）</option>'+
-    off.map(function(p){
-      return '<option value="'+esc(p.productId)+'">'+esc(p.name)+' '+fmtPrice(p.price)+'</option>';
-    }).join('');
-  if(prev) sel.value=prev;
-}
 function renderLiveMountList(){
   var el=document.getElementById('liveMountList');
   if(!el) return;
-  renderLiveMountSelect();
   var list=mountedProducts();
+  var cnt=document.getElementById('mountedCount');
+  if(cnt) cnt.textContent=list.length;
   if(!list.length){
-    el.innerHTML='<div style="font-size:12px;color:#94a3b8;padding:12px 0">直播间还没有挂载商品，从右上角选择商品挂载后观众端即可看到</div>';
+    el.innerHTML='<div style="font-size:12px;color:#94a3b8;padding:12px 0">直播间还没有挂载商品：在上方选择商品并点「上架并讲解」，观众端即可看到</div>';
   } else {
     el.innerHTML=list.map(function(p){
       var isCur=S.curProd&&S.curProd.productId===p.productId;
-      return '<div style="min-width:210px;max-width:250px;flex-shrink:0;border:1px solid '+(isCur?'#2563eb':'#eef2f7')+';border-radius:10px;padding:10px;background:#fff">'+
+      return '<div style="min-width:190px;max-width:230px;flex-shrink:0;border:1px solid '+(isCur?'#2563eb':'#eef2f7')+';border-radius:10px;padding:8px;background:#fff">'+
         '<div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline">'+
           '<span style="font-size:13px;font-weight:600;color:#1e293b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(p.name)+'">'+esc(p.name)+'</span>'+
-          (isCur?'<span style="font-size:10px;color:#2563eb;flex-shrink:0">讲解中</span>':'')+
+          (isCur?'<span style="font-size:10px;color:#2563eb;flex-shrink:0">🎯 讲解中</span>':'')+
         '</div>'+
         '<div style="font-size:12px;color:#dc2626;font-weight:700;margin-top:4px">'+fmtPrice(p.price)+
           '<span style="color:#94a3b8;font-weight:400;margin-left:8px">库存 '+fmtNum(p.stock)+'</span></div>'+
-        '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">'+
-          '<button class="lc-mini-btn" style="border-color:#2563eb;color:#2563eb" onclick="pushProductCard(\''+esc(p.productId)+'\')">📢 推送弹窗</button>'+
+        '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">'+
+          '<button class="lc-mini-btn" style="border-color:#2563eb;color:#2563eb" onclick="pushProductCard(\''+esc(p.productId)+'\')">📢 推送</button>'+
           '<button class="lc-mini-btn" onclick="setCurProdFromMgr(\''+esc(p.productId)+'\')">🎯 讲解</button>'+
           '<button class="lc-mini-btn" style="border-color:#ef4444;color:#ef4444" onclick="unmountLiveProduct(\''+esc(p.productId)+'\')">撤下</button>'+
         '</div></div>';
     }).join('');
   }
   renderLiveRoomStatBar();
-}
-function mountSelectedProduct(){
-  var sel=document.getElementById('mountProductSelect');
-  var pid=sel&&sel.value;
-  if(!pid){ toast('请先选择要挂载的商品','warn'); return; }
-  wsSend('mount_live_product',{productId:pid});
 }
 function unmountLiveProduct(pid){
   if(!confirm('确定把该商品从直播间撤下吗？观众端将立即看不到它。')) return;
@@ -2938,13 +3081,13 @@ on('unpin_danmaku_result',function(d){
 on('stage_changed',function(d){S.liveStatus.currentStage=d.stage;renderConsoleStatus();renderStageControl();toast('已切换阶段','success');});
 on('product_on_sale',function(d){
   var p=S.products.find(function(x){return x.productId===d.productId});
-  if(p){S.curProd=p;renderProductSelect();}
+  if(p){S.curProd=p;syncProductLinkage();}
   if(S.curPage==='products')renderProductsPage();
 });
 on('product_updated',function(d){
   // 商品发生变更（上下架/编辑等）：刷新商品列表与直播间挂载区
   wsSend('get_products');
-  renderLiveMountList();
+  syncProductLinkage();
 });
 // ---- 直播间商品挂载 / 商品卡片推送 ----
 on('live_product_mounted',function(d){
@@ -2959,13 +3102,20 @@ on('live_product_unmounted',function(d){
   if(d&&d.productId){
     S.products.forEach(function(p){if(p.productId===d.productId)p.isOnSale=false;});
     if(S.curProd&&S.curProd.productId===d.productId)S.curProd=null;
+    if(_pendingCurProdId===d.productId)_pendingCurProdId=null;
   }
   wsSend('get_products');loadLiveRoomStats();
-  if(S.curPage==='console'){renderLiveMountList();renderProductSelect();}
+  if(S.curPage==='console')syncProductLinkage();
 });
 on('mount_live_product_result',function(d){
-  if(d.success){toast(d.message||'商品已挂载','success');wsSend('get_products');loadLiveRoomStats();}
-  else toast(d.message||'挂载失败','err');
+  if(d.success){
+    toast(d.message||'商品已挂载','success');
+    wsSend('get_products');loadLiveRoomStats();
+  } else {
+    // 挂载失败：清掉待切换状态，下拉框回到当前讲解商品
+    if(_pendingCurProdId){ _pendingCurProdId=null; syncProductLinkage(); }
+    toast(d.message||'挂载失败','err');
+  }
 });
 on('unmount_live_product_result',function(d){
   if(d.success){toast(d.message||'商品已撤下','success');wsSend('get_products');loadLiveRoomStats();}
@@ -2992,11 +3142,25 @@ on('get_live_room_stats_result',function(d){
   renderLiveRoomStats();
 });
 on('set_product_result',function(d){
-  if(d.success&&d.product){S.curProd=d.product;renderProductSelect();toast('已切换商品','success');}
-  // 必须透出后端的具体原因：「商品已下架，请先上架再讲解」和「商品不存在」是两种
-  // 完全不同的处置，笼统回一句「切换失败」等于没提示（下架商品是点不到讲解的，
-  // 这就是主播会撞上的那个反馈）。
-  else toast(d.message||'商品切换失败','err');
+  if(d.success&&d.product){
+    S.curProd=d.product;
+    S._prevCurProd=null;
+    _pendingCurProdId=null;
+    syncProductLinkage();
+    toast('已切换商品','success');
+  } else {
+    // 乐观更新失败 → 回滚到切换前的商品，再整体同步一遍 UI
+    if(S._prevCurProd){
+      var back=(S.products||[]).find(function(p){return p.productId===S._prevCurProd.productId;});
+      if(back) S.curProd=back;
+      S._prevCurProd=null;
+    }
+    syncProductLinkage();
+    // 必须透出后端的具体原因：「商品已下架，请先上架再讲解」和「商品不存在」是两种
+    // 完全不同的处置，笼统回一句「切换失败」等于没提示（下架商品是点不到讲解的，
+    // 这就是主播会撞上的那个反馈）。
+    toast(d.message||'商品切换失败','err');
+  }
   if(S.curPage==='products')renderProductsPage();
 });
 on('status_update',function(d){
@@ -3140,8 +3304,17 @@ on('get_products_result',function(d){
     // 同步 curProd 引用，避免状态分裂
     if(S.curProd){S.curProd=S.products.find(function(p){return p.productId===S.curProd.productId;})||S.curProd;}
   }
-  renderProductSelect();
-  renderLiveMountList();
+  // 之前在等「上架后自动讲解」的商品，现在列表回来了：如果已挂载就补上切换
+  if(_pendingCurProdId){
+    var pend=S.products.find(function(p){return p.productId===_pendingCurProdId;});
+    if(pend&&pend.isOnSale){
+      var pid=_pendingCurProdId;
+      _pendingCurProdId=null;
+      setCurProd(pid);
+      return;
+    }
+  }
+  syncProductLinkage();
   if(S.curPage==='products')renderProductsPage();
 });
 on('add_product_result',function(d){if(d.success){toast('商品添加成功','success');wsSend('get_products');}else toast('商品添加失败','err');});
