@@ -348,9 +348,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
         <div><h2>📦 商品管理</h2><div class="sub">添加、上架、编辑你的直播间商品</div></div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="openProductForm()">➕ 添加商品</button>
-          <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="batchGenMissingImages()" title="为没有图片的商品批量生成本地 SVG 商品主图">🖼 给无图商品补图</button>
         </div>
       </div>
+      <!-- 商品图片本地上传（卡片 / 详情弹窗共用这一个隐藏 file input） -->
+      <input type="file" id="prodImgFileInput" accept="image/*" style="display:none">
       <!-- 统计卡 -->
       <div class="lc-grid lc-grid-4" id="prodStatRow"></div>
       <!-- 工具栏 -->
@@ -406,8 +407,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
             <input class="lc-inp" id="pfStock" type="number" min="0" step="1" style="width:100%;margin-top:4px">
           </div>
           <div>
-            <label style="font-size:12px;color:#64748b">商品外链图片URL（可多个，逗号/换行分隔；自动生成的 SVG 主图无需在此填写）</label>
-            <input class="lc-inp" id="pfImages" placeholder="https://...  也可在商品卡点「🖼 生成图」自动生成" style="width:100%;margin-top:4px">
+            <label style="font-size:12px;color:#64748b">商品外链图片URL（可多个，逗号/换行分隔；也可在商品卡点「⬆ 上传图片」本地选图）</label>
+            <input class="lc-inp" id="pfImages" placeholder="https://...  或点商品卡「⬆ 上传图片」从本地上传" style="width:100%;margin-top:4px">
           </div>
         </div>
         <div style="margin-top:12px">
@@ -885,6 +886,8 @@ var S = {
   // AI 出图进行中的商品 {productId: true}。免费端点单张要 1.6s~45s，
   // 且后端串行排队，不给个「生成中」状态用户会以为按钮没反应而反复点。
   aiImgBusy: {},
+  // 本地图片上传当前选中的商品（点卡片/详情按钮 → 选文件 → 上传后写回该商品）
+  imgUploadProductId: null,
   // 观众列表：两个数据源都在服务端算好，切 tab 只换渲染集合
   viewersOnline: [],
   viewersAll: [],
@@ -1300,86 +1303,63 @@ function prodSales(p) {
     allToday: p.todayQty || 0
   };
 }
-function escXml(s) {
-  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+// 图片素材 · 本地上传：POST /api/product/upload-image 把原图落到后端
+// uploads 目录，再通过 WebSocket save_product 写回商品主图（旧图保留在后面）。
+// 与下面的 AI 出图并存：上传是用户选图，AI 是生成图，两者互不替代。
+function wireProdImgUpload() {
+  var fi = document.getElementById('prodImgFileInput');
+  if (!fi || fi.getAttribute('data-wired') === '1') return;
+  fi.setAttribute('data-wired', '1');
+  fi.addEventListener('change', function(){
+    var f = fi.files && fi.files[0];
+    var pid = S.imgUploadProductId;
+    fi.value = '';
+    if (!f || !pid) return;
+    if (!/^image\//i.test(f.type || '')) { toast('请选择图片文件', 'warn'); return; }
+    if (f.size > 3 * 1024 * 1024) { toast('图片过大（上限 3MB）', 'warn'); return; }
+    var t = '';
+    try { t = localStorage.getItem('lc_auth_token') || ''; } catch(e) {}
+    if (!t) { toast('登录已失效，请重新登录', 'err'); return; }
+
+    var fd = new FormData();
+    fd.append('file', f);
+    toast('图片上传中…', 'info');
+    fetch('/api/product/upload-image', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + t },
+      body: fd
+    }).then(function(r){
+      // 后端失败时返回 {detail: ...}，取出来给用户看具体原因
+      return r.json().catch(function(){ return {}; }).then(function(j){
+        if (!r.ok) throw new Error((j && j.detail) || ('HTTP ' + r.status));
+        return j;
+      });
+    }).then(function(j){
+      if (!j || !j.url) throw new Error('上传结果缺少图片地址');
+      var p = S.products.filter(function(x){ return x.productId === pid; })[0];
+      var old = ((p && p.images) || []).filter(function(u){ return u && u !== j.url; });
+      // 新图放最前当主图，旧图保留在后面（与 AI 生图写回策略一致）
+      wsSend('save_product', { product: { productId: pid, images: [j.url].concat(old.slice(0, 4)), imageUrl: j.url } });
+      toast('商品图片已上传并设为主图', 'success');
+      if (S.detailProductId === pid) {
+        setTimeout(function(){
+          if (S.detailProductId === pid && S.products.some(function(x){ return x.productId === pid; })) openProductDetail(pid);
+        }, 600);
+      }
+    }).catch(function(e){
+      toast('图片上传失败：' + (e && e.message ? e.message : e), 'err');
+    });
+  });
 }
-function catColors(cat) {
-  var m = {
-    '美妆护肤': ['#ec4899', '#f9a8d4'],
-    '个护电器': ['#6366f1', '#a5b4fc'],
-    '食品生鲜': ['#f59e0b', '#fcd34d'],
-    '数码3C':   ['#0ea5e9', '#7dd3fc'],
-    '家居生活': ['#8b5cf6', '#c4b5fd'],
-    '母婴用品': ['#f97316', '#fdba74'],
-    '服饰穿搭': ['#f43f5e', '#fda4af'],
-    '其他':     ['#64748b', '#cbd5e1']
-  };
-  return m[cat] || m['其他'];
-}
-function productPosterSvg(p) {
-  // 依据商品信息生成本地 SVG 商品主图（无外部依赖）：品类配色渐变 + 图标 + 名称/价格/销量
-  var cs = catStyle(p.category);
-  var cc = catColors(p.category);
-  var name = String(p.name || '商品');
-  var n1 = name.slice(0, 12), rest = name.slice(12), n2 = '';
-  if (rest) n2 = rest.slice(0, 11) + (rest.length > 11 ? '…' : '');
-  var has2 = !!n2;
-  var s = prodSales(p);
-  var price = Number(p.price || 0);
-  var money = '¥' + (price === Math.floor(price) ? price.toFixed(0) : (Math.round(price * 100) / 100).toFixed(2));
-  var orig = (p.originalPrice && Number(p.originalPrice) > price) ? '¥' + Number(p.originalPrice).toFixed(0) : '';
-  var origX = orig ? (52 + money.length * 20 + 12) : 0;
-  var badge = s.qty > 0
-    ? ('已售 ' + fmtNum(s.qty) + ' 件' + (s.today > 0 ? ' · 今日+' + fmtNum(s.today) : ''))
-    : (s.allQty > 0 ? '真实成交 0 件（含模拟 ' + fmtNum(s.allQty) + '）' : '暂无成交');
-  var nameY1 = has2 ? 266 : 292, nameY2 = 306, priceY = 356, metaY = 408;
-  var catPillW = 34 + String(p.category || '').length * 16 + 30;
-  var svg =
-    '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480" font-family="-apple-system,BlinkMacSystemFont,\'PingFang SC\',\'Microsoft YaHei\',sans-serif">' +
-    '<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">' +
-      '<stop offset="0%" stop-color="' + cc[0] + '"/><stop offset="100%" stop-color="' + cc[1] + '"/></linearGradient></defs>' +
-    '<rect width="640" height="480" fill="url(#bg)"/>' +
-    '<circle cx="545" cy="70" r="115" fill="#ffffff" opacity="0.13"/>' +
-    '<circle cx="58" cy="430" r="92" fill="#ffffff" opacity="0.10"/>' +
-    '<circle cx="620" cy="430" r="42" fill="#ffffff" opacity="0.14"/>' +
-    '<rect x="28" y="26" rx="15" height="34" width="' + catPillW + '" fill="#ffffff" opacity="0.30"/>' +
-    '<text x="44" y="50" font-size="17" fill="#ffffff" font-weight="600">' + cs.emoji + ' ' + escXml(p.category || '') + '</text>' +
-    '<text x="320" y="150" text-anchor="middle" font-size="104">' + cs.emoji + '</text>' +
-    '<rect x="24" y="220" width="592" height="236" rx="18" fill="#ffffff"/>' +
-    '<text x="52" y="' + nameY1 + '" font-size="30" font-weight="700" fill="#0f172a">' + escXml(n1) + '</text>' +
-    (has2 ? '<text x="52" y="' + nameY2 + '" font-size="30" font-weight="700" fill="#0f172a">' + escXml(n2) + '</text>' : '') +
-    '<text x="52" y="' + priceY + '" font-size="34" font-weight="800" fill="#e11d48">' + escXml(money) + '</text>' +
-    (orig ? '<text x="' + origX + '" y="' + (priceY - 8) + '" font-size="16" fill="#94a3b8" text-decoration="line-through">' + escXml(orig) + '</text>' : '') +
-    '<text x="588" y="' + metaY + '" text-anchor="end" font-size="17" font-weight="700" fill="#475569">' + escXml(badge) + '</text>' +
-    '</svg>';
-  return svg;
-}
-function productDataUri(p) {
-  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(productPosterSvg(p));
-}
-function genProductImage(pid) {
-  // 用商品当前信息生成一张 SVG 商品主图并保存（卡片/详情弹窗即时刷新）
-  var p = S.products.filter(function(x){return x.productId === pid;})[0];
-  if (!p) return;
-  var uri = productDataUri(p);
-  wsSend('save_product', { product: { productId: pid, images: [uri], imageUrl: uri } });
-  toast('已生成商品主图', 'success');
-  if (S.detailProductId === pid) {
-    // 保存结果回来后再拉一遍新图刷新详情弹窗
-    setTimeout(function(){
-      if (S.detailProductId === pid && S.products.some(function(x){return x.productId === pid;})) openProductDetail(pid);
-    }, 600);
-  }
-}
-function batchGenMissingImages() {
-  var missing = S.products.filter(function(p){ return !((p.images && p.images.length) || p.imageUrl); });
-  if (!missing.length) { toast('所有商品都已配有图片', 'warn'); return; }
-  missing.forEach(function(p){ genProductImage(p.productId); });
-  toast('已为 ' + missing.length + ' 个商品生成主图', 'success');
+function uploadProductImage(pid) {
+  S.imgUploadProductId = pid;
+  wireProdImgUpload();
+  var fi = document.getElementById('prodImgFileInput');
+  if (fi) fi.click();
+  else toast('上传控件未就绪，请刷新页面', 'err');
 }
 // AI 出图：调后端 /api/product/{id}/generate-image，由后端写回商品主图。
-// 与上面 genProductImage（本地生成的 SVG 海报，瞬时、纯前端）是两回事：
+// 与上面的本地上传是两条并存的路径：
 // 这个是真正的 AI 写实图片，慢（免费端点排队 1.6s~45s）、有概率画得不像，
 // 不满意就再点一次重新抽（后端每次随机 seed，不会返回缓存里的同一张）。
 function genAiProductImage(pid) {
@@ -1505,7 +1485,7 @@ function renderProductsPage() {
             ? '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="toggleOnSale(\''+p.productId+'\',false)">下架</button>'
             : '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="toggleOnSale(\''+p.productId+'\',true)" style="color:#059669;border-color:#a7f3d0">上架</button>')+
           '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="openProductForm(\''+p.productId+'\')">编辑</button>'+
-          '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="genProductImage(\''+p.productId+'\')" title="按商品信息生成本地 SVG 商品主图（瞬时、离线，可重复点击重新生成）">🖼 生成图</button>'+
+          '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="uploadProductImage(\''+p.productId+'\')" title="从本地上传图片并设为主图（原图保存，不做压缩裁剪）">⬆ 上传图片</button>'+
           '<button class="lc-btn lc-btn-outline lc-btn-sm" data-aiimg="'+p.productId+'" onclick="genAiProductImage(\''+p.productId+'\')" title="AI 生成写实商品图并设为主图。免费端点较慢（几秒到几十秒），不满意可再点一次重新生成">✨ AI 生成图</button>'+
           '<button class="lc-btn lc-btn-danger lc-btn-sm" onclick="deleteProduct(\''+p.productId+'\')">删除</button>'+
         '</div>'+
@@ -1631,7 +1611,7 @@ function openProductDetail(pid) {
     '<div style="display:flex;gap:8px;margin-top:14px" onclick="event.stopPropagation()">'+
       '<button class="lc-btn lc-btn-primary lc-btn-sm" onclick="setCurProdFromMgr(\''+p.productId+'\');closeProductDetail()">🎯 设为讲解</button>'+
       '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="openProductForm(\''+p.productId+'\');closeProductDetail()">✏️ 编辑</button>'+
-      '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="genProductImage(\''+p.productId+'\')" title="按商品信息生成本地 SVG 商品主图（瞬时、离线）">🖼 生成商品图</button>'+
+      '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="uploadProductImage(\''+p.productId+'\')" title="从本地上传图片并设为主图（原图保存，不做压缩裁剪）">⬆ 上传图片</button>'+
       '<button class="lc-btn lc-btn-outline lc-btn-sm" data-aiimg="'+p.productId+'" onclick="genAiProductImage(\''+p.productId+'\')" title="AI 生成写实商品图并设为主图。免费端点较慢（几秒到几十秒），不满意可再点一次重新生成">✨ AI 生成图</button>'+
       (p.isOnSale?'<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="toggleOnSale(\''+p.productId+'\',false);closeProductDetail()">下架</button>'
                  :'<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="toggleOnSale(\''+p.productId+'\',true);closeProductDetail()">上架</button>')+

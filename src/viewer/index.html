@@ -510,7 +510,7 @@ function isPaused(){ return S.live && S.live.status==='paused'; }
 // ============================================================
 // WebSocket
 // ============================================================
-var ws=null, wsR=null, wsA=0, wsInit=false, wsQ=[];
+var ws=null, wsR=null, wsA=0, wsInit=false, wsOpened=false, wsQ=[];
 function wsUrl(){
   // 同源：沿用改造前的 (wss|ws)://当前host；跨域：由配置的 http(s) 推出 ws(s)。
   // 用字符串替换而不是拼协议，顺带支持 API_BASE 带路径前缀
@@ -523,9 +523,10 @@ function wsUrl(){
 }
 function wsConn(){
   if (ws && ws.readyState===1) return;
+  wsOpened=false;
   try{ ws=new WebSocket(wsUrl()); }catch(e){ scheduleReconnect(); return; }
   ws.onopen=function(){
-    wsA=0; wsInit=true; setConnPill(true);
+    wsA=0; wsInit=true; wsOpened=true; setConnPill(true);
     while(wsQ.length && ws.readyState===1){ ws.send(wsQ.shift()); }
     // 有 token 就静默续登（游客不登录，只能看）；不再自报 userId 建档
     if(S.token) wsSend('viewer_login',{token:S.token});
@@ -533,16 +534,41 @@ function wsConn(){
   ws.onmessage=function(e){ try{ var m=JSON.parse(e.data); handle(m); }catch(ex){} };
   ws.onclose=function(e){
     setConnPill(false);
-    if(e && e.code===1008){
-      // 服务端握手校验失败（token 过期/伪造）→ 清本地 token，按游客重连。
-      // 不清的话会带着同一个坏 token 无限重连。
-      saveToken(''); S.acc={userId:'',userName:'',avatar:'',balance:0};
-      onLogoutUI(); toast('登录已过期，请重新登录','err');
+    var code = e && e.code;
+    if(code===1000||code===1001) return;
+    var hadToken = !!S.token;
+    if(code===1008){
+      // 服务端在已接受连接后以 1008 拒绝（token 过期/伪造）→ 清本地 token，按游客重连。
+      clearViewerAuth('登录已过期，请重新登录');
+      scheduleReconnect();
+      return;
     }
-    if(e && (e.code===1000||e.code===1001)) return;
+    // 握手阶段被拒（HTTP 403）时浏览器只能拿到 1006，拿不到 1008。
+    // 有 token 且这次根本没连上 → 用 HTTP 接口确认 token 是否还有效：
+    // 失效则清态按游客重连，网络异常则保留 token 继续重试。
+    if(hadToken && !wsOpened){
+      var badToken = S.token;
+      probeViewerToken(badToken).then(function(valid){
+        // 探测期间用户可能已重新登录，只在 token 未变时才清态。
+        if(!valid && S.token===badToken) clearViewerAuth('登录已过期，请重新登录');
+        scheduleReconnect();
+      });
+      return;
+    }
     scheduleReconnect();
   };
   ws.onerror=function(){ setConnPill(false); };
+}
+function clearViewerAuth(reason){
+  if(!S.token) return;
+  saveToken(''); S.acc={userId:'',userName:'',avatar:'',balance:0}; S.userId='';
+  onLogoutUI(); toast(reason||'登录已过期，请重新登录','err');
+}
+function probeViewerToken(token){
+  // 返回 true = token 仍有效或网络异常（保留 token 重试）；false = 服务端判定失效。
+  return fetch(apiUrl('/auth/viewer/me'), {headers:{'Authorization':'Bearer '+(token||S.token)}})
+    .then(function(r){ return r.status!==401 && r.status!==403; })
+    .catch(function(){ return true; });
 }
 function scheduleReconnect(){ setConnPill(false); clearTimeout(wsR); var d= wsInit? Math.min(1000*Math.pow(1.3,wsA),8000) : 300; wsR=setTimeout(wsConn, d); wsA++; }
 function wsSend(t,d){ var s=JSON.stringify({type:t,data:d||{},timestamp:new Date().toISOString()}); if(ws&&ws.readyState===1){ ws.send(s); } else { wsQ.push(s); } }

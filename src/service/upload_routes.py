@@ -1,7 +1,11 @@
-"""头像/图片上传接口：POST /api/avatar/upload → {"url": "/uploads/<name>"}。
+"""头像/商品图片上传接口。
+
+  * POST /api/avatar/upload        → {"url": "/uploads/av_<hex>.<ext>"}
+  * POST /api/product/upload-image → {"url": "/uploads/prod_<hex>.<ext>"}
 
 图片落盘到 src/data/live_commerce/data/uploads/（已在 run_service reload 排除范围内，写图不触发热重载），
 由 service.py 中以 StaticFiles 挂载 /uploads 对外提供读取。
+商品图现阶段保留原图直接保存，不做压缩、裁剪等处理。
 """
 import os
 from uuid import uuid4
@@ -18,9 +22,8 @@ _ALLOWED_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}
 _MAX_BYTES = 3 * 1024 * 1024
 
 
-@router.post("/api/avatar/upload")
-async def upload_avatar(file: UploadFile):
-    """接收一张头像图片，返回可访问的 /uploads/<name> 相对 URL"""
+async def _save_image(file: UploadFile, prefix: str) -> dict:
+    """把上传的图片原样写入 UPLOADS_DIR，返回 {"url", "size"}。"""
     content_type = (file.content_type or "").lower()
     if not content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="仅支持上传图片")
@@ -37,7 +40,7 @@ async def upload_avatar(file: UploadFile):
         ext = fallback or ".png"
 
     os.makedirs(UPLOADS_DIR, exist_ok=True)
-    name = f"av_{uuid4().hex}{ext}"
+    name = f"{prefix}_{uuid4().hex}{ext}"
     dest = os.path.join(UPLOADS_DIR, name)
 
     size = 0
@@ -57,3 +60,18 @@ async def upload_avatar(file: UploadFile):
             out.write(chunk)
 
     return {"url": f"/uploads/{name}", "size": size}
+
+
+@router.post("/api/avatar/upload")
+async def upload_avatar(file: UploadFile):
+    """接收一张头像图片，返回可访问的 /uploads/<name> 相对 URL"""
+    return await _save_image(file, "av")
+
+
+@router.post("/api/product/upload-image")
+async def upload_product_image(file: UploadFile):
+    """接收一张商品图片，原图落盘到后端本地上传目录并返回访问 URL。
+
+    前端拿到 url 后通过 WebSocket save_product 写回商品的 images[0] / imageUrl。
+    """
+    return await _save_image(file, "prod")
