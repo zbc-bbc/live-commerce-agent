@@ -856,6 +856,21 @@ class LiveCommerceWebSocketManager:
                     "pinned": dm.get_pinned_danmaku(),
                 })
 
+            # ========== 主播端 · 场次弹幕复盘（按场次隔离读取） ==========
+            # 不在 _VIEWER_ALLOWED 里：场次弹幕属于运营复盘数据，观众连接一律拒绝。
+            elif msg_type == "get_danmaku_sessions":
+                await self._send(websocket, "get_danmaku_sessions_result", {
+                    "sessions": dm.get_danmaku_sessions(),
+                })
+
+            elif msg_type == "get_session_danmaku":
+                result = dm.get_session_danmaku(
+                    msg_data.get("sessionId", ""),
+                    msg_data.get("filter", "all"),
+                    msg_data.get("keyword", ""),
+                )
+                await self._send(websocket, "get_session_danmaku_result", result)
+
             elif msg_type == "pin_danmaku":
                 # 主播专用（不在 _VIEWER_ALLOWED，观众发这条会被角色闸门拦下）
                 result = dm.pin_danmaku(msg_data.get("danmakuId", ""))

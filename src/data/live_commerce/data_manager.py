@@ -9,6 +9,7 @@ import random
 import re
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
@@ -58,6 +59,23 @@ ALERT_HISTORY_MAX = 50
 # 直播间弹幕历史缓冲条数：中途进入的观众最多能拉到最近 20 条本场弹幕。
 DANMAKU_HISTORY_LIMIT = 20
 os.makedirs(REPORTS_DIR, exist_ok=True)
+
+# ── 场次弹幕归档 ──
+# 每场直播结束时，把本场**全部**弹幕固化到 danmaku_sessions/<sessionId>.json，
+# 索引 index.json 保存场次列表与统计。场次之间物理隔离，复盘页按 sessionId 读取，
+# 不再从跨场混存的滚动列表里反推。
+# 目录按 DANMAKU_FILE 动态推导（而不是导入时算死），这样测试把 DANMAKU_FILE
+# 重定向到 tmp_path 时，归档目录也会跟着走。
+DANMAKU_SESSIONS_DIRNAME = "danmaku_sessions"
+DANMAKU_SESSION_INDEX = "index.json"
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def danmaku_sessions_dir() -> str:
+    """返回场次弹幕归档目录（不存在则创建）。"""
+    path = os.path.join(os.path.dirname(DANMAKU_FILE), DANMAKU_SESSIONS_DIRNAME)
+    os.makedirs(path, exist_ok=True)
+    return path
 
 # ── 收货地址校验 ──
 # 手机号按中国大陆手机号校验；地址条数上限防止单个账号无限堆积。
@@ -347,6 +365,10 @@ class LiveCommerceDataManager:
         # 直播间弹幕历史缓冲：开播时清空，之后滚动保留最近 DANMAKU_HISTORY_LIMIT 条，
         # 供中途进入的观众拉取（get_danmaku_history / danmaku_history）。
         self.live_danmaku_history: list[DanmakuItem] = []
+        # 本场**全程**弹幕（不截断）。开播清空，直播结束整场固化到 danmaku_sessions/。
+        # 与上面 20 条缓冲的区别：那个只负责「中途进来的观众能看到什么」，
+        # 这个负责复盘时「本场到底聊了什么」，因此一条都不能丢。
+        self.current_session_danmaku: list[DanmakuItem] = []
         # 当前置顶弹幕 id（空串表示无置顶）。只在本场直播内有效，开播时清空。
         self.pinned_danmaku_id: str = ""
         # 私信数据
@@ -928,6 +950,169 @@ class LiveCommerceDataManager:
                 self._session_real_users.add(user_id)
 
     # ============================================================
+    # 场次弹幕：绑定 / 归档 / 复盘查询
+    # ============================================================
+    @staticmethod
+    def _new_live_session_id() -> str:
+        """生成唯一场次ID：live_年月日_时分秒_4位随机串。"""
+        return f"live_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}"
+
+    def _ensure_live_session_id_locked(self) -> str:
+        """确保直播场次有唯一ID（调用方需持锁）。
+
+        正常路径由 start_live 生成；这里兜住「直接改 live_state 的测试/旧调用」，
+        避免弹幕因为 sessionId 为空而无法归入任何场次。
+        """
+        if not self.live_state.sessionId:
+            self.live_state.sessionId = self._new_live_session_id()
+        return self.live_state.sessionId
+
+    def _bind_danmaku_session_locked(self, danmaku: DanmakuItem) -> None:
+        """判定情绪并把弹幕绑定到当前场次（调用方需持锁）。
+
+        只有直播中/暂停中才采集：未开播时发的弹幕 sessionId 保持空串，
+        仍进入全局滚动列表，但不属于任何一场直播。
+        """
+        if not danmaku.sentiment:
+            danmaku.sentiment = classify_sentiment(danmaku.content)
+        if self.live_state.status in ("live", "paused"):
+            sid = self._ensure_live_session_id_locked()
+            if not danmaku.sessionId:
+                danmaku.sessionId = sid
+            if danmaku.sessionId == sid:
+                self.current_session_danmaku.append(danmaku)
+
+    @staticmethod
+    def _count_session_danmaku(items: list[DanmakuItem]) -> dict:
+        """场次弹幕统计：总数、真实观众数、提问数、情绪分布。"""
+        counts = {
+            "total": len(items), "real": 0, "question": 0,
+            "emotion": 0, "positive": 0, "negative": 0, "neutral": 0,
+        }
+        for d in items:
+            if is_real_user_id(d.userId):
+                counts["real"] += 1
+            if d.isQuestion:
+                counts["question"] += 1
+            sentiment = d.sentiment or classify_sentiment(d.content)
+            if sentiment in ("positive", "negative"):
+                counts[sentiment] += 1
+                counts["emotion"] += 1
+            else:
+                counts["neutral"] += 1
+        return counts
+
+    def _archive_current_session_locked(self, end_time: str) -> Optional[dict]:
+        """把本场全部弹幕固化到独立场次文件，并更新索引（调用方需持锁）。
+
+        归档是幂等的：同一 sessionId 再次归档会覆盖旧文件、索引里只保留一条。
+        返回场次摘要（供 live_ended 广播）；没有可归档内容时返回 None。
+        """
+        items = list(self.current_session_danmaku)
+        if not self.live_state.sessionId:
+            if not items:
+                return None
+            self._ensure_live_session_id_locked()
+        sid = self.live_state.sessionId
+        product = self.get_current_product()
+        product_name = product.name if product else "未上架商品"
+        start_time = self.live_state.startTime or ""
+        start_label = start_time[:16].replace("T", " ") if start_time else end_time[:16].replace("T", " ")
+        counts = self._count_session_danmaku(items)
+        meta = {
+            "sessionId": sid,
+            "title": f"{product_name} · {start_label}",
+            "productId": product.productId if product else "",
+            "productName": product_name,
+            "startTime": start_time,
+            "endTime": end_time,
+            "duration": self.live_state.liveDuration,
+            **counts,
+            "archivedAt": end_time,
+        }
+        session_dir = danmaku_sessions_dir()
+        # 1) 本场独立文件：场次之间物理隔离，复盘只读这里
+        self._save_json(
+            os.path.join(session_dir, f"{sid}.json"),
+            {"session": meta, "danmaku": [d.model_dump() for d in items]},
+        )
+        # 2) 索引：只存摘要，不存弹幕正文，便于复盘页快速列出所有场次
+        index_path = os.path.join(session_dir, DANMAKU_SESSION_INDEX)
+        index = self._load_json(index_path, [])
+        if not isinstance(index, list):
+            index = []
+        index = [m for m in index
+                 if isinstance(m, dict) and m.get("sessionId") != sid]
+        index.append(meta)
+        index.sort(key=lambda m: str(m.get("startTime", "")), reverse=True)
+        self._save_json(index_path, index)
+        self.current_session_danmaku = []
+        return meta
+
+    def get_danmaku_sessions(self) -> list[dict]:
+        """所有已归档场次摘要（按开播时间倒序）。"""
+        with self._lock:
+            index = self._load_json(
+                os.path.join(danmaku_sessions_dir(), DANMAKU_SESSION_INDEX), [])
+        if not isinstance(index, list):
+            return []
+        sessions = [m for m in index if isinstance(m, dict) and m.get("sessionId")]
+        sessions.sort(key=lambda m: str(m.get("startTime", "")), reverse=True)
+        return sessions
+
+    def get_session_danmaku(self, session_id: str, filter_type: str = "all",
+                            keyword: str = "") -> dict:
+        """读取某一场已归档弹幕，并按提问 / 情绪 / 关键词筛选。
+
+        filter_type: all | question | emotion（正面或负面） | positive | negative | neutral
+        场次ID 来自客户端，先做白名单校验再拼路径，避免路径穿越。
+        """
+        sid = (session_id or "").strip()
+        empty = {"success": False, "session": None, "danmaku": [], "counts": {}}
+        if not _SESSION_ID_RE.fullmatch(sid):
+            return {**empty, "message": "场次ID不合法"}
+        meta = next((m for m in self.get_danmaku_sessions()
+                     if m.get("sessionId") == sid), None)
+        if meta is None:
+            return {**empty, "message": "场次不存在或尚未归档"}
+        with self._lock:
+            data = self._load_json(
+                os.path.join(danmaku_sessions_dir(), f"{sid}.json"), {})
+        raw = data.get("danmaku", []) if isinstance(data, dict) else []
+        items: list[DanmakuItem] = []
+        for d in raw:
+            try:
+                items.append(DanmakuItem(**d))
+            except Exception:
+                continue
+        counts = self._count_session_danmaku(items)
+
+        flt = (filter_type or "all").strip().lower()
+        kw = (keyword or "").strip().lower()
+
+        def match(item: DanmakuItem) -> bool:
+            if kw and kw not in (item.content or "").lower():
+                return False
+            sentiment = item.sentiment or classify_sentiment(item.content)
+            if flt == "question":
+                return item.isQuestion
+            if flt == "emotion":
+                return sentiment in ("positive", "negative")
+            if flt in ("positive", "negative", "neutral"):
+                return sentiment == flt
+            return True
+
+        result = []
+        for item in items:
+            if not item.sentiment:
+                # 兼容引入 sentiment 字段之前写入的归档
+                item.sentiment = classify_sentiment(item.content)
+            if match(item):
+                result.append(item.model_dump())
+        return {"success": True, "session": meta, "danmaku": result,
+                "counts": counts, "filter": flt, "keyword": kw}
+
+    # ============================================================
     # 商品管理
     # ============================================================
     def next_product_id(self) -> str:
@@ -1299,6 +1484,9 @@ class LiveCommerceDataManager:
         模拟弹幕的 isVirtual 是 False，旧写法把它们全算进了真实口径）。
         """
         with self._lock:
+            # 绑定场次 + 判定情绪：直播中的每条弹幕都归入当前 sessionId，
+            # 并进入本场全程缓冲（直播结束时整场固化）。
+            self._bind_danmaku_session_locked(danmaku)
             self.danmaku_list.append(danmaku)
             self._remember_live_danmaku_locked(danmaku)
             self._danmaku_counter += 1
@@ -2599,8 +2787,15 @@ class LiveCommerceDataManager:
                 # 「上架」和「选讲解商品」现在是两件事，文案得跟着改，否则主播会去
                 # 商品管理里点「上架」然后困惑为什么还开不了播。
                 return {"success": False, "message": "请先选择讲解商品"}
+            # 上一场没走 end_live 就重复开播（比如误点）时，先把旧场次固化，
+            # 否则本场全程缓冲一清空，那一场的弹幕就永久丢了。
+            if self.live_state.status in ("live", "paused") and self.live_state.sessionId:
+                self._archive_current_session_locked(datetime.now().isoformat())
             self.live_state.status = "live"
             self.live_state.startTime = datetime.now().isoformat()
+            # 新场次：生成唯一ID并清空本场全程缓冲，从此每条弹幕都绑定到它
+            self.live_state.sessionId = self._new_live_session_id()
+            self.current_session_danmaku = []
             # 在线人数 = 配置的模拟热度基数 + 真实在线观众数（不再随机取数）
             self._online_base = self._online_base_from_settings()
             self._refresh_online_locked()
@@ -2681,15 +2876,19 @@ class LiveCommerceDataManager:
                     self.live_state.liveDuration = int((datetime.now() - start).total_seconds())
                 except Exception:
                     self.live_state.liveDuration = 0
+            # 直播结束：把本场全程弹幕固化到独立场次文件（按 sessionId 隔离）
+            archived_session = self._archive_current_session_locked(now)
             self._stop_timers()
         # 释放锁后生成报告（避免死锁）
         report = self.generate_report()
         self._broadcast("live_ended", {
             "endTime": now,
             "duration": self.live_state.liveDuration,
+            "danmakuSession": archived_session,
             "report": report,
         })
-        return {"success": True, "message": "直播已结束", "report": report}
+        return {"success": True, "message": "直播已结束", "report": report,
+                "danmakuSession": archived_session}
 
     def switch_stage(self, stage_key: str) -> dict:
         """切换直播阶段"""
@@ -2768,6 +2967,7 @@ class LiveCommerceDataManager:
             s = self.live_state
             return {
                 "status": s.status,
+                "sessionId": s.sessionId,
                 "currentStage": s.currentStage,
                 "startTime": s.startTime,
                 "liveDuration": s.liveDuration,
@@ -2890,7 +3090,11 @@ class LiveCommerceDataManager:
                 isVirtual=True,
                 isQuestion=is_question_like(content),
                 isReplied=False,
+                sentiment=classify_sentiment(content),
             )
+            # 虚拟弹幕也属于本场：同样绑定 sessionId 并进入全程缓冲，
+            # 复盘时可以看到「氛围弹幕」在整场里占了多少。
+            self._bind_danmaku_session_locked(danmaku)
             self.danmaku_list.append(danmaku)
             # 虚拟弹幕同样会广播给在线观众，因此也计入本场历史缓冲，
             # 否则中途进来的观众看到的「历史」会缺掉屏幕上刚刷过的那几条。

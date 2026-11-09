@@ -195,6 +195,7 @@ privatecredentials/*
 # ── Live Commerce 运行时数据（只保留目录骨架） ──
 src/data/live_commerce/data/*.json
 src/data/live_commerce/data/*.db
+src/data/live_commerce/data/danmaku_sessions/*
 src/data/live_commerce/data/reports/*
 !src/data/live_commerce/data/reports/.gitkeep
 src/data/live_commerce/data/uploads/*

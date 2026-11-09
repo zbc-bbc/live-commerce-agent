@@ -1202,7 +1202,16 @@ function renderWallet(){
   if(w){ w.innerHTML = isLoggedIn()? ('💰 ¥<b id="walletVal">'+fmtPrice(S.acc.balance)+'</b>') : '👤 登录'; }
   else { var el=$('walletVal'); if(el) el.textContent=fmtPrice(S.acc.balance); }
 }
-function fmtDT(t){ if(!t)return'--'; try{ var d=new Date(t); function p(x){return('0'+x).slice(-2)} return (d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes()); }catch(e){ return t; } }
+// 统一时间展示：订单、私信等所有时间都必须带完整年月日
+function fmtDT(t){
+  if(!t)return'--';
+  try{
+    var d=new Date(t);
+    if(isNaN(d.getTime())) return String(t);
+    function p(x){return('0'+x).slice(-2)}
+    return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+  }catch(e){ return t; }
+}
 function onProfileResult(d){
   if(d && d.user){
     S.acc.userId=d.user.userId||S.acc.userId;

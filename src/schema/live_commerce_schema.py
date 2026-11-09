@@ -145,6 +145,15 @@ class DanmakuItem(BaseModel):
     source: str = Field(default="danmaku", description="来源（danmaku/private）")
     isViolation: bool = Field(default=False, description="是否违规弹幕")
     violationReason: str = Field(default="", description="违规原因")
+    # ---- 场次绑定 / 复盘筛选扩展字段（均带默认值，向后兼容旧 JSON）----
+    sessionId: str = Field(
+        default="",
+        description="所属直播场次ID（开播时生成，按场次隔离存储；未开播时的弹幕为空串）",
+    )
+    sentiment: str = Field(
+        default="",
+        description="观众情绪判定：positive / neutral / negative（纯规则词表，空串=尚未判定）",
+    )
 
 
 # ============================================================
@@ -369,6 +378,9 @@ class QuickReplyItem(BaseModel):
 class LiveSessionState(BaseModel):
     """直播会话状态"""
     status: LIVE_STATUS = "idle"
+    # 本场直播的唯一场次ID（形如 live_20261109_161230_a1b2）。
+    # 弹幕、复盘都按它隔离；开播时生成，结束后保留供复盘页回看。
+    sessionId: str = Field(default="", description="当前直播场次唯一ID")
     currentProductId: str = Field(default="", description="当前上架商品ID")
     currentStage: str = Field(default="warmup", description="当前直播阶段")
     startTime: str = Field(default="", description="开播时间")

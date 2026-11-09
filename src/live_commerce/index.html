@@ -628,32 +628,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
         <div class="lc-grid lc-grid-4" id="liveRoomStatRow" style="margin-top:6px"></div>
         <div class="lc-scroll" style="margin-top:12px;max-height:300px" id="liveRoomProductStats"></div>
       </div>
-      <!-- 商单成交区块 -->
+      <!-- 订单明细 / 成交统计 / 状态筛选已统一迁移到「订单管理」页。
+           分析页只保留按商品的累计销量分析，避免两页重复维护同一套订单数据。 -->
       <div class="lc-card" style="margin-top:16px">
         <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center">
-          <span>💰 商单与成交</span>
-          <span style="font-size:11px;font-weight:400;color:#94a3b8">只统计真实注册观众的成交（模拟单已停用）</span>
+          <span>🏆 商品销量 Top（累计真实成交）</span>
+          <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="switchPage('orders')">前往订单管理 →</button>
         </div>
-        <div class="lc-grid lc-grid-4" style="margin-top:6px" id="orderStatRow"></div>
-        <div class="lc-grid lc-grid-2" style="margin-top:14px">
-          <div>
-            <div class="lc-card-title" style="border:none;padding:0">📄 最近订单</div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">
-              <button class="lc-mini-btn" data-ost="all" onclick="setOrderFilter('all')">全部</button>
-              <button class="lc-mini-btn" data-ost="pending_pay" onclick="setOrderFilter('pending_pay')">待付款</button>
-              <button class="lc-mini-btn" data-ost="paid" onclick="setOrderFilter('paid')">已付款</button>
-              <button class="lc-mini-btn" data-ost="shipped" onclick="setOrderFilter('shipped')">已发货</button>
-              <button class="lc-mini-btn" data-ost="completed" onclick="setOrderFilter('completed')">已完成</button>
-              <button class="lc-mini-btn" data-ost="refunded" onclick="setOrderFilter('refunded')">已退款</button>
-              <button class="lc-mini-btn" data-ost="canceled" onclick="setOrderFilter('canceled')">已取消</button>
-            </div>
-            <div class="lc-scroll" style="max-height:320px"><table class="lc-tbl2" id="orderTable"></table></div>
-          </div>
-          <div>
-            <div class="lc-card-title" style="border:none;padding:0">🏆 商品销量 Top</div>
-            <div id="orderByProduct" style="margin-top:8px;font-size:13px"></div>
-          </div>
-        </div>
+        <div id="orderByProduct" style="margin-top:8px;font-size:13px"></div>
       </div>
     </div>
 
@@ -780,6 +762,35 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
       <div id="reportContent">
         <div class="lc-card">
           <div class="lc-empty"><div class="icon">📋</div>点击「生成报告」查看本场直播复盘数据</div>
+        </div>
+      </div>
+      <!-- 场次弹幕复盘：选定已归档场次，按提问 / 情绪筛选本场弹幕 -->
+      <div class="lc-card" style="margin-top:16px">
+        <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <span>💬 场次弹幕复盘</span>
+          <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="loadDmSessions()">↻ 刷新场次</button>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0">
+          <label style="font-size:12px;color:#475569">选择场次</label>
+          <select class="lc-sel" id="dmSessionSelect" style="min-width:300px" onchange="selectDmSession(this.value)">
+            <option value="">加载中…</option>
+          </select>
+          <input class="lc-inp" id="dmSessionKeyword" placeholder="搜索弹幕内容…" style="width:190px"
+                 onkeydown="if(event.key==='Enter')applyDmSessionFilter()">
+          <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="applyDmSessionFilter()">🔍 筛选</button>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px" id="dmSessionFilters">
+          <button class="lc-btn lc-btn-primary lc-btn-sm" data-f="all" onclick="setDmSessionFilter('all')">全部</button>
+          <button class="lc-btn lc-btn-outline lc-btn-sm" data-f="question" onclick="setDmSessionFilter('question')">❓ 提问</button>
+          <button class="lc-btn lc-btn-outline lc-btn-sm" data-f="emotion" onclick="setDmSessionFilter('emotion')">😊😟 有情绪</button>
+          <button class="lc-btn lc-btn-outline lc-btn-sm" data-f="positive" onclick="setDmSessionFilter('positive')">😊 正面</button>
+          <button class="lc-btn lc-btn-outline lc-btn-sm" data-f="negative" onclick="setDmSessionFilter('negative')">😟 负面</button>
+        </div>
+        <div id="dmSessionMeta" style="font-size:12px;color:#64748b;margin-bottom:8px">
+          直播结束后自动固化本场全部弹幕，可在此按场次回看
+        </div>
+        <div class="lc-scroll" id="dmSessionList" style="max-height:440px">
+          <div class="lc-empty"><div class="icon">💬</div>暂无已归档场次</div>
         </div>
       </div>
     </div>
@@ -947,6 +958,11 @@ var S = {
   aiReplyFilter: 'ai',
   reviewFilter: 'all',
   dmHistoryTab: 'real',   // 弹幕历史：默认只看真实观众（注册用户）
+  // 场次弹幕复盘（复盘页）：已归档场次列表 / 当前选中场次 / 筛选条件
+  dmSessions: [],
+  dmSessionId: '',
+  dmSessionFilter: 'all',
+  dmSessionKeyword: '',
   isLive: false,
   orders: [],
   orderStats: null,
@@ -1069,7 +1085,17 @@ function emit(e, d) { if (LL[e]) LL[e].forEach(function(f){try{f(d)}catch(ex){}}
 // ============================================================
 function fmtNum(n) { return (n===null||n===undefined||isNaN(n))?'0':Number(n).toLocaleString(); }
 function fmtPrice(p) { return '¥' + (p||0).toFixed(0); }
-function fmtTime(t) { if(!t)return'--';try{var d=new Date(t);return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2)}catch(e){return t} }
+// 统一时间展示：所有页面（订单、弹幕、私信、评价、观众详情等）都必须带完整年月日
+function fmtTime(t) {
+  if(!t)return'--';
+  try{
+    var d=new Date(t);
+    if(isNaN(d.getTime())) return String(t);
+    function p(x){ return ('0'+x).slice(-2); }
+    return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+
+           p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+  }catch(e){return t}
+}
 function esc(s) { if(!s)return'';var d=document.createElement('div');d.textContent=s;return d.innerHTML; }
 function toast(msg, type) {
   var el=document.createElement('div');
@@ -1100,7 +1126,7 @@ function switchPage(page) {
   if (page==='reviews') { renderReviewsPage(); loadReviewSummary(); }
   if (page==='viewers') renderViewersPage();
   if (page==='inbox') refreshInbox();
-  if (page==='report') renderReport(S.lastReport);
+  if (page==='report') { renderReport(S.lastReport); loadDmSessions(); }
   if (page==='settings') { loadSettings(); loadLlmEndpoints(); }
 }
 
@@ -2045,6 +2071,104 @@ function renderTopQuestionsChart() {
 }
 
 // ============================================================
+// Rendering: 场次弹幕复盘（复盘页）
+// ============================================================
+function loadDmSessions(){
+  var sel=document.getElementById('dmSessionSelect');
+  if(sel && !sel.value) sel.innerHTML='<option value="">加载中…</option>';
+  wsSend('get_danmaku_sessions');
+}
+function renderDmSessions(sessions){
+  S.dmSessions=sessions||[];
+  var sel=document.getElementById('dmSessionSelect');
+  if(!sel) return;
+  if(!S.dmSessions.length){
+    sel.innerHTML='<option value="">暂无已归档场次</option>';
+    S.dmSessionId='';
+    renderDmSessionResult({success:false,message:'暂无已归档场次：直播结束后会自动保存本场全部弹幕'});
+    return;
+  }
+  var cur=S.dmSessionId;
+  if(!cur || !S.dmSessions.some(function(s){return s.sessionId===cur})) cur=S.dmSessions[0].sessionId;
+  S.dmSessionId=cur;
+  sel.innerHTML=S.dmSessions.map(function(s){
+    return '<option value="'+esc(s.sessionId)+'"'+(s.sessionId===cur?' selected':'')+'>'+
+      esc(s.title||s.sessionId)+'（'+fmtNum(s.total||0)+'条）</option>';
+  }).join('');
+  selectDmSession(cur);
+}
+function selectDmSession(id){
+  if(!id) return;
+  S.dmSessionId=id;
+  var sel=document.getElementById('dmSessionSelect');
+  if(sel) sel.value=id;
+  wsSend('get_session_danmaku',{
+    sessionId:id,
+    filter:S.dmSessionFilter||'all',
+    keyword:S.dmSessionKeyword||''
+  });
+}
+function setDmSessionFilter(f){
+  S.dmSessionFilter=f||'all';
+  document.querySelectorAll('#dmSessionFilters button').forEach(function(b){
+    b.classList.toggle('lc-btn-primary',b.dataset.f===S.dmSessionFilter);
+    b.classList.toggle('lc-btn-outline',b.dataset.f!==S.dmSessionFilter);
+  });
+  if(S.dmSessionId) selectDmSession(S.dmSessionId);
+}
+function applyDmSessionFilter(){
+  var kw=document.getElementById('dmSessionKeyword');
+  S.dmSessionKeyword=kw?kw.value.trim():'';
+  if(S.dmSessionId) selectDmSession(S.dmSessionId);
+}
+function renderDmSessionResult(d){
+  var meta=document.getElementById('dmSessionMeta');
+  var el=document.getElementById('dmSessionList');
+  if(!el) return;
+  if(!d||!d.success){
+    if(meta) meta.textContent=(d&&d.message)||'场次弹幕加载失败';
+    el.innerHTML='<div class="lc-empty"><div class="icon">💬</div>'+esc((d&&d.message)||'暂无该场弹幕记录')+'</div>';
+    return;
+  }
+  var s=d.session||{}, c=d.counts||{};
+  var f=S.dmSessionFilter||'all';
+  var fname={all:'全部',question:'提问',emotion:'有情绪',positive:'正面',negative:'负面',neutral:'中性'}[f]||'全部';
+  var kw=S.dmSessionKeyword?(' · 关键词「'+esc(S.dmSessionKeyword)+'」'):'';
+  if(meta){
+    meta.innerHTML='<strong>'+esc(s.title||s.sessionId||'')+'</strong>'+
+      ' · '+fmtTime(s.startTime)+' ~ '+fmtTime(s.endTime)+
+      ' · 共 <strong>'+fmtNum(s.total||0)+'</strong> 条'+
+      '（真实观众 '+fmtNum(s.real||0)+'，提问 '+fmtNum(s.question||0)+
+      '，正面 '+fmtNum(s.positive||0)+'，负面 '+fmtNum(s.negative||0)+'）'+
+      ' · 当前筛选：<strong>'+esc(fname)+'</strong>'+kw+
+      '<span style="margin-left:8px;color:#94a3b8">场次ID：'+esc(s.sessionId||'')+'</span>';
+  }
+  var list=d.danmaku||[];
+  if(!list.length){
+    el.innerHTML='<div class="lc-empty"><div class="icon">💬</div>该场次没有符合条件的弹幕（'+esc(fname)+'）</div>';
+    return;
+  }
+  var KIND_TAG={ viewer:['观众','#2563eb'], virtual:['AI','#7c3aed'],
+                 mock:['模拟','#94a3b8'], host:['主播','#ef4444'],
+                 legacy:['老账号','#94a3b8'], system:['系统','#94a3b8'], unknown:['其他','#94a3b8'] };
+  el.innerHTML=list.slice().reverse().map(function(d){
+    var k=KIND_TAG[danmakuKind(d)]||KIND_TAG.unknown;
+    var tags='<span style="color:'+k[1]+';font-size:10px;border:1px solid '+k[1]+
+      ';border-radius:3px;padding:0 3px;margin-right:4px">'+k[0]+'</span>';
+    if(d.isQuestion) tags+='<span style="color:#d97706;font-weight:600;margin-right:4px">问</span>';
+    var sent=d.sentiment||'';
+    if(sent==='positive') tags+='<span class="lc-tag lc-tag-green" style="font-size:10px;margin-right:4px">😊 正面</span>';
+    else if(sent==='negative') tags+='<span class="lc-tag lc-tag-red" style="font-size:10px;margin-right:4px">😟 负面</span>';
+    return '<div class="lc-dm-item">'+
+      '<span style="font-weight:600;color:#1e293b;font-size:11px">'+esc(d.userName||'用户')+'</span> '+tags+
+      '<span style="color:#475569">'+esc(d.content)+'</span>'+
+      '<span style="float:right;color:#cbd5e1;font-size:10px">'+fmtTime(d.timestamp)+'</span>'+
+      (d.replyContent?'<div style="font-size:11px;color:#059669;margin-top:2px">🤖 '+esc(d.replyContent)+'</div>':'')+
+    '</div>';
+  }).join('');
+}
+
+// ============================================================
 // Rendering: Analysis Page
 // ============================================================
 function renderAnalysisPage() {
@@ -2062,59 +2186,19 @@ function renderAnalysisPage() {
   renderLiveRoomStats();
   if (S.curPage==='analysis') { loadLiveRoomStats(); loadOrderData(); }
 }
-// ===== 商单成交 =====
-var S_orderFilter='all';
+// ===== 商品累计销量 Top =====
+// 订单明细、成交统计与状态筛选统一由「订单管理」页负责；分析页只保留按商品的
+// 累计销量分析，避免两页重复维护同一份订单数据。
 function loadOrderData(){
-  // 显式 scope=real：分析页的「最近订单」也只统计真实观众订单。
-  if(!S.orders.length && !S.orderStats) { wsSend('get_orders',{limit:40,scope:'real'}); wsSend('get_order_stats'); }
-  else { renderOrders(); renderOrderStats(); }
+  if(!S.orderStats) wsSend('get_order_stats');
+  else renderOrderByProduct();
 }
-function setOrderFilter(f){
-  S_orderFilter=f;
-  var btns=document.querySelectorAll('[data-ost]');
-  btns.forEach(function(b){b.style.cssText=b.getAttribute('data-ost')===f?'border-color:#2563eb;color:#2563eb;font-weight:600':'';});
-  renderOrders();
-}
-function renderOrderStats(){
-  var el=document.getElementById('orderStatRow');
-  if(!el||!S.orderStats)return;
-  var o=S.orderStats;
-  el.innerHTML =
-    statCard('今日销售额', '¥'+fmtNum(o.todaySales), '#059669') +
-    statCard('今日订单', o.todayOrders, '#2563eb') +
-    statCard('累计 GMV', '¥'+fmtNum(o.totalSales), '#ef4444') +
-    statCard('累计订单', o.totalOrders, '#7c3aed') +
-    statCard('已售件数', o.totalQty, '#d97706') +
-    statCard('退款单', o.refundCount, '#94a3b8');
-  el.parentNode.style.gridTemplateColumns = 'repeat(auto-fit,minmax(120px,1fr))';
-}
-// 订单状态 → 徽章配色 / 中文名。提到函数外共用：分析页的宽表格（renderOrders）
+// 订单状态 → 徽章配色 / 中文名。提到函数外共用：订单管理页的宽表格
 // 和 控制台的紧凑列表（renderSessionOrders）都读这一份，别再各写一张表。
 var ORDER_STATUS_STYLE={pending_pay:'background:#fef3c7;color:#d97706',paid:'background:#dbeafe;color:#2563eb',
   shipped:'background:#e0e7ff;color:#4f46e5',completed:'background:#d1fae5;color:#059669',
   refunded:'background:#fee2e2;color:#dc2626',canceled:'background:#f1f5f9;color:#64748b'};
 var ORDER_STATUS_NAME={pending_pay:'待付款',paid:'已付款',shipped:'已发货',completed:'已完成',refunded:'已退款',canceled:'已取消'};
-function renderOrders(){
-  var el=document.getElementById('orderTable');
-  if(!el)return;
-  var list=S.orders.filter(function(o){return S_orderFilter==='all'||o.status===S_orderFilter;});
-  if(!list.length){el.innerHTML='<tr><td class="lc-empty-row">暂无订单数据</td></tr>';return;}
-  var stl=ORDER_STATUS_STYLE;
-  var stName=ORDER_STATUS_NAME;
-  el.innerHTML='<tr><th>单号</th><th>商品</th><th>买家</th><th>数量</th><th>金额</th><th>状态</th><th>时间</th><th>操作</th></tr>'+
-    list.slice(0,30).map(function(o){
-      return '<tr>'+
-        '<td style="color:#64748b;font-size:11px">'+esc(o.orderNo||o.orderId)+'</td>'+
-        '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis">'+esc(o.productName)+'</td>'+
-        '<td>'+esc(o.userName||'-')+'</td>'+
-        '<td>×'+o.quantity+'</td>'+
-        '<td style="color:#dc2626;font-weight:600">¥'+fmtNum(o.totalAmount)+'</td>'+
-        '<td title="'+(o.shipTime?('发货时间 '+o.shipTime):'')+'"><span class="lc-order-status" style="'+(stl[o.status]||'')+'">'+(stName[o.status]||o.status)+'</span></td>'+
-        '<td style="color:#94a3b8;font-size:11px">'+fmtTime(o.createTime)+'</td>'+
-        '<td>'+orderActBtns(o)+'</td>'+
-      '</tr>';
-    }).join('');
-}
 // ============================================================
 // 独立订单模块：真实订单 / AI 模拟测试订单 / 退款审核
 // ============================================================
@@ -2205,7 +2289,7 @@ function renderAdminOrders(){
         '<td>'+orderContactHtml(o)+'</td>'+
         '<td>×'+o.quantity+'</td>'+
         '<td style="color:#dc2626;font-weight:600">¥'+fmtNum(o.totalAmount)+'</td>'+
-        '<td title="'+(o.shipTime?('发货时间 '+o.shipTime):'')+'">'+orderStatusHtml(o)+'</td>'+
+        '<td title="'+(o.shipTime?('发货时间 '+fmtTime(o.shipTime)):'')+'">'+orderStatusHtml(o)+'</td>'+
         '<td style="color:#94a3b8;font-size:11px">'+fmtTime(o.createTime)+'</td>'+
         '<td>'+acts+'</td>'+
       '</tr>';
@@ -2246,7 +2330,7 @@ function renderRefundReview(){
           ' <span style="color:#94a3b8">· '+esc(o.userName||'-')+' · '+esc(o.orderNo||o.orderId)+'</span></span>'+
         '<span style="font-size:12px;font-weight:600;color:#dc2626">¥'+fmtNum(o.totalAmount)+'</span></div>'+
       '<div style="font-size:12px;color:#475569;margin-top:4px">退款原因：'+esc(o.refundReason||'（未填写）')+'</div>'+
-      '<div style="font-size:10px;color:#94a3b8;margin-top:3px">申请时间 '+esc(o.refundApplyTime||'')+'</div>'+
+      '<div style="font-size:10px;color:#94a3b8;margin-top:3px">申请时间 '+esc(fmtTime(o.refundApplyTime))+'</div>'+
       '<div style="margin-top:6px;display:flex;gap:6px">'+
         '<button class="lc-mini-btn" style="border-color:#dc2626;color:#dc2626;background:#fef2f2" onclick="reviewRefund(\''+esc(o.orderId)+'\',true)">✅ 同意退款</button>'+
         '<button class="lc-mini-btn" style="border-color:#94a3b8;color:#475569" onclick="reviewRefund(\''+esc(o.orderId)+'\',false)">✖ 拒绝退款</button>'+
@@ -2543,8 +2627,8 @@ function renderDmTrendChart() {
     var times=data.map(function(d){return fmtTime(d.timestamp)});
     var counts=data.map(function(_,i){return i+1});
     chart.setOption({
-      tooltip:{trigger:'axis'},grid:{left:40,right:20,top:20,bottom:30},
-      xAxis:{type:'category',data:times.length>10?times.filter(function(_,i){return i%Math.ceil(times.length/10)===0}):times,axisLabel:{fontSize:10}},
+      tooltip:{trigger:'axis'},grid:{left:40,right:20,top:20,bottom:58},
+      xAxis:{type:'category',data:times.length>10?times.filter(function(_,i){return i%Math.ceil(times.length/10)===0}):times,axisLabel:{fontSize:10,rotate:30}},
       yAxis:{type:'value'},
       series:[{type:'line',data:counts,smooth:true,lineStyle:{color:'#2563eb',width:2},areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'rgba(37,99,235,.2)'},{offset:1,color:'rgba(37,99,235,0)'}]}},symbol:'circle',symbolSize:6}]
     });
@@ -2932,7 +3016,7 @@ function renderViewerDetail(d) {
       statBox('订单数',String(v.orderCount||0))+
       statBox('累计消费','¥'+(v.totalSpend||0).toFixed(0))+
       statBox('状态', v.isOnline ? ('在线'+(v.connections>1?'（'+v.connections+' 连接）':'')) : '离线')+
-      statBox('注册时间', v.registerTime || '--')+
+      statBox('注册时间', v.registerTime ? fmtTime(v.registerTime) : '--')+
       statBox('账号类型', v.hasAccount ? '新账号' : '历史账户（无登录凭据）')+
     '</div>'+
     '<div class="lc-card-title" style="font-size:13px">📦 订单（'+orders.length+'）</div>'+
@@ -2941,7 +3025,7 @@ function renderViewerDetail(d) {
         '<span style="font-weight:600">'+esc(o.productName||o.productId)+' ×'+o.quantity+'</span>'+
         '<span style="color:#f59e0b">¥'+(o.totalAmount||0).toFixed(2)+'</span></div>'+
         '<div style="font-size:11px;color:#94a3b8">'+esc(o.orderNo||o.orderId)+' · '+
-        (stMap[o.status]||o.status)+' · '+esc(o.createTime||'')+'</div></div>';
+        (stMap[o.status]||o.status)+' · '+esc(fmtTime(o.createTime))+'</div></div>';
     }).join('') : '<div class="lc-empty"><div class="icon">📦</div>暂无订单</div>')+
     '<div class="lc-card-title" style="font-size:13px;margin-top:14px">✉️ 私信记录（'+msgs.length+'）</div>'+
     (msgs.length ? msgs.slice(-20).map(function(m){
@@ -3309,9 +3393,20 @@ on('live_started',function(d){
 });
 on('live_paused',function(d){S.liveStatus.status='paused';renderConsoleStatus();toast('直播已暂停','warn');});
 on('live_resumed',function(d){S.liveStatus.status='live';renderConsoleStatus();toast('直播已恢复','success');});
-on('live_ended',function(d){S.liveStatus.status='ended';renderConsoleStatus();loadLiveRoomStats();if(d.report){S.lastReport=d.report;if(S.curPage==='report')renderReport(d.report);}toast('直播已结束','success');});
+on('live_ended',function(d){
+  S.liveStatus.status='ended';renderConsoleStatus();loadLiveRoomStats();
+  if(d.report){S.lastReport=d.report;if(S.curPage==='report')renderReport(d.report);}
+  // 本场弹幕已固化：刷新复盘页的场次下拉，并默认切到刚结束的这一场
+  if(d.danmakuSession&&d.danmakuSession.sessionId)S.dmSessionId=d.danmakuSession.sessionId;
+  if(S.curPage==='report')loadDmSessions();
+  toast('直播已结束，本场弹幕已归档','success');
+});
 on('start_live_result',function(d){if(!d.success) toast(d.message||'开始失败','err');});
-on('end_live_result',function(d){if(d.report){S.lastReport=d.report;if(S.curPage==='report')renderReport(d.report);}});
+on('end_live_result',function(d){
+  if(d.report){S.lastReport=d.report;if(S.curPage==='report')renderReport(d.report);}
+  if(d.danmakuSession&&d.danmakuSession.sessionId)S.dmSessionId=d.danmakuSession.sessionId;
+  if(S.curPage==='report')loadDmSessions();
+});
 
 on('new_danmaku',function(d){
   var exists=S.dmList.some(function(x){return x.danmakuId===d.danmakuId});
@@ -3502,6 +3597,9 @@ on('test_llm_endpoint_result',function(d){
   else{toast((d.ok?'✅ ':'❌ ')+(d.message||''),d.ok?'success':'err');}
 });
 on('request_report_result',function(d){if(d.success&&d.report){S.lastReport=d.report;renderReport(d.report);toast('报告生成成功','success');}else toast(d.message||'报告生成失败','err');});
+// 场次弹幕复盘：场次列表 / 单场弹幕（均为主播专用，观众连接会被后端拒绝）
+on('get_danmaku_sessions_result',function(d){renderDmSessions((d&&d.sessions)||[]);});
+on('get_session_danmaku_result',function(d){renderDmSessionResult(d);});
 on('generate_report_result',function(d){if(d.success&&d.report){S.lastReport=d.report;renderReport(d.report);toast('报告生成成功','success');}});
 on('get_reviews_result',function(d){if(d.reviews)S.reviews=d.reviews;if(S.curPage==='reviews')renderReviewsPage();});
 on('review_summary_result',function(d){S.rvSummary=d;renderReviewSummary();});
@@ -3602,7 +3700,7 @@ on('get_product_reviews_result',function(d){
   if(d.productId===S.detailProductId){
     // 渲染详情弹窗里的评价
     S.detailReviews=(d.reviews||[]).map(function(r){
-      r.timeText=r.timestamp?new Date(r.timestamp).toLocaleString():'';
+      r.timeText=r.timestamp?fmtTime(r.timestamp):'';
       return r;
     });
     renderDetailReviews();
@@ -3632,12 +3730,11 @@ on('get_orders_result',function(d){
   }
   if(d.orders)S.orders=d.orders;
   updateRefundBadge((S.orders||[]).filter(function(o){return o.refundStatus==='pending'}).length);
-  if(S.curPage==='analysis')renderOrders();
   if(S.curPage==='orders'){ renderAdminOrders(); renderAdminStats(); renderRefundReview(); }
 });
 on('get_order_stats_result',function(d){
   if(d.stats)S.orderStats=d.stats;
-  if(S.curPage==='analysis'){renderOrderStats();renderOrderByProduct();}
+  if(S.curPage==='analysis')renderOrderByProduct();
   if(S.curPage==='orders')renderAdminStats();
 });
 on('get_session_orders_result',function(d){
@@ -3646,16 +3743,16 @@ on('get_session_orders_result',function(d){
   if(S.curPage==='console')renderSessionOrders();
 });
 on('order_new',function(d){
-  // 新订单到达：刷新分析页与商品销量；在控制台就地刷「本场订单」，
+  // 新订单到达：刷新分析页的商品销量 Top 与商品数据；在控制台就地刷「本场订单」，
   // 主播不用切页就能看到刚成交的那一单。
-  if(S.curPage==='analysis'){wsSend('get_orders',{limit:40,scope:'real'});wsSend('get_order_stats');}
+  if(S.curPage==='analysis')wsSend('get_order_stats');
   if(S.curPage==='console')loadSessionOrders();
   if(S.curPage==='orders')loadAdminOrders();
   loadLiveRoomStats();
   wsSend('get_products');
 });
 on('order_updated',function(d){
-  if(S.curPage==='analysis'){wsSend('get_orders',{limit:40,scope:'real'});wsSend('get_order_stats');}
+  if(S.curPage==='analysis')wsSend('get_order_stats');
   if(S.curPage==='console')loadSessionOrders();
   if(S.curPage==='orders')loadAdminOrders();
   else if(d && d.refundStatus==='pending') wsSend('get_orders',{scope:'real',limit:200});
