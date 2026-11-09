@@ -6,16 +6,17 @@
 import json
 import os
 import random
+import re
 import threading
 import time
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from schema.live_commerce_schema import (
-    LIVE_STAGES, ORDER_STATUS_LABELS, STAGE_STRATEGIES, BlacklistItem, DanmakuItem,
-    LiveCommerceSettings, LiveSessionState, LiveStatsData, OrderItem, PresetPhraseItem,
-    PrivateMessageItem, ProductItem, QuickReplyItem, ReviewItem, SmartAlert, UserSessionItem,
-    ViewerAccount, VirtualDanmakuSettings, WSMessage,
+    LIVE_STAGES, ORDER_STATUS_LABELS, STAGE_STRATEGIES, AddressItem, BlacklistItem,
+    DanmakuItem, LiveCommerceSettings, LiveSessionState, LiveStatsData, OrderItem,
+    PresetPhraseItem, PrivateMessageItem, ProductItem, QuickReplyItem, ReviewItem,
+    SmartAlert, UserSessionItem, ViewerAccount, VirtualDanmakuSettings, WSMessage,
 )
 
 # ============================================================
@@ -57,6 +58,11 @@ ALERT_HISTORY_MAX = 50
 # 直播间弹幕历史缓冲条数：中途进入的观众最多能拉到最近 20 条本场弹幕。
 DANMAKU_HISTORY_LIMIT = 20
 os.makedirs(REPORTS_DIR, exist_ok=True)
+
+# ── 收货地址校验 ──
+# 手机号按中国大陆手机号校验；地址条数上限防止单个账号无限堆积。
+_PHONE_RE = re.compile(r"^1[3-9]\d{9}$")
+_ADDRESS_MAX = 10
 
 
 # ============================================================
@@ -1812,10 +1818,70 @@ class LiveCommerceDataManager:
             self._broadcast_product_sales(order.productId)
             return order
 
-    def get_orders(self, status: str = "", limit: int = 50) -> list[OrderItem]:
-        """获取订单列表（按时间倒序，可按状态筛选）"""
+    def create_ai_test_order(
+        self,
+        product_id: str = "",
+        quantity: int = 1,
+        status: str = "paid",
+        user_name: str | None = None,
+    ) -> Optional[OrderItem]:
+        """生成一张 **AI 模拟测试订单**（source=ai_test，userId 为空）。
+
+        与 `create_order` 的关键区别：
+          * **不扣商品库存、不改 soldCount** —— 测试数据不得污染真实商品数据；
+          * `source="ai_test"`，运营台只在「模拟测试订单」页展示，默认页看不到；
+          * 不计入 get_order_stats / get_product_sales_map / 本场统计等任何经营口径；
+          * 重启时 `_rollback_mock_side_effects` 与 `_purge_mock_collections` 都会跳过它，
+            因此测试订单可以跨重启保留，便于演示。
+        """
+        with self._lock:
+            products_list = list(self.products.values())
+            product = self.products.get(product_id) if product_id else (
+                random.choice(products_list) if products_list else None
+            )
+            if product is None:
+                return None
+            qty = max(1, int(quantity or 1))
+            order_status = status if status in ORDER_STATUS_LABELS else "paid"
+            self._order_counter += 1
+            now = datetime.now().isoformat()
+            img = (product.images[0] if product.images else product.imageUrl) or ""
+            order = OrderItem(
+                orderId=f"test_order_{int(datetime.now().timestamp()*1000)}_{self._order_counter}",
+                orderNo="TEST" + datetime.now().strftime("%Y%m%d") + f"{self._order_counter:04d}",
+                productId=product.productId,
+                productName=product.name,
+                productImage=img,
+                userId="",
+                userName=user_name or random.choice(self._BUYER_NAMES),
+                quantity=qty,
+                unitPrice=product.price,
+                totalAmount=round(product.price * qty, 2),
+                status=order_status,
+                payTime=now if order_status in ("paid", "shipped", "completed") else "",
+                createTime=now,
+                isVirtual=True,
+                source="ai_test",
+            )
+            self.orders[order.orderId] = order
+            self._save_orders()
+            self._broadcast_order("order_new", order)
+            return order
+
+    def get_orders(self, status: str = "", limit: int = 50, scope: str = "real") -> list[OrderItem]:
+        """获取订单列表（按时间倒序，可按状态筛选）。
+
+        scope 是**真伪隔离**的唯一入口：
+          real（默认）—— 只返回真实注册观众的订单，运营台默认看到的就是这些；
+          mock        —— 只返回 AI 模拟测试订单（含历史遗留模拟单），单独页面展示；
+          all         —— 全部，仅供内部排查，不要给前端默认值。
+        """
         with self._lock:
             results = list(self.orders.values())
+            if scope == "real":
+                results = [o for o in results if order_is_real(o)]
+            elif scope == "mock":
+                results = [o for o in results if not order_is_real(o)]
             if status:
                 results = [o for o in results if o.status == status]
             results.sort(key=lambda o: o.createTime, reverse=True)
@@ -1890,19 +1956,84 @@ class LiveCommerceDataManager:
             if status == "shipped":
                 order.shipTime = order.shipTime or now
             elif status == "refunded":
-                # 退款：回补库存与销量
-                product = self.products.get(order.productId)
-                if product:
-                    product.stock += order.quantity
-                    product.soldCount = max(0, product.soldCount - order.quantity)
-                    self._save_products()
-                # 钱包单返充金额
-                self._credit_viewer(order.userId, order.totalAmount)
+                # 主播直接退款：回补库存/销量 + 钱包返充，并把退款申请标记为已通过
+                self._apply_refund_locked(order, now)
             order.payTime = order.payTime or now
             self._save_orders()
             self._broadcast_order("order_updated", order)
             self._broadcast_product_sales(order.productId)
             return order
+
+    def _apply_refund_locked(self, order: OrderItem, now: str) -> None:
+        """锁内执行退款落地：回补库存/销量、钱包返充、标记退款申请已通过。
+
+        只应由 request_refund 的审核通过与 update_order_status 的直接退款分支调用。
+        """
+        product = self.products.get(order.productId)
+        if product:
+            product.stock += order.quantity
+            product.soldCount = max(0, product.soldCount - order.quantity)
+            self._save_products()
+        self._credit_viewer(order.userId, order.totalAmount)
+        order.status = "refunded"
+        order.refundStatus = "approved"
+        order.refundReviewTime = now
+
+    def request_refund(self, order_id: str, user_id: str, reason: str = "") -> tuple[Optional[OrderItem], str]:
+        """观众提交退款申请：只登记申请，不改 order.status、不动库存/余额。
+
+        真正退款要等主播在后台「同意」，由 review_refund 完成。申请状态单独放在
+        refundStatus 上，这样待审核期间不会提前影响既有成交/GMV 统计口径。
+        """
+        reason = (reason or "").strip()
+        if not reason:
+            return None, "请填写退款原因"
+        if len(reason) > 200:
+            reason = reason[:200]
+        with self._lock:
+            order = self.orders.get(order_id)
+            if not order:
+                return None, "订单不存在"
+            if order.userId != user_id:
+                return None, "无权操作该订单"
+            if order.status not in ("paid", "shipped", "completed"):
+                return None, "当前订单状态不支持退款"
+            if order.refundStatus == "pending":
+                return None, "退款申请正在审核中，请勿重复提交"
+            if order.refundStatus == "approved" or order.status == "refunded":
+                return None, "该订单已退款"
+            order.refundStatus = "pending"
+            order.refundReason = reason
+            order.refundApplyTime = datetime.now().isoformat()
+            order.refundRejectReason = ""
+            self._save_orders()
+            self._broadcast_order("order_updated", order)
+            return order, ""
+
+    def review_refund(self, order_id: str, approve: bool,
+                      reason: str = "") -> tuple[Optional[OrderItem], str]:
+        """主播审核退款申请（仅 host 可达）。
+
+        approve=True  → 执行退款：状态 refunded、回补库存、钱包返充；
+        approve=False → 只把申请标记为 rejected，订单保持原状态，并记录拒绝理由。
+        """
+        with self._lock:
+            order = self.orders.get(order_id)
+            if not order:
+                return None, "订单不存在"
+            if order.refundStatus != "pending":
+                return None, "该订单没有待审核的退款申请"
+            now = datetime.now().isoformat()
+            if approve:
+                self._apply_refund_locked(order, now)
+            else:
+                order.refundStatus = "rejected"
+                order.refundReviewTime = now
+                order.refundRejectReason = (reason or "").strip()[:200]
+            self._save_orders()
+            self._broadcast_order("order_updated", order)
+            self._broadcast_product_sales(order.productId)
+            return order, ""
 
     # ============================================================
     # 观众账户（钱包）
@@ -2014,10 +2145,132 @@ class LiveCommerceDataManager:
             return rows
 
     # ============================================================
+    # 观众收货地址（多条保存 + 默认地址 + 下单自选）
+    # ============================================================
+    def get_addresses(self, user_id: str) -> list[AddressItem]:
+        """某观众的收货地址列表（默认地址排最前，其余按创建时间倒序）。"""
+        if not user_id:
+            return []
+        with self._lock:
+            acc = self.viewers.get(user_id)
+            if acc is None:
+                return []
+            return sorted(
+                list(acc.addresses),
+                key=lambda a: (not a.isDefault, a.createTime or ""),
+                reverse=False,
+            )
+
+    def save_address(
+        self,
+        user_id: str,
+        receiver_name: str,
+        phone: str,
+        detail: str,
+        region: str = "",
+        is_default: bool = False,
+        address_id: str = "",
+    ) -> tuple[Optional[AddressItem], str]:
+        """新增或编辑收货地址。address_id 非空即编辑，空则新增。
+
+        返回 (地址, 错误原因)。同一条地址编辑不改 createTime；首次新增自动设为默认。
+        """
+        if not user_id:
+            return None, "请先登录"
+        name = (receiver_name or "").strip()
+        phone = (phone or "").strip().replace(" ", "").replace("-", "")
+        detail = (detail or "").strip()
+        region = (region or "").strip()
+        if not name:
+            return None, "请填写收货人姓名"
+        if len(name) > 20:
+            return None, "收货人姓名过长"
+        if not _PHONE_RE.match(phone):
+            return None, "请填写正确的 11 位手机号"
+        if not detail:
+            return None, "请填写详细地址"
+        if len(region) > 60 or len(detail) > 120:
+            return None, "地址内容过长"
+        with self._lock:
+            acc = self._get_or_create_viewer_locked(user_id)
+            if acc is None:
+                return None, "观众账户不存在"
+            target = None
+            if address_id:
+                target = next((a for a in acc.addresses if a.addressId == address_id), None)
+                if target is None:
+                    return None, "收货地址不存在"
+            if target is None and len(acc.addresses) >= _ADDRESS_MAX:
+                return None, f"最多保存 {_ADDRESS_MAX} 条收货地址"
+            if target is None:
+                target = AddressItem(
+                    addressId=f"addr_{int(time.time() * 1000)}_{len(acc.addresses)}",
+                    receiverName=name,
+                    phone=phone,
+                    region=region,
+                    detail=detail,
+                    createTime=datetime.now().isoformat(),
+                )
+                # 第一条地址自动成为默认地址
+                target.isDefault = bool(is_default) or not acc.addresses
+                acc.addresses.append(target)
+            else:
+                target.receiverName = name
+                target.phone = phone
+                target.region = region
+                target.detail = detail
+                target.isDefault = bool(is_default) or target.isDefault and not any(
+                    a is not target and a.isDefault for a in acc.addresses
+                )
+            if target.isDefault:
+                for a in acc.addresses:
+                    if a is not target:
+                        a.isDefault = False
+            # 兜底：列表中始终有且仅有一个默认地址（避免编辑时取消默认后无默认）
+            if not any(a.isDefault for a in acc.addresses):
+                acc.addresses[0].isDefault = True
+            self._save_viewers()
+            return target, ""
+
+    def delete_address(self, user_id: str, address_id: str) -> tuple[bool, str]:
+        """删除一条收货地址；若删除的是默认地址，自动把剩余第一条设为默认。"""
+        if not user_id:
+            return False, "请先登录"
+        with self._lock:
+            acc = self._get_or_create_viewer_locked(user_id)
+            if acc is None:
+                return False, "观众账户不存在"
+            target = next((a for a in acc.addresses if a.addressId == address_id), None)
+            if target is None:
+                return False, "收货地址不存在"
+            acc.addresses = [a for a in acc.addresses if a.addressId != address_id]
+            if acc.addresses and not any(a.isDefault for a in acc.addresses):
+                acc.addresses[0].isDefault = True
+            self._save_viewers()
+            return True, ""
+
+    def set_default_address(self, user_id: str, address_id: str) -> tuple[bool, str]:
+        """把指定地址设为默认地址。"""
+        if not user_id:
+            return False, "请先登录"
+        with self._lock:
+            acc = self._get_or_create_viewer_locked(user_id)
+            if acc is None:
+                return False, "观众账户不存在"
+            target = next((a for a in acc.addresses if a.addressId == address_id), None)
+            if target is None:
+                return False, "收货地址不存在"
+            for a in acc.addresses:
+                a.isDefault = a is target
+            self._save_viewers()
+            return True, ""
+
+    # ============================================================
     # 观众端下单（两步：下单 pending_pay → 支付 paid）
     # ============================================================
     def create_viewer_order(self, product_id: str, user_id: str, user_name: str = "",
-                            quantity: int = 1) -> tuple[Optional[OrderItem], str]:
+                            quantity: int = 1,
+                            address_id: str = "") -> tuple[Optional[OrderItem], str]:
         """观众下单：生成「待付款」订单，快照商品首图，不扣库存/销量。返回 (order, 错误原因)。"""
         with self._lock:
             product = self.products.get(product_id)
@@ -2030,9 +2283,23 @@ class LiveCommerceDataManager:
             qty = max(1, int(quantity or 1))
             if product.stock < qty:
                 return None, "库存不足"
+            # 收货地址快照：下单时从地址簿复制，之后改/删地址不影响历史订单。
+            # address_id 为空时不强制（兼容内部/测试调用）；WS 层会要求观众必须选择。
+            address = None
+            if address_id:
+                acc = self.viewers.get(user_id)
+                address = next(
+                    (a for a in (acc.addresses if acc else []) if a.addressId == address_id),
+                    None,
+                )
+                if address is None:
+                    return None, "收货地址不存在，请重新选择"
             now = datetime.now().isoformat()
             self._order_counter += 1
             img = (product.images[0] if product.images else product.imageUrl) or ""
+            full_address = ""
+            if address is not None:
+                full_address = " ".join(x for x in (address.region, address.detail) if x)
             order = OrderItem(
                 orderId=f"order_{int(datetime.now().timestamp()*1000)}_{self._order_counter}",
                 orderNo=self._next_order_no(),
@@ -2049,6 +2316,11 @@ class LiveCommerceDataManager:
                 shipTime="",
                 createTime=now,
                 isVirtual=False,
+                source="real",
+                addressId=address.addressId if address else "",
+                receiverName=address.receiverName if address else "",
+                receiverPhone=address.phone if address else "",
+                receiverAddress=full_address,
             )
             self.orders[order.orderId] = order
             self._save_orders()
@@ -2197,7 +2469,8 @@ class LiveCommerceDataManager:
         sales: dict[str, dict] = {}
         with self._lock:
             for o in self.orders.values():
-                if o.status not in paid_statuses:
+                # AI 模拟测试订单不参与任何销量展示（观众端「已售 N 件」也不掺）
+                if o.status not in paid_statuses or getattr(o, "source", "") == "ai_test":
                     continue
                 s = sales.setdefault(o.productId, {"qty": 0, "amount": 0.0, "todayQty": 0})
                 s["qty"] += o.quantity
@@ -3860,7 +4133,8 @@ class LiveCommerceDataManager:
         with self._lock:
             per_product: dict[str, list[tuple[int, int]]] = {}
             for o in self.orders.values():
-                if order_is_real(o) or o.status == "refunded":
+                # AI 模拟测试订单从不扣库存/销量，不能在这里回补（否则库存凭空增加）
+                if order_is_real(o) or o.status == "refunded" or getattr(o, "source", "") == "ai_test":
                     continue
                 sold = o.quantity if o.status in self._SOLD_STATUSES else 0
                 per_product.setdefault(o.productId, []).append((o.quantity, sold))
@@ -3899,7 +4173,12 @@ class LiveCommerceDataManager:
                 uid: s for uid, s in self.user_sessions.items()
                 if is_persistable_user_id(uid)
             }
-            for oid in [oid for oid, o in self.orders.items() if not order_is_real(o)]:
+            # 保留 AI 模拟测试订单（source=ai_test）：它们是显式生成的隔离测试数据，
+            # 不参与统计也不扣库存，跨重启保留便于演示；历史遗留的模拟单照旧清理。
+            for oid in [
+                oid for oid, o in self.orders.items()
+                if not order_is_real(o) and getattr(o, "source", "") != "ai_test"
+            ]:
                 del self.orders[oid]
             # 内存已与磁盘对齐，顺手落盘（幂等：第二次启动时这些文件里已经没有模拟数据）
             self._save_orders()

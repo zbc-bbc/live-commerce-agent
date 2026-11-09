@@ -382,7 +382,12 @@ var S = {
   acc: {userId:'', userName:'', avatar:'', balance:0},   // 后端钱包账户（余额）
   myOrders: [],          // 我的订单（来自后端 get_user_orders）
   myOrdersLoaded: false,
-  meTab: 'all',          // 我的-订单 tab：all/pending_pay/paid/shipped/await_review
+  addresses: [],         // 收货地址簿（来自 viewer_login_result / get_addresses）
+  addrSel: '',           // 下单时选中的地址ID
+  addrEditId: '',        // 正在编辑的地址ID（空=新增）
+  addrAfterSave: null,   // 保存地址成功后要继续执行的动作（如「继续下单」）
+  refundOrderId: '',     // 正在申请退款的订单ID
+  meTab: 'all',          // 我的-订单 tab：all/pending_pay/paid/shipped/await_review/refund_pending
   sheetMode: 'none',     // none/product/gift/checkout/me/review/ok/profile —— 决定事件是否重绘当前弹层
   cam: null,             // {src, ts} 摄像头最近一帧
   reviewed: {},          // 已评价的 orderId -> 1（本地防重复展示）
@@ -907,6 +912,13 @@ function handle(m){
     else if (t==='confirm_receipt_result'){ onConfirmResult(d); }
     else if (t==='cancel_order_result'){ onCancelResult(d); }
     else if (t==='submit_review_result'){ onReviewResult(d); }
+    // ---- 收货地址 ----
+    else if (t==='get_addresses_result'){ S.addresses=d.addresses||[]; if(S.sheetMode==='address')renderAddressBook(); }
+    else if (t==='save_address_result'){ onSaveAddressResult(d); }
+    else if (t==='delete_address_result'){ onDeleteAddressResult(d); }
+    else if (t==='set_default_address_result'){ onSetDefaultAddressResult(d); }
+    // ---- 退款申请 ----
+    else if (t==='request_refund_result'){ onRequestRefundResult(d); }
     else if (t==='get_user_orders_result'){
       S.myOrders=d.orders||[]; S.myOrdersLoaded=true;
       if(S.sheetMode==='me') renderMe();
@@ -1056,6 +1068,7 @@ function doLogout(){
   saveToken('');
   S.acc={userId:'', userName:'', avatar:'', balance:0};
   S.userId=''; S.myOrders=[]; S.myOrdersLoaded=false; S.messages=[];
+  S.addresses=[]; S.addrSel=''; S.addrEditId=''; S.addrAfterSave=null;
   closeSheet(); onLogoutUI();
   toast('已退出登录','ok');
 }
@@ -1087,6 +1100,8 @@ function onLoginResult(d){
   }
   S.myOrders=d.orders||[]; S.myOrdersLoaded=true;
   S.messages=d.messages||[];
+  if(d.addresses) S.addresses=d.addresses;
+  // 下单流程可能因为「未登录」被挂起：登录成功后继续，地址此时已在手
   onLoginUI();
   refreshNickChips();
   updateMsgBadge();
@@ -1232,7 +1247,10 @@ function meHeadHtml(){
     '<div style="flex:1;min-width:0">'+
       '<div class="me-name">'+esc(nm)+'</div>'+
       '<div class="me-uid">'+esc(a.userId||S.userId)+'</div>'+
-      '<div style="margin-top:6px"><button class="re-btn ghost" onclick="openProfile()">✎ 编辑昵称/头像</button></div>'+
+      '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">'+
+        '<button class="re-btn ghost" onclick="openProfile()">✎ 编辑昵称/头像</button>'+
+        '<button class="re-btn ghost" onclick="openAddressBook()">📍 收货地址</button>'+
+      '</div>'+
       '<div class="me-bal">钱包余额 <b>¥'+fmtPrice(a.balance)+'</b></div>'+
       '<div class="me-balbtns">'+
         '<button class="re-btn" onclick="doRecharge(100)">+¥100</button>'+
@@ -1344,11 +1362,131 @@ function saveProfile(){
   wsSend('update_viewer_profile',{userName:S.nick, avatar:S.avatar});
 }
 
+// ---- 收货地址簿：多条保存 / 默认地址 / 下单自选 ----
+function findAddress(id){
+  var l=S.addresses||[];
+  for(var i=0;i<l.length;i++){ if(l[i].addressId===id) return l[i]; }
+  return null;
+}
+function defaultAddress(){
+  var l=S.addresses||[];
+  for(var i=0;i<l.length;i++){ if(l[i].isDefault) return l[i]; }
+  return l[0]||null;
+}
+function addrText(a){ return [(a&&a.region)||'',(a&&a.detail)||''].filter(function(x){return !!x;}).join(' '); }
+function openAddressBook(){
+  if(!isLoggedIn()){ _pendingAction=null; openAuth('login'); return; }
+  S.sheetMode='address';
+  wsSend('get_addresses',{});
+  renderAddressBook();
+}
+function renderAddressBook(){
+  var list=S.addresses||[];
+  var h='<div class="hd"><b>📍 收货地址</b><button class="x" onclick="closeSheet()">✕</button></div>';
+  if(!list.length){
+    h+='<div class="oc-empty">还没有收货地址，添加一条后即可下单</div>';
+  } else {
+    h+=list.map(function(a){
+      return '<div class="oc" style="margin-bottom:10px">'+
+        '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">'+
+          '<div style="min-width:0">'+
+            '<div style="font-size:14px;font-weight:600;color:#0f172a">'+esc(a.receiverName)+
+              ' <span style="font-weight:400;font-size:12px;color:#475569">'+esc(a.phone)+'</span>'+
+              (a.isDefault?' <span style="font-size:10px;background:#eff6ff;color:#2563eb;border-radius:8px;padding:1px 6px">默认</span>':'')+'</div>'+
+            '<div style="font-size:12px;color:#64748b;line-height:1.6;margin-top:4px;word-break:break-all">'+esc(addrText(a))+'</div>'+
+          '</div>'+
+        '</div>'+
+        '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;flex-wrap:wrap">'+
+          (a.isDefault?'':'<button class="b-ghost" onclick="setDefaultAddress(\''+esc(a.addressId)+'\')">设为默认</button>')+
+          '<button class="b-ghost" onclick="openAddressForm(\''+esc(a.addressId)+'\')">编辑</button>'+
+          '<button class="b-ghost" style="color:#dc2626;border-color:#fecaca" onclick="deleteAddress(\''+esc(a.addressId)+'\')">删除</button>'+
+        '</div>'+
+      '</div>';
+    }).join('');
+  }
+  h+='<button class="big-buy" onclick="openAddressForm(\'\')" style="margin-top:6px">＋ 新增收货地址</button>';
+  $('sheet').innerHTML=h;
+  openMask();
+}
+function openAddressForm(id){
+  var a=findAddress(id)||{receiverName:'',phone:'',region:'',detail:'',isDefault:false};
+  S.addrEditId=id||'';
+  S.sheetMode='addressForm';
+  $('sheet').innerHTML=
+    '<div class="hd"><b>'+(id?'编辑收货地址':'新增收货地址')+'</b><button class="x" onclick="backToAddressOrClose()">✕</button></div>'+
+    '<div class="pe-lbl" style="margin-top:0">收货人</div>'+
+    '<input id="afName" class="pe-name-inp" maxlength="20" placeholder="收货人姓名" value="'+escAttr(a.receiverName)+'">'+
+    '<div class="pe-lbl">手机号</div>'+
+    '<input id="afPhone" class="pe-name-inp" maxlength="11" inputmode="numeric" placeholder="11 位手机号" value="'+escAttr(a.phone)+'">'+
+    '<div class="pe-lbl">所在地区</div>'+
+    '<input id="afRegion" class="pe-name-inp" maxlength="60" placeholder="省 / 市 / 区（可空）" value="'+escAttr(a.region)+'">'+
+    '<div class="pe-lbl">详细地址</div>'+
+    '<input id="afDetail" class="pe-name-inp" maxlength="120" placeholder="街道、门牌号等" value="'+escAttr(a.detail)+'">'+
+    '<label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#475569;margin:14px 0">'+
+      '<input type="checkbox" id="afDefault" '+(a.isDefault?'checked':'')+' style="width:16px;height:16px">设为默认地址</label>'+
+    '<div class="pe-foot">'+
+      '<button class="b-ghost" onclick="backToAddressOrClose()">取消</button>'+
+      '<button class="b-blue" id="afSaveBtn" onclick="saveAddress()">保存地址</button>'+
+    '</div>';
+  openMask();
+  setTimeout(function(){ var i=$('afName'); if(i) i.focus(); },80);
+}
+function backToAddressOrClose(){
+  if(S.addrAfterSave){ S.addrAfterSave=null; closeSheet(); }
+  else openAddressBook();
+}
+function saveAddress(){
+  var name=((($('afName')||{}).value)||'').trim();
+  var phone=((($('afPhone')||{}).value)||'').trim();
+  var region=((($('afRegion')||{}).value)||'').trim();
+  var detail=((($('afDetail')||{}).value)||'').trim();
+  var isDefault=!!(($('afDefault')||{}).checked);
+  if(!name){ toast('请填写收货人姓名'); return; }
+  if(!/^1[3-9]\d{9}$/.test(phone)){ toast('请填写正确的 11 位手机号','err'); return; }
+  if(!detail){ toast('请填写详细地址'); return; }
+  var btn=$('afSaveBtn'); if(btn){ btn.disabled=true; btn.textContent='保存中…'; }
+  wsSend('save_address',{ addressId:S.addrEditId||'', receiverName:name, phone:phone,
+    region:region, detail:detail, isDefault:isDefault });
+}
+function onSaveAddressResult(d){
+  var btn=$('afSaveBtn'); if(btn){ btn.disabled=false; btn.textContent='保存地址'; }
+  if(!d || !d.success){ toast((d&&d.message)||'保存失败','err'); return; }
+  S.addresses=d.addresses||S.addresses;
+  var saved=d.address||null;
+  var act=S.addrAfterSave; S.addrAfterSave=null;
+  // 下单途中新增/编辑的地址，直接选中刚保存的那条，省得再点一次
+  if(saved && (saved.isDefault || act)) S.addrSel=saved.addressId;
+  if(!S.addrSel){ var def=defaultAddress(); if(def) S.addrSel=def.addressId; }
+  toast('地址已保存','ok');
+  if(act){ setTimeout(function(){ try{act();}catch(e){} },60); }
+  else openAddressBook();
+}
+function deleteAddress(id){
+  if(!confirm('确定删除这条收货地址？')) return;
+  wsSend('delete_address',{addressId:id});
+}
+function onDeleteAddressResult(d){
+  if(!d||!d.success){ toast((d&&d.message)||'删除失败','err'); return; }
+  S.addresses=d.addresses||[];
+  if(S.addrSel && !findAddress(S.addrSel)){ var def=defaultAddress(); S.addrSel=def?def.addressId:''; }
+  toast('地址已删除','ok');
+  if(S.sheetMode==='address') renderAddressBook();
+}
+function setDefaultAddress(id){ wsSend('set_default_address',{addressId:id}); }
+function onSetDefaultAddressResult(d){
+  if(!d||!d.success){ toast((d&&d.message)||'操作失败','err'); return; }
+  S.addresses=d.addresses||[];
+  toast('已设为默认地址','ok');
+  if(S.sheetMode==='address') renderAddressBook();
+  if(S.sheetMode==='confirm') openOrderConfirm();
+}
+
 function meTabHtml(){
   var list=S.myOrders||[];
-  function cnt(st){ return list.filter(function(o){return o.status===st}).length; }
-  var awaitRv=list.filter(function(o){return o.status==='completed' && !S.reviewed[o.orderId]}).length;
-  var tabs=[['all','全部',list.length],['pending_pay','待支付',cnt('pending_pay')],['paid','待发货',cnt('paid')],['shipped','待收货',cnt('shipped')],['await_review','待评价',awaitRv]];
+  function cnt(st){ return list.filter(function(o){return o.status===st && o.refundStatus!=='pending'}).length; }
+  var awaitRv=list.filter(function(o){return o.status==='completed' && !S.reviewed[o.orderId] && o.refundStatus!=='pending'}).length;
+  var refundCnt=list.filter(function(o){return o.refundStatus==='pending'}).length;
+  var tabs=[['all','全部',list.length],['pending_pay','待支付',cnt('pending_pay')],['paid','待发货',cnt('paid')],['shipped','待收货',cnt('shipped')],['await_review','待评价',awaitRv],['refund_pending','退款中',refundCnt]];
   var html='<div class="tabbar">';
   tabs.forEach(function(tb){
     html+='<button class="tab'+(S.meTab===tb[0]?' on':'')+'" onclick="setMeTab(\''+tb[0]+'\')">'+tb[1]+(tb[2]>0?'<span class="cnt">'+tb[2]+'</span>':'')+'</button>';
@@ -1357,15 +1495,19 @@ function meTabHtml(){
 }
 function meOrdersByTab(){
   var t=S.meTab, list=S.myOrders||[];
+  if(t==='refund_pending') return list.filter(function(o){return o.refundStatus==='pending'});
   if(t==='pending_pay') return list.filter(function(o){return o.status==='pending_pay'});
-  if(t==='paid') return list.filter(function(o){return o.status==='paid'});
-  if(t==='shipped') return list.filter(function(o){return o.status==='shipped'});
-  if(t==='await_review') return list.filter(function(o){return o.status==='completed' && !S.reviewed[o.orderId]});
+  if(t==='paid') return list.filter(function(o){return o.status==='paid' && o.refundStatus!=='pending'});
+  if(t==='shipped') return list.filter(function(o){return o.status==='shipped' && o.refundStatus!=='pending'});
+  if(t==='await_review') return list.filter(function(o){return o.status==='completed' && !S.reviewed[o.orderId] && o.refundStatus!=='pending'});
   return list;
 }
-function oStLabel(s){ return ({pending_pay:'待支付',paid:'待发货',shipped:'待收货',completed:'已完成',refunded:'已退款',canceled:'已取消'})[s]||s; }
-function oStColor(s){ return ({pending_pay:'#d97706',paid:'#2563eb',shipped:'#4f46e5',completed:'#059669',refunded:'#dc2626',canceled:'#94a3b8'})[s]||'#64748b'; }
+function oStLabel(s){ return ({pending_pay:'待支付',paid:'待发货',shipped:'待收货',completed:'已完成',refunded:'已退款',canceled:'已取消',refund_pending:'退款审核中'})[s]||s; }
+function oStColor(s){ return ({pending_pay:'#d97706',paid:'#2563eb',shipped:'#4f46e5',completed:'#059669',refunded:'#dc2626',canceled:'#94a3b8',refund_pending:'#dc2626'})[s]||'#64748b'; }
+function oEffStatus(o){ return (o && o.refundStatus==='pending') ? 'refund_pending' : (o?o.status:''); }
 function oShipTxt(o){
+  if(o.refundStatus==='pending') return '⏳ 退款申请审核中，等待主播处理';
+  if(o.refundStatus==='rejected') return '⚠️ 退款申请未通过'+(o.refundRejectReason?('：'+esc(o.refundRejectReason)):'');
   if(o.status==='paid') return '🏭 商家备货中，等待发货…';
   if(o.status==='shipped') return '📦 已发货 · 发货 '+fmtDT(o.shipTime)+'<br>运单号 '+esc(o.orderNo||o.orderId);
   if(o.status==='completed') return '✅ 已签收 · 交易完成'+(o.shipTime?(' · 发货 '+fmtDT(o.shipTime)):'');
@@ -1374,10 +1516,20 @@ function oShipTxt(o){
 }
 function orderCard(o){
   var act='';
-  if(o.status==='pending_pay'){ act='<button class="b-red" onclick="goPay(\''+esc(o.orderId)+'\')">立即支付</button><button class="b-ghost" onclick="cancelMy(\''+esc(o.orderId)+'\')">取消订单</button>'; }
-  else if(o.status==='shipped'){ act='<button class="b-blue" onclick="confirmMy(\''+esc(o.orderId)+'\')">确认收货</button>'; }
-  else if(o.status==='completed' && !S.reviewed[o.orderId]){ act='<button class="b-blue" onclick="reviewOrder(\''+esc(o.orderId)+'\')">去评价</button>'; }
+  var canRefund=(o.status==='paid'||o.status==='shipped'||o.status==='completed')&&o.refundStatus!=='pending'&&o.refundStatus!=='approved';
+  if(o.refundStatus==='pending'){
+    act='<span style="font-size:12px;color:#dc2626">退款申请审核中</span>';
+  } else {
+    if(o.status==='pending_pay'){ act='<button class="b-red" onclick="goPay(\''+esc(o.orderId)+'\')">立即支付</button><button class="b-ghost" onclick="cancelMy(\''+esc(o.orderId)+'\')">取消订单</button>'; }
+    else if(o.status==='shipped'){ act='<button class="b-blue" onclick="confirmMy(\''+esc(o.orderId)+'\')">确认收货</button>'; }
+    else if(o.status==='completed' && !S.reviewed[o.orderId]){ act='<button class="b-blue" onclick="reviewOrder(\''+esc(o.orderId)+'\')">去评价</button>'; }
+    if(canRefund){ act+='<button class="b-ghost" onclick="openRefund(\''+esc(o.orderId)+'\')">申请退款</button>'; }
+  }
   var img=o.productImage?'<img src="'+esc(assetUrl(o.productImage))+'" onerror="this.style.display=\'none\'">':'';
+  var addr=(o.receiverName||o.receiverPhone||o.receiverAddress)
+    ? '<div style="font-size:11px;color:#64748b;line-height:1.6;margin-top:6px;padding-top:6px;border-top:1px dashed #eef2f7;word-break:break-all">📍 '+esc(o.receiverName||'')+
+      (o.receiverPhone?(' '+esc(o.receiverPhone)):'')+(o.receiverAddress?('<br>'+esc(o.receiverAddress)):'')+'</div>'
+    : '';
   return '<div class="oc">'+
     '<div class="oc-top">'+
       '<div class="oc-img">'+(img||'📦')+'</div>'+
@@ -1386,8 +1538,9 @@ function orderCard(o){
         '<div class="oc-amt">¥'+fmtPrice(o.totalAmount)+' <span style="font-weight:400;color:#94a3b8;font-size:10px">×'+o.quantity+'</span></div>'+
         '<div class="oc-meta">单号 '+esc(o.orderNo||o.orderId)+' · '+fmtDT(o.createTime)+(oShipTxt(o)?'<br>'+oShipTxt(o):'')+'</div>'+
       '</div>'+
-      '<div class="oc-status" style="color:'+oStColor(o.status)+'">'+oStLabel(o.status)+'</div>'+
+      '<div class="oc-status" style="color:'+oStColor(oEffStatus(o))+'">'+oStLabel(oEffStatus(o))+'</div>'+
     '</div>'+
+    addr+
     (act?'<div class="oc-foot">'+act+'</div>':'')+
   '</div>';
 }
@@ -1395,7 +1548,7 @@ function meListHtml(){
   if(!S.myOrdersLoaded) return '<div class="oc-empty">订单加载中…</div>';
   var list=meOrdersByTab();
   if(!list.length){
-    var tips={all:'还没有订单，去直播间逛逛吧 🛒',pending_pay:'暂无待支付订单',paid:'暂无待发货订单',shipped:'暂无待收货订单',await_review:'暂无待评价订单'};
+    var tips={all:'还没有订单，去直播间逛逛吧 🛒',pending_pay:'暂无待支付订单',paid:'暂无待发货订单',shipped:'暂无待收货订单',await_review:'暂无待评价订单',refund_pending:'暂无退款中的订单'};
     return '<div class="oc-empty">'+(tips[S.meTab]||'暂无订单')+'</div>';
   }
   return list.slice(0,60).map(orderCard).join('')+
@@ -1490,24 +1643,93 @@ function buyCurrent(){
 function buy(p){
   // 未登录先弹登录框，登录成功后自动续做这笔下单（续做不依赖弹层 DOM）
   if(!isLoggedIn()){
-    _pendingAction=function(){ doPlaceOrder(p); };
+    _pendingAction=function(){ buy(p); };
     toast('下单需要先登录','err');
     openAuth('login');
     return;
   }
-  doPlaceOrder(p);
+  startOrderConfirm(p);
 }
-function doPlaceOrder(p){
-  var btn=$('bigBuyBtn');
-  if(btn){ btn.disabled=true; btn.textContent='下单中…'; }
-  wsSend('place_order',{ productId:p.productId, quantity:1 });
+// 下单第一步：确认收货地址。没有地址先引导新增，保存完自动回到这里。
+function startOrderConfirm(p){
+  if(!p) return;
+  if(!(S.addresses||[]).length){
+    S.addrAfterSave=function(){ startOrderConfirm(p); };
+    toast('请先添加收货地址','err');
+    openAddressForm('');
+    return;
+  }
+  if(!S.addrSel || !findAddress(S.addrSel)){
+    var def=defaultAddress();
+    S.addrSel=def?def.addressId:'';
+  }
   S.placing={p:p};
+  openOrderConfirm();
+}
+function openOrderConfirm(){
+  var p=S.placing&&S.placing.p;
+  if(!p){ closeSheet(); return; }
+  S.sheetMode='confirm';
+  var cm=catMeta(p.category);
+  var img=(p.images&&p.images.length&&p.images[0])||p.imageUrl||'';
+  var imgHtml=img
+    ? '<img src="'+esc(assetUrl(img))+'" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display=\'none\'">'
+    : '<div style="font-size:40px">'+cm.emoji+'</div>';
+  var addrHtml=(S.addresses||[]).map(function(a){
+    var on=a.addressId===S.addrSel;
+    return '<div onclick="selectOrderAddr(\''+esc(a.addressId)+'\')" style="border:1px solid '+(on?'#2563eb':'#e2e8f0')+
+      ';background:'+(on?'#eff6ff':'#fff')+';border-radius:10px;padding:10px;margin-bottom:8px;cursor:pointer">'+
+      '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">'+
+        '<div style="min-width:0">'+
+          '<div style="font-size:13px;font-weight:600;color:#0f172a">'+esc(a.receiverName)+
+            ' <span style="font-weight:400;font-size:12px;color:#475569">'+esc(a.phone)+'</span>'+
+            (a.isDefault?' <span style="font-size:10px;background:#dbeafe;color:#2563eb;border-radius:8px;padding:1px 6px">默认</span>':'')+'</div>'+
+          '<div style="font-size:12px;color:#64748b;line-height:1.6;margin-top:3px;word-break:break-all">'+esc(addrText(a))+'</div>'+
+        '</div>'+
+        '<span style="width:16px;height:16px;border-radius:50%;border:2px solid '+(on?'#2563eb':'#cbd5e1')+
+          ';background:'+(on?'#2563eb':'#fff')+';flex-shrink:0;margin-top:2px"></span>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+  $('sheet').innerHTML=
+    '<div class="hd"><b>确认订单</b><button class="x" onclick="closeSheet()">✕</button></div>'+
+    '<div class="cash-prod">'+
+      '<div class="cash-img">'+imgHtml+'</div>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div class="cash-pn">'+esc(p.name)+'</div>'+
+        '<div style="font-size:11px;color:#94a3b8;margin-top:4px">数量 ×1</div>'+
+      '</div>'+
+      '<div style="font-weight:700;color:#dc2626">¥'+fmtPrice(p.price)+'</div>'+
+    '</div>'+
+    '<div class="pe-lbl" style="margin-top:4px">收货地址</div>'+
+    addrHtml+
+    '<button class="b-ghost" style="width:100%;margin-bottom:10px" onclick="addAddressForOrder()">＋ 新增收货地址</button>'+
+    '<div class="cash-price"><span>实付</span><span class="v">¥'+fmtPrice(p.price)+'</span></div>'+
+    '<button class="cash-pay" id="confirmOrderBtn" onclick="submitOrder()">提交订单 ¥'+fmtPrice(p.price)+'</button>';
+  openMask();
+}
+function selectOrderAddr(id){
+  S.addrSel=id||'';
+  openOrderConfirm();
+}
+function addAddressForOrder(){
+  var p=S.placing&&S.placing.p;
+  S.addrAfterSave=function(){ if(p) startOrderConfirm(p); else closeSheet(); };
+  openAddressForm('');
+}
+function submitOrder(){
+  var p=S.placing&&S.placing.p;
+  if(!p){ toast('商品信息已失效，请重新下单','err'); closeSheet(); return; }
+  if(!S.addrSel || !findAddress(S.addrSel)){ toast('请选择收货地址','err'); return; }
+  var btn=$('confirmOrderBtn');
+  if(btn){ btn.disabled=true; btn.textContent='提交中…'; }
+  wsSend('place_order',{ productId:p.productId, quantity:1, addressId:S.addrSel });
 }
 function onPlaceOrderResult(d){
-  var btn=$('bigBuyBtn');
+  var btn=$('confirmOrderBtn');
   if(!d.success){
     toast(d.message||'下单失败','err');
-    if(btn && S.sheetMode==='product'){ btn.disabled=false; btn.textContent='去下单'; }
+    if(btn){ btn.disabled=false; btn.textContent='提交订单'; }
     fetchProducts(); return;
   }
   var order=d.order||{};
@@ -1532,6 +1754,10 @@ function showCashier(o){
         '<div style="font-size:11px;color:#94a3b8;margin-top:4px">数量 ×'+o.quantity+' · 单号 '+esc(o.orderNo||o.orderId)+'</div>'+
       '</div>'+
     '</div>'+
+    ((o.receiverName||o.receiverPhone||o.receiverAddress)
+      ? '<div style="font-size:11px;color:#64748b;line-height:1.6;margin:-4px 0 10px;word-break:break-all">📍 收货信息：'+esc(o.receiverName||'')+
+        (o.receiverPhone?(' · '+esc(o.receiverPhone)):'')+(o.receiverAddress?('<br>'+esc(o.receiverAddress)):'')+'</div>'
+      : '')+
     '<div class="cash-row"><span>订单金额</span><span class="v">¥'+fmtPrice(amt)+'</span></div>'+
     '<div class="cash-row"><span>我的余额</span><b>¥'+fmtPrice(bal)+'</b></div>'+
     '<div class="cash-row" style="border-bottom:1px solid #eef1f6;padding-bottom:10px"><span>支付方式</span><span style="color:#059669">💰 钱包余额支付</span></div>'+
@@ -1619,6 +1845,65 @@ function onCancelResult(d){
   if(d.order) upsertMyOrder(d.order);
   if(d.success){ toast('订单已取消','ok'); if(S.sheetMode==='me') renderMe(); }
   else toast(d.message||'取消失败','err');
+}
+
+// ============================================================
+// 退款申请（观众提交 → 主播后台人工审核）
+// ============================================================
+var REFUND_REASONS=['不想要了','商品与描述不符','物流太慢','商品质量问题','拍错了/重复下单'];
+function openRefund(orderId){
+  var o=findMyOrder(orderId);
+  if(!o){ toast('订单不存在或已变化','err'); resyncMe(); return; }
+  if(o.refundStatus==='pending'){ toast('退款申请审核中，请耐心等待','err'); return; }
+  if(o.refundStatus==='approved' || o.status==='refunded'){ toast('该订单已退款','err'); return; }
+  S.sheetMode='refund'; S.refundOrderId=o.orderId;
+  var img=o.productImage?'<img src="'+esc(assetUrl(o.productImage))+'" onerror="this.style.display=\'none\'">':'';
+  $('sheet').innerHTML=
+    '<div class="hd"><b>申请退款</b><button class="x" onclick="closeRefund()">✕</button></div>'+
+    '<div class="cash-prod">'+
+      '<div class="cash-img">'+(img||'📦')+'</div>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div class="cash-pn">'+esc(o.productName)+'</div>'+
+        '<div style="font-size:11px;color:#94a3b8;margin-top:4px">单号 '+esc(o.orderNo||o.orderId)+' · 实付 ¥'+fmtPrice(o.totalAmount)+'</div>'+
+      '</div>'+
+    '</div>'+
+    '<div class="pe-lbl" style="margin-top:0">退款原因</div>'+
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+
+      REFUND_REASONS.map(function(t){ return '<button class="b-ghost" style="font-size:12px;padding:6px 10px" onclick="pickRefundReason(\''+esc(t)+'\')">'+esc(t)+'</button>'; }).join('')+
+    '</div>'+
+    '<textarea class="rev-ta" id="rfReason" maxlength="100" placeholder="请填写退款原因（最多 100 字），可点上方快捷选项"></textarea>'+
+    '<div style="font-size:11px;color:#94a3b8;line-height:1.6;margin:8px 0 4px">提交后由主播人工审核，审核通过后款项将退回你的钱包余额。</div>'+
+    '<div class="pe-foot">'+
+      '<button class="b-ghost" onclick="closeRefund()">取消</button>'+
+      '<button class="b-blue" id="rfBtn" onclick="submitRefund()">提交退款申请</button>'+
+    '</div>';
+  openMask();
+}
+function closeRefund(){
+  S.refundOrderId='';
+  closeSheet();
+  openMe();   // 回到「我的」原标签页
+}
+function pickRefundReason(t){
+  var ta=$('rfReason'); if(!ta) return;
+  ta.value=t; ta.focus();
+}
+function submitRefund(){
+  var o=findMyOrder(S.refundOrderId);
+  if(!o){ toast('订单不存在或已变化','err'); closeRefund(); return; }
+  var reason=((($('rfReason')||{}).value)||'').trim();
+  if(!reason){ toast('请填写退款原因','err'); return; }
+  var btn=$('rfBtn'); if(btn){ btn.disabled=true; btn.textContent='提交中…'; }
+  wsSend('request_refund',{orderId:o.orderId, reason:reason.slice(0,100)});
+}
+function onRequestRefundResult(d){
+  var btn=$('rfBtn'); if(btn){ btn.disabled=false; btn.textContent='提交退款申请'; }
+  if(!d || !d.success){ toast((d&&d.message)||'提交失败','err'); return; }
+  if(d.order) upsertMyOrder(d.order);
+  S.refundOrderId='';
+  closeSheet();
+  toast(d.message||'退款申请已提交，等待主播审核','ok');
+  openMe('refund_pending');
 }
 
 // ============================================================

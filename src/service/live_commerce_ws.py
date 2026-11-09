@@ -47,6 +47,10 @@ _VIEWER_ALLOWED: frozenset = frozenset({
     "send_danmaku", "update_viewer_profile", "recharge", "place_order",
     "pay_order", "confirm_receipt", "cancel_order", "submit_review",
     "get_user_orders", "get_my_messages",
+    # 收货地址：观众自主保存多条，下单时选择
+    "get_addresses", "save_address", "delete_address", "set_default_address",
+    # 售后退款：观众提交申请，主播后台人工审核
+    "request_refund",
     # 观众 → 主播私信。方向与 send_viewer_msg（主播 → 观众）相反，
     # 是观众的**主动**发言，所以必须在白名单里；身份仍走 _require_viewer 二次校验。
     "send_host_msg",
@@ -1249,11 +1253,51 @@ class LiveCommerceWebSocketManager:
                 })
 
             elif msg_type == "get_orders":
+                # scope 默认 real：主播默认只看到真实订单；AI 模拟测试订单必须显式
+                # 传 scope=mock 才会下发，避免两类订单在默认视图里混在一起。
                 status = msg_data.get("status", "")
                 limit = int(msg_data.get("limit", 50))
-                orders = dm.get_orders(status, limit)
+                scope = msg_data.get("scope", "real")
+                if scope not in ("real", "mock", "all"):
+                    scope = "real"
+                orders = dm.get_orders(status, limit, scope=scope)
                 await self._send(websocket, "get_orders_result", {
+                    "scope": scope,
                     "orders": [o.model_dump() for o in orders],
+                })
+
+            elif msg_type == "generate_ai_test_orders":
+                # 仅运营台可达（不在观众白名单）：生成隔离的 AI 模拟测试订单。
+                # 这些订单 source=ai_test，不扣库存、不计入任何经营统计。
+                try:
+                    count = max(1, min(20, int(msg_data.get("count", 3) or 3)))
+                except (TypeError, ValueError):
+                    count = 3
+                product_id = msg_data.get("productId", "") or ""
+                created = []
+                for _ in range(count):
+                    order = dm.create_ai_test_order(product_id=product_id)
+                    if order is not None:
+                        created.append(order.model_dump())
+                await self._send(websocket, "generate_ai_test_orders_result", {
+                    "success": bool(created),
+                    "created": created,
+                    "message": (f"已生成 {len(created)} 笔模拟测试订单"
+                                if created else "生成失败：没有可用商品"),
+                })
+
+            elif msg_type == "review_refund":
+                # 仅运营台可达：同意退款会回补库存并向观众钱包返充；
+                # 拒绝只标记申请，订单维持原状态。
+                order_id = msg_data.get("orderId", "")
+                approve = bool(msg_data.get("approve"))
+                reason = msg_data.get("reason", "") or ""
+                order, err = dm.review_refund(order_id, approve, reason)
+                await self._send(websocket, "review_refund_result", {
+                    "success": order is not None,
+                    "message": (("已同意退款" if approve else "已拒绝退款")
+                                if order is not None else (err or "操作失败")),
+                    "order": order.model_dump() if order else None,
                 })
 
             elif msg_type == "get_session_orders":
@@ -1328,6 +1372,7 @@ class LiveCommerceWebSocketManager:
                         },
                         "orders": [],
                         "messages": [],
+                        "addresses": [],
                     })
 
             elif msg_type == "viewer_logout":
@@ -1376,6 +1421,7 @@ class LiveCommerceWebSocketManager:
                     "user": user,
                     "orders": [o.model_dump() for o in dm.get_user_orders(user_id)],
                     "messages": [m.model_dump() for m in dm.get_user_messages(user_id)],
+                    "addresses": [a.model_dump() for a in dm.get_addresses(user_id)],
                 })
 
             elif msg_type == "update_viewer_profile":
@@ -1483,18 +1529,29 @@ class LiveCommerceWebSocketManager:
                 await self._send(websocket, "click_live_product_result", result)
 
             elif msg_type == "place_order":
-                # 观众下单：生成「待付款」订单（不扣钱包/库存），随后由 pay_order 付款
+                # 观众下单：生成「待付款」订单（不扣钱包/库存），随后由 pay_order 付款。
+                # 必须带 addressId —— 订单要绑定收货地址与手机号快照。
                 user_id = await self._require_viewer(websocket, "place_order")
                 if not user_id:
                     return
                 product_id = msg_data.get("productId", "")
+                address_id = (msg_data.get("addressId") or "").strip()
+                if not address_id:
+                    await self._send(websocket, "place_order_result", {
+                        "success": False,
+                        "message": "请先选择收货地址",
+                        "order": None,
+                    })
+                    return
                 try:
                     quantity = max(1, int(msg_data.get("quantity", 1) or 1))
                 except (TypeError, ValueError):
                     quantity = 1
                 acc = dm.get_viewer(user_id)
                 user_name = (acc.userName if acc else "") or "观众"
-                order, reason = dm.create_viewer_order(product_id, user_id, user_name, quantity)
+                order, reason = dm.create_viewer_order(
+                    product_id, user_id, user_name, quantity, address_id=address_id
+                )
                 await self._send(websocket, "place_order_result", {
                     "success": order is not None,
                     # 观众端 onPlaceOrderResult 直接 toast 这个 message，所以具体原因
@@ -1538,6 +1595,71 @@ class LiveCommerceWebSocketManager:
                 await self._send(websocket, "cancel_order_result", {
                     "success": order is not None,
                     "message": "订单已取消" if order else (reason or "操作失败"),
+                    "order": order.model_dump() if order else None,
+                })
+
+            # ========== 观众端 · 收货地址 ==========
+            elif msg_type == "get_addresses":
+                user_id = await self._require_viewer(websocket, "get_addresses")
+                if not user_id:
+                    return
+                await self._send(websocket, "get_addresses_result", {
+                    "addresses": [a.model_dump() for a in dm.get_addresses(user_id)],
+                })
+
+            elif msg_type == "save_address":
+                user_id = await self._require_viewer(websocket, "save_address")
+                if not user_id:
+                    return
+                address, reason = dm.save_address(
+                    user_id,
+                    msg_data.get("receiverName", ""),
+                    msg_data.get("phone", ""),
+                    msg_data.get("detail", ""),
+                    region=msg_data.get("region", ""),
+                    is_default=bool(msg_data.get("isDefault")),
+                    address_id=msg_data.get("addressId", "") or "",
+                )
+                await self._send(websocket, "save_address_result", {
+                    "success": address is not None,
+                    "message": "地址已保存" if address else (reason or "保存失败"),
+                    "address": address.model_dump() if address else None,
+                    "addresses": [a.model_dump() for a in dm.get_addresses(user_id)],
+                })
+
+            elif msg_type == "delete_address":
+                user_id = await self._require_viewer(websocket, "delete_address")
+                if not user_id:
+                    return
+                ok, reason = dm.delete_address(user_id, msg_data.get("addressId", ""))
+                await self._send(websocket, "delete_address_result", {
+                    "success": ok,
+                    "message": "地址已删除" if ok else (reason or "删除失败"),
+                    "addresses": [a.model_dump() for a in dm.get_addresses(user_id)],
+                })
+
+            elif msg_type == "set_default_address":
+                user_id = await self._require_viewer(websocket, "set_default_address")
+                if not user_id:
+                    return
+                ok, reason = dm.set_default_address(user_id, msg_data.get("addressId", ""))
+                await self._send(websocket, "set_default_address_result", {
+                    "success": ok,
+                    "message": "已设为默认地址" if ok else (reason or "操作失败"),
+                    "addresses": [a.model_dump() for a in dm.get_addresses(user_id)],
+                })
+
+            # ========== 观众端 · 退款申请 ==========
+            elif msg_type == "request_refund":
+                user_id = await self._require_viewer(websocket, "request_refund")
+                if not user_id:
+                    return
+                order, reason = dm.request_refund(
+                    msg_data.get("orderId", ""), user_id, msg_data.get("reason", "")
+                )
+                await self._send(websocket, "request_refund_result", {
+                    "success": order is not None,
+                    "message": "退款申请已提交，等待主播审核" if order else (reason or "提交失败"),
                     "order": order.model_dump() if order else None,
                 })
 

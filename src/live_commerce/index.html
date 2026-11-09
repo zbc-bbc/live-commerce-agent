@@ -192,6 +192,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
       <div class="lc-sb-item" data-page="products" onclick="switchPage('products')">
         <span class="icon">📦</span>商品管理
       </div>
+      <div class="lc-sb-item" data-page="orders" onclick="switchPage('orders')">
+        <span class="icon">🧾</span>订单管理<span id="sbRefundDot" style="display:none;margin-left:auto;background:#ef4444;color:#fff;font-size:10px;border-radius:8px;padding:0 6px;font-weight:600">0</span>
+      </div>
       <div class="lc-sb-item" data-page="danmaku" onclick="switchPage('danmaku')">
         <span class="icon">💬</span>弹幕与AI问答
       </div>
@@ -542,6 +545,58 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
     </div>
 
     <!-- ============ PAGE 3: 商品数据分析 ============ -->
+    <!-- ============ PAGE: 订单管理（独立一级模块） ============ -->
+    <div class="lc-inner" id="page-orders">
+      <div class="lc-page-hdr">
+        <div><h2>🧾 订单管理</h2><div class="sub">真实订单与 AI 模拟测试订单分离；退款申请由主播人工审核</div></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="lc-btn lc-btn-sm" id="ordScopeReal" onclick="setOrdersScope('real')">📄 真实订单</button>
+          <button class="lc-btn lc-btn-outline lc-btn-sm" id="ordScopeMock" onclick="setOrdersScope('mock')">🧪 模拟测试订单</button>
+          <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="loadAdminOrders()">↻ 刷新</button>
+        </div>
+      </div>
+
+      <!-- 真实订单 -->
+      <div id="ordersRealWrap">
+        <div class="lc-grid lc-grid-4" style="margin-bottom:16px" id="adminOrderStatRow"></div>
+        <div class="lc-card" id="refundReviewCard" style="display:none;border-left:3px solid #ef4444">
+          <div class="lc-card-title">🔔 退款申请待审核 <span id="refundPendingCount" style="color:#ef4444"></span></div>
+          <div class="lc-scroll" style="max-height:300px" id="refundReviewList"></div>
+        </div>
+        <div class="lc-card">
+          <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center">
+            <span>📄 真实订单</span>
+            <span style="font-size:11px;font-weight:400;color:#94a3b8">默认只展示真实注册观众的订单，模拟单已隔离</span>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0" id="adminOrderFilters"></div>
+          <div class="lc-scroll" style="max-height:560px"><table class="lc-tbl2" id="adminOrderTable"></table></div>
+        </div>
+      </div>
+
+      <!-- AI 模拟测试订单 -->
+      <div id="ordersMockWrap" style="display:none">
+        <div class="lc-card" style="border-left:3px solid #f59e0b">
+          <div style="font-size:13px;color:#92400e;line-height:1.8">
+            🧪 这里只存放 <b>AI 模拟测试订单</b>：不绑定观众账号、不扣真实库存、不计入任何经营统计，
+            仅用于演示发货/退款等流程。真实订单请切回上方「真实订单」。
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap">
+            <label style="font-size:12px;color:#475569">生成数量</label>
+            <input class="lc-inp" id="mockOrderCount" type="number" min="1" max="20" value="3" style="width:80px">
+            <button class="lc-btn lc-btn-sm" id="btnGenMockOrders" style="background:#f59e0b;color:#fff" onclick="generateAiTestOrders()">🤖 生成模拟测试订单</button>
+            <span id="mockOrderHint" style="font-size:11px;color:#94a3b8"></span>
+          </div>
+        </div>
+        <div class="lc-card">
+          <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center">
+            <span>🧪 模拟测试订单</span>
+            <span id="mockOrderCountLabel" style="font-size:11px;font-weight:400;color:#94a3b8"></span>
+          </div>
+          <div class="lc-scroll" style="max-height:560px"><table class="lc-tbl2" id="mockOrderTable"></table></div>
+        </div>
+      </div>
+    </div>
+
     <div class="lc-inner" id="page-analysis">
       <div class="lc-page-hdr">
         <div><h2>📊 商品数据分析</h2><div class="sub">弹幕统计、观众画像、转化率分析</div></div>
@@ -895,6 +950,11 @@ var S = {
   isLive: false,
   orders: [],
   orderStats: null,
+  // 独立订单模块：scope=real 只看真实订单（默认），mock 只看 AI 模拟测试订单
+  ordersScope: 'real',
+  adminOrderFilter: 'all',
+  mockOrders: [],
+  mockOrdersLoaded: false,
   // 控制台「本场订单」：口径是当前这场直播 + 真实注册观众，与分析页的
   // S.orders / S.orderStats（今日/累计、全部订单）是两套东西，别互相覆盖。
   sessionOrders: [],
@@ -958,6 +1018,9 @@ function wsConn() {
     // 端口列表不只设置页要用：「话术生成」「AI 回复」两处卡片上的
     // 「当前模型：xxx」也靠它，所以连上就拉一次，不必等用户点进设置页。
     loadLlmEndpoints();
+    // 进后台就拉一次真实订单：左侧「订单管理」的退款待审核角标不必等用户点进去才有数
+    wsSend('get_orders', { scope: 'real', limit: 200 });
+    wsSend('get_order_stats');
   };
   ws.onclose = function(e) {
     wsConnected = false;
@@ -1033,6 +1096,7 @@ function switchPage(page) {
   if (page==='products') renderProductsPage();
   if (page==='danmaku') { renderDmPage(); renderDanmakuSummary(); renderDanmakuSummaryAI(); }
   if (page==='analysis') renderAnalysisPage();
+  if (page==='orders') renderOrdersPage();
   if (page==='reviews') { renderReviewsPage(); loadReviewSummary(); }
   if (page==='viewers') renderViewersPage();
   if (page==='inbox') refreshInbox();
@@ -2001,7 +2065,8 @@ function renderAnalysisPage() {
 // ===== 商单成交 =====
 var S_orderFilter='all';
 function loadOrderData(){
-  if(!S.orders.length && !S.orderStats) { wsSend('get_orders',{limit:40}); wsSend('get_order_stats'); }
+  // 显式 scope=real：分析页的「最近订单」也只统计真实观众订单。
+  if(!S.orders.length && !S.orderStats) { wsSend('get_orders',{limit:40,scope:'real'}); wsSend('get_order_stats'); }
   else { renderOrders(); renderOrderStats(); }
 }
 function setOrderFilter(f){
@@ -2049,6 +2114,196 @@ function renderOrders(){
         '<td>'+orderActBtns(o)+'</td>'+
       '</tr>';
     }).join('');
+}
+// ============================================================
+// 独立订单模块：真实订单 / AI 模拟测试订单 / 退款审核
+// ============================================================
+var ADMIN_ORDER_FILTERS=[
+  ['all','全部'],['pending_pay','待付款'],['paid','已付款'],['shipped','已发货'],
+  ['completed','已完成'],['refunded','已退款'],['canceled','已取消']
+];
+function setOrdersScope(scope){
+  S.ordersScope=(scope==='mock')?'mock':'real';
+  var realWrap=document.getElementById('ordersRealWrap');
+  var mockWrap=document.getElementById('ordersMockWrap');
+  if(realWrap) realWrap.style.display=S.ordersScope==='real'?'':'none';
+  if(mockWrap) mockWrap.style.display=S.ordersScope==='mock'?'':'none';
+  var bReal=document.getElementById('ordScopeReal');
+  var bMock=document.getElementById('ordScopeMock');
+  if(bReal){ bReal.className='lc-btn lc-btn-sm'; bReal.style.cssText=S.ordersScope==='real'?'background:#2563eb;color:#fff':'background:transparent;color:#475569;border:1px solid #d1d5db'; }
+  if(bMock){ bMock.className='lc-btn lc-btn-sm'; bMock.style.cssText=S.ordersScope==='mock'?'background:#f59e0b;color:#fff':'background:transparent;color:#475569;border:1px solid #d1d5db'; }
+  loadAdminOrders();
+}
+function renderOrdersPage(){
+  setOrdersScope(S.ordersScope);
+  renderAdminFilters();
+  renderAdminOrders();
+  renderAdminStats();
+  renderRefundReview();
+  renderMockOrders();
+}
+function setAdminOrderFilter(f){
+  S.adminOrderFilter=f;
+  renderAdminFilters();
+  renderAdminOrders();
+}
+function renderAdminFilters(){
+  var el=document.getElementById('adminOrderFilters');
+  if(!el) return;
+  el.innerHTML=ADMIN_ORDER_FILTERS.map(function(f){
+    var on=(S.adminOrderFilter===f[0]);
+    return '<button class="lc-mini-btn" data-aost="'+f[0]+'" onclick="setAdminOrderFilter(\''+f[0]+'\')" '+
+      'style="'+(on?'border-color:#2563eb;color:#2563eb;font-weight:600':'')+'">'+f[1]+'</button>';
+  }).join('');
+}
+function loadAdminOrders(){
+  if(S.ordersScope==='mock'){
+    wsSend('get_orders',{scope:'mock',limit:200});
+  } else {
+    wsSend('get_orders',{scope:'real',limit:200});
+    wsSend('get_order_stats');
+  }
+}
+function orderContactHtml(o){
+  if(!o || (!o.receiverName && !o.receiverPhone && !o.receiverAddress)){
+    return '<span style="color:#cbd5e1">—</span>';
+  }
+  return '<div style="font-size:11px;line-height:1.6;max-width:200px;white-space:normal">'+
+    esc(o.receiverName||'')+(o.receiverPhone?(' <span style="color:#475569">'+esc(o.receiverPhone)+'</span>'):'')+
+    (o.receiverAddress?('<br><span style="color:#94a3b8">'+esc(o.receiverAddress)+'</span>'):'')+
+  '</div>';
+}
+function orderStatusHtml(o){
+  var badge='<span class="lc-order-status" style="'+(ORDER_STATUS_STYLE[o.status]||'')+'">'+(ORDER_STATUS_NAME[o.status]||o.status)+'</span>';
+  if(o.refundStatus==='pending') badge+=' <span class="lc-order-status" style="background:#fee2e2;color:#dc2626">退款审核中</span>';
+  else if(o.refundStatus==='rejected') badge+=' <span class="lc-order-status" style="background:#f1f5f9;color:#94a3b8">退款被拒</span>';
+  return badge;
+}
+function renderAdminOrders(){
+  var el=document.getElementById('adminOrderTable');
+  if(!el) return;
+  var list=(S.orders||[]).filter(function(o){
+    return S.adminOrderFilter==='all'||o.status===S.adminOrderFilter;
+  });
+  if(!list.length){
+    el.innerHTML='<tr><td class="lc-empty-row">暂无真实订单</td></tr>';
+    return;
+  }
+  el.innerHTML='<tr><th>单号</th><th>商品</th><th>买家</th><th>收货信息</th><th>数量</th><th>金额</th><th>状态</th><th>时间</th><th>操作</th></tr>'+
+    list.slice(0,200).map(function(o){
+      var acts;
+      if(o.refundStatus==='pending'){
+        acts='<button class="lc-mini-btn" style="border-color:#dc2626;color:#dc2626;background:#fef2f2" onclick="reviewRefund(\''+esc(o.orderId)+'\',true)">✅ 同意退款</button> '+
+             '<button class="lc-mini-btn" style="border-color:#94a3b8;color:#475569" onclick="reviewRefund(\''+esc(o.orderId)+'\',false)">✖ 拒绝</button>';
+      } else {
+        acts=orderActBtns(o);
+      }
+      return '<tr>'+
+        '<td style="color:#64748b;font-size:11px">'+esc(o.orderNo||o.orderId)+'</td>'+
+        '<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis">'+esc(o.productName)+'</td>'+
+        '<td>'+esc(o.userName||'-')+'</td>'+
+        '<td>'+orderContactHtml(o)+'</td>'+
+        '<td>×'+o.quantity+'</td>'+
+        '<td style="color:#dc2626;font-weight:600">¥'+fmtNum(o.totalAmount)+'</td>'+
+        '<td title="'+(o.shipTime?('发货时间 '+o.shipTime):'')+'">'+orderStatusHtml(o)+'</td>'+
+        '<td style="color:#94a3b8;font-size:11px">'+fmtTime(o.createTime)+'</td>'+
+        '<td>'+acts+'</td>'+
+      '</tr>';
+    }).join('');
+}
+function renderAdminStats(){
+  var el=document.getElementById('adminOrderStatRow');
+  if(!el) return;
+  var list=S.orders||[];
+  var pendingPay=list.filter(function(o){return o.status==='pending_pay'}).length;
+  var pendingShip=list.filter(function(o){return o.status==='paid'}).length;
+  var pendingRefund=list.filter(function(o){return o.refundStatus==='pending'}).length;
+  var now=new Date();
+  var today=now.getFullYear()+'-'+('0'+(now.getMonth()+1)).slice(-2)+'-'+('0'+now.getDate()).slice(-2);
+  var todayCount=list.filter(function(o){return (o.createTime||'').slice(0,10)===today}).length;
+  el.innerHTML=
+    statCard('真实订单', list.length, '#2563eb')+
+    statCard('今日订单', todayCount, '#7c3aed')+
+    statCard('待付款', pendingPay, '#d97706')+
+    statCard('待发货', pendingShip, '#0ea5e9')+
+    statCard('退款待审核', pendingRefund, '#dc2626')+
+    statCard('累计 GMV', '¥'+fmtNum((S.orderStats||{}).totalSales||0), '#059669');
+  el.style.gridTemplateColumns='repeat(auto-fit,minmax(120px,1fr))';
+}
+function renderRefundReview(){
+  var card=document.getElementById('refundReviewCard');
+  var listEl=document.getElementById('refundReviewList');
+  var cntEl=document.getElementById('refundPendingCount');
+  if(!card||!listEl) return;
+  var pending=(S.orders||[]).filter(function(o){return o.refundStatus==='pending'});
+  if(cntEl) cntEl.textContent='('+pending.length+')';
+  if(!pending.length){ card.style.display='none'; listEl.innerHTML=''; return; }
+  card.style.display='';
+  listEl.innerHTML=pending.map(function(o){
+    return '<div class="lc-dm-item" style="border-left:3px solid #ef4444;padding-left:10px;margin-bottom:8px">'+
+      '<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline;flex-wrap:wrap">'+
+        '<span style="font-size:12px;color:#1e293b">'+esc(o.productName||'商品')+' ×'+o.quantity+
+          ' <span style="color:#94a3b8">· '+esc(o.userName||'-')+' · '+esc(o.orderNo||o.orderId)+'</span></span>'+
+        '<span style="font-size:12px;font-weight:600;color:#dc2626">¥'+fmtNum(o.totalAmount)+'</span></div>'+
+      '<div style="font-size:12px;color:#475569;margin-top:4px">退款原因：'+esc(o.refundReason||'（未填写）')+'</div>'+
+      '<div style="font-size:10px;color:#94a3b8;margin-top:3px">申请时间 '+esc(o.refundApplyTime||'')+'</div>'+
+      '<div style="margin-top:6px;display:flex;gap:6px">'+
+        '<button class="lc-mini-btn" style="border-color:#dc2626;color:#dc2626;background:#fef2f2" onclick="reviewRefund(\''+esc(o.orderId)+'\',true)">✅ 同意退款</button>'+
+        '<button class="lc-mini-btn" style="border-color:#94a3b8;color:#475569" onclick="reviewRefund(\''+esc(o.orderId)+'\',false)">✖ 拒绝退款</button>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+  updateRefundBadge(pending.length);
+}
+function updateRefundBadge(n){
+  var dot=document.getElementById('sbRefundDot');
+  if(!dot) return;
+  if(n>0){ dot.style.display=''; dot.textContent=n>99?'99+':String(n); }
+  else dot.style.display='none';
+}
+function reviewRefund(orderId, approve){
+  if(approve){
+    if(!confirm('确认同意退款？款项将退回观众钱包，库存与销量同时回补。')) return;
+    wsSend('review_refund',{orderId:orderId,approve:true});
+  } else {
+    var reason=prompt('拒绝理由（会展示给观众，可留空）','');
+    if(reason===null) return;
+    wsSend('review_refund',{orderId:orderId,approve:false,reason:reason||''});
+  }
+}
+function renderMockOrders(){
+  var el=document.getElementById('mockOrderTable');
+  var label=document.getElementById('mockOrderCountLabel');
+  if(!el) return;
+  var list=S.mockOrders||[];
+  if(label) label.textContent='共 '+list.length+' 笔 · 不计入成交/销量统计';
+  if(!list.length){
+    el.innerHTML='<tr><td class="lc-empty-row">还没有模拟测试订单，点击上方「生成模拟测试订单」</td></tr>';
+    return;
+  }
+  el.innerHTML='<tr><th>测试单号</th><th>商品</th><th>模拟买家</th><th>数量</th><th>金额</th><th>状态</th><th>时间</th></tr>'+
+    list.slice(0,200).map(function(o){
+      return '<tr>'+
+        '<td style="color:#b45309;font-size:11px">'+esc(o.orderNo||o.orderId)+'</td>'+
+        '<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis">'+esc(o.productName)+'</td>'+
+        '<td>'+esc(o.userName||'-')+'</td>'+
+        '<td>×'+o.quantity+'</td>'+
+        '<td style="color:#dc2626;font-weight:600">¥'+fmtNum(o.totalAmount)+'</td>'+
+        '<td>'+orderStatusHtml(o)+'</td>'+
+        '<td style="color:#94a3b8;font-size:11px">'+fmtTime(o.createTime)+'</td>'+
+      '</tr>';
+    }).join('');
+}
+function generateAiTestOrders(){
+  var inp=document.getElementById('mockOrderCount');
+  var n=parseInt((inp&&inp.value)||'3',10);
+  if(isNaN(n)||n<1)n=1; if(n>20)n=20;
+  if(inp) inp.value=n;
+  var btn=document.getElementById('btnGenMockOrders');
+  if(btn){ btn.disabled=true; btn.textContent='生成中…'; }
+  var hint=document.getElementById('mockOrderHint');
+  if(hint) hint.textContent='正在生成 '+n+' 笔模拟测试订单…';
+  wsSend('generate_ai_test_orders',{count:n});
 }
 // ===== 控制台：本场订单（当前这场直播 + 真实注册观众）=====
 function loadSessionOrders(){
@@ -2215,6 +2470,12 @@ function orderActBtns(o){
     var rcl=st==='refunded'?'border-color:#dc2626;color:#dc2626':(st==='canceled'?'border-color:#ef4444;color:#ef4444':stl);
     return '<button class="'+base+'" style="'+rcl+';margin-right:4px" onclick="orderAct(\''+esc(o.orderId)+'\',\''+st+'\',this)">'+label+'</button>';
   }
+  // 观众已提交退款申请：只等主播审核，不再提供发货/直接退款入口
+  if(o.refundStatus==='pending'){
+    btns.push('<span style="color:#dc2626;font-size:11px;margin-right:6px">⏳ 退款审核中</span>');
+    if(real) btns.push('<button class="lc-mini-btn" style="border-color:#10b981;color:#10b981;background:#ecfdf5" onclick="orderMsg(\''+esc(o.userId)+'\')">💬 私信</button>');
+    return btns.join('');
+  }
   if(s==='pending_pay'){ btns.push(mk('取消','canceled')); }
   else if(s==='paid'){
     // 发货闸（决策：只有真实用户订单可发货）。服务端同样有闸门 ——
@@ -2224,6 +2485,7 @@ function orderActBtns(o){
     btns.push(mk('退款','refunded'));
   }
   else if(s==='shipped'){ btns.push(mk('退款','refunded')); }
+  else if(s==='completed'){ btns.push(mk('退款','refunded')); }
   // 「私信」不限状态：买过东西的观众，不管单子走到哪一步都可能要联系
   // （用户要的是「下播后与购买用品的用户私信」，不是「只有已付款才能私信」）。
   // 同样只给真实订单 —— 伪造 id 的模拟单没有可对话的账号。点击后跳收件箱
@@ -3361,12 +3623,22 @@ on('get_scripts_history_result',function(d){
   renderScriptHistory();
 });
 on('get_orders_result',function(d){
+  var scope=d.scope||'real';
+  if(scope==='mock'){
+    S.mockOrders=d.orders||[];
+    S.mockOrdersLoaded=true;
+    if(S.curPage==='orders')renderMockOrders();
+    return;
+  }
   if(d.orders)S.orders=d.orders;
+  updateRefundBadge((S.orders||[]).filter(function(o){return o.refundStatus==='pending'}).length);
   if(S.curPage==='analysis')renderOrders();
+  if(S.curPage==='orders'){ renderAdminOrders(); renderAdminStats(); renderRefundReview(); }
 });
 on('get_order_stats_result',function(d){
   if(d.stats)S.orderStats=d.stats;
   if(S.curPage==='analysis'){renderOrderStats();renderOrderByProduct();}
+  if(S.curPage==='orders')renderAdminStats();
 });
 on('get_session_orders_result',function(d){
   if(d.orders)S.sessionOrders=d.orders;
@@ -3376,19 +3648,38 @@ on('get_session_orders_result',function(d){
 on('order_new',function(d){
   // 新订单到达：刷新分析页与商品销量；在控制台就地刷「本场订单」，
   // 主播不用切页就能看到刚成交的那一单。
-  if(S.curPage==='analysis'){wsSend('get_orders',{limit:40});wsSend('get_order_stats');}
+  if(S.curPage==='analysis'){wsSend('get_orders',{limit:40,scope:'real'});wsSend('get_order_stats');}
   if(S.curPage==='console')loadSessionOrders();
+  if(S.curPage==='orders')loadAdminOrders();
   loadLiveRoomStats();
   wsSend('get_products');
 });
 on('order_updated',function(d){
-  if(S.curPage==='analysis'){wsSend('get_orders',{limit:40});wsSend('get_order_stats');}
+  if(S.curPage==='analysis'){wsSend('get_orders',{limit:40,scope:'real'});wsSend('get_order_stats');}
   if(S.curPage==='console')loadSessionOrders();
+  if(S.curPage==='orders')loadAdminOrders();
+  else if(d && d.refundStatus==='pending') wsSend('get_orders',{scope:'real',limit:200});
   loadLiveRoomStats();
 });
 on('update_order_status_result',function(d){
   if(d.success) toast('订单状态已更新','success');
   else toast(d.message||'操作未生效（订单状态不满足条件）','warn');
+});
+on('review_refund_result',function(d){
+  toast(d.message||(d.success?'退款已审核':'操作失败'), d.success?'success':'warn');
+  loadAdminOrders();
+});
+on('generate_ai_test_orders_result',function(d){
+  var btn=document.getElementById('btnGenMockOrders');
+  if(btn){ btn.disabled=false; btn.textContent='🤖 生成模拟测试订单'; }
+  var hint=document.getElementById('mockOrderHint');
+  if(hint) hint.textContent=(d&&d.message)||'';
+  toast((d&&d.message)||'生成完成', d&&d.success?'success':'warn');
+  if(d&&d.success){
+    // 生成完立即切到模拟测试订单视图并刷新（order_new 事件也会触发一次刷新）
+    if(S.ordersScope!=='mock') setOrdersScope('mock');
+    else wsSend('get_orders',{scope:'mock',limit:200});
+  }
 });
 
 // ============================================================

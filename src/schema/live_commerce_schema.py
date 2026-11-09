@@ -47,6 +47,20 @@ class ProductItem(BaseModel):
 
 
 # ============================================================
+# 收货地址模型
+# ============================================================
+class AddressItem(BaseModel):
+    """观众收货地址（一个观众可保存多条，下单时自主选择）"""
+    addressId: str = Field(description="地址唯一标识")
+    receiverName: str = Field(description="收货人姓名")
+    phone: str = Field(description="收货手机号")
+    region: str = Field(default="", description="省 / 市 / 区（可空）")
+    detail: str = Field(description="详细地址")
+    isDefault: bool = Field(default=False, description="是否默认地址")
+    createTime: str = Field(default="", description="创建时间")
+
+
+# ============================================================
 # 商单/订单模型
 # ============================================================
 class OrderItem(BaseModel):
@@ -68,6 +82,24 @@ class OrderItem(BaseModel):
     shipTime: str = Field(default="", description="发货时间")
     createTime: str = Field(description="下单时间")
     isVirtual: bool = Field(default=True, description="是否为模拟订单")
+    # ---- 订单来源隔离：真实观众订单 / AI 模拟测试订单 ----
+    source: Literal["real", "ai_test"] = Field(
+        default="real",
+        description="订单来源：real=真实观众订单；ai_test=AI 模拟测试订单（不参与统计，单独展示）",
+    )
+    # ---- 收货信息快照（下单时从观众地址簿复制，地址后续被改/删不影响历史订单）----
+    addressId: str = Field(default="", description="下单时选择的收货地址ID")
+    receiverName: str = Field(default="", description="收货人姓名快照")
+    receiverPhone: str = Field(default="", description="收货手机号快照")
+    receiverAddress: str = Field(default="", description="收货地址快照（地区+详细地址）")
+    # ---- 退款申请：与 order.status 正交，避免影响既有成交统计口径 ----
+    refundStatus: Literal["none", "pending", "approved", "rejected"] = Field(
+        default="none", description="退款申请状态：none/pending/approved/rejected"
+    )
+    refundReason: str = Field(default="", description="观众提交的退款原因")
+    refundApplyTime: str = Field(default="", description="退款申请时间")
+    refundReviewTime: str = Field(default="", description="主播审核时间")
+    refundRejectReason: str = Field(default="", description="拒绝退款时的说明")
 
 
 # 订单状态标签映射（供前端 badge / 后端统计复用）
@@ -91,6 +123,7 @@ class ViewerAccount(BaseModel):
     avatar: str = Field(default="", description="观众头像（图片URL / emoji SVG dataURI）")
     balance: float = Field(default=2000.0, ge=0, description="账户余额（元）")
     registerTime: str = Field(default="", description="注册时间")
+    addresses: list[AddressItem] = Field(default_factory=list, description="收货地址列表（可保存多条）")
 
 
 # ============================================================
