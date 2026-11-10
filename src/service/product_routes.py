@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from data.live_commerce.data_manager import get_data_manager
-from schema.live_commerce_schema import ProductItem
+from schema.live_commerce_schema import ProductItem, SkuItem
 from schema.product_schema import (
     ProductCreateRequest,
     ProductOnSaleRequest,
@@ -162,6 +162,8 @@ async def create_product(
         isOnSale=payload.isOnSale,
         addedTime=datetime.now().isoformat(),
         isInLibrary=payload.isInLibrary,
+        skus=[SkuItem(**s.model_dump()) for s in payload.skus],
+        costPrice=payload.costPrice,
     )
     dm.add_product(product)
     logger.info("主播 %s 新增商品 %s（上架=%s）", host_user.get("username"), product_id, product.isOnSale)
@@ -179,9 +181,9 @@ async def update_product(
     if dm.get_product(product_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="商品不存在")
 
-    # update_product 直接 setattr，绕过 Pydantic 校验；显式传 null 会把
-    # 非空字段（name/price/stock…）改成 None。这里一律过滤 None，清空可选
-    # 文本字段请传空字符串。
+    # 显式传 null 会把非空字段（name/price/stock…）改成 None，导致
+    # update_product 重建 ProductItem 时校验失败。这里一律过滤 None，
+    # 清空可选文本字段请传空字符串。
     changes = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
     on_sale = changes.pop("isOnSale", None)
 

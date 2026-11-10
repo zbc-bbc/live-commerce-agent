@@ -47,9 +47,14 @@ _VIEWER_ALLOWED: frozenset = frozenset({
     "send_danmaku", "update_viewer_profile", "recharge", "place_order",
     "pay_order", "confirm_receipt", "cancel_order", "submit_review",
     "get_user_orders", "get_my_messages",
+    # 购物车 / 合并结算：全部走 _require_viewer，不采信客户端 userId
+    "get_cart", "add_cart", "update_cart_item", "remove_cart_item",
+    "clear_cart", "place_cart_order",
+    # 优惠券规则是公开营销信息，商品详情页需要实时展示到手价
+    "get_coupons",
     # 收货地址：观众自主保存多条，下单时选择
     "get_addresses", "save_address", "delete_address", "set_default_address",
-    # 售后退款：观众提交申请，主播后台人工审核
+    # 售后退款/退货：观众提交申请，主播后台人工审核
     "request_refund",
     # 观众 → 主播私信。方向与 send_viewer_msg（主播 → 观众）相反，
     # 是观众的**主动**发言，所以必须在白名单里；身份仍走 _require_viewer 二次校验。
@@ -1302,9 +1307,11 @@ class LiveCommerceWebSocketManager:
                 scope = msg_data.get("scope", "real")
                 if scope not in ("real", "mock", "all"):
                     scope = "real"
-                orders = dm.get_orders(status, limit, scope=scope)
+                product_id = str(msg_data.get("productId") or "")
+                orders = dm.get_orders(status, limit, scope=scope, product_id=product_id)
                 await self._send(websocket, "get_orders_result", {
                     "scope": scope,
+                    "productId": product_id,
                     "orders": [o.model_dump() for o in orders],
                 })
 
@@ -1360,6 +1367,27 @@ class LiveCommerceWebSocketManager:
                 # 运营台的成交面板只算真实观众订单，模拟单单独披露数量。
                 await self._send(websocket, "get_order_stats_result", {
                     "stats": dm.get_order_stats(real_only=True),
+                })
+
+            elif msg_type == "get_product_ops":
+                # 单品经营面板（host-only）：SKU、售后、加购转化、优惠分摊、
+                # 渠道分布、待付款时效与低库存预警一次带齐。
+                product_id = str(msg_data.get("productId") or "")
+                await self._send(websocket, "get_product_ops_result",
+                                 dm.get_product_ops_stats(product_id))
+
+            elif msg_type == "get_stock_logs":
+                product_id = str(msg_data.get("productId") or "")
+                limit = int(msg_data.get("limit", 100) or 100)
+                await self._send(websocket, "get_stock_logs_result", {
+                    "productId": product_id,
+                    "logs": [x.model_dump() for x in dm.get_stock_logs(product_id, limit)],
+                })
+
+            elif msg_type == "get_low_stock":
+                await self._send(websocket, "get_low_stock_result", {
+                    "threshold": dm.settings.system.lowStockThreshold,
+                    "items": dm.get_low_stock_overview(),
                 })
 
             elif msg_type == "get_live_room_stats":
@@ -1570,6 +1598,105 @@ class LiveCommerceWebSocketManager:
                 )
                 await self._send(websocket, "click_live_product_result", result)
 
+            elif msg_type == "get_coupons":
+                # 优惠券规则是公开营销信息：观众端选规格后要实时算「到手价」。
+                await self._send(websocket, "get_coupons_result", {
+                    "coupons": dm.get_coupon_rules(),
+                })
+
+            # ========== 观众端 · 购物车 ==========
+            elif msg_type == "get_cart":
+                user_id = await self._require_viewer(websocket, "get_cart")
+                if not user_id:
+                    return
+                await self._send(websocket, "get_cart_result", dm.get_cart(user_id))
+
+            elif msg_type == "add_cart":
+                user_id = await self._require_viewer(websocket, "add_cart")
+                if not user_id:
+                    return
+                try:
+                    quantity = max(1, int(msg_data.get("quantity", 1) or 1))
+                except (TypeError, ValueError):
+                    quantity = 1
+                cart, message = dm.add_cart_item(
+                    user_id,
+                    str(msg_data.get("productId") or ""),
+                    str(msg_data.get("skuId") or ""),
+                    quantity,
+                    str(msg_data.get("channel") or "live_cart"),
+                )
+                await self._send(websocket, "add_cart_result", {
+                    "success": not message or message.startswith("已加入"),
+                    "message": message, "cart": cart,
+                })
+
+            elif msg_type == "update_cart_item":
+                user_id = await self._require_viewer(websocket, "update_cart_item")
+                if not user_id:
+                    return
+                cart, message = dm.update_cart_item(
+                    user_id,
+                    str(msg_data.get("productId") or ""),
+                    str(msg_data.get("skuId") or ""),
+                    msg_data.get("quantity", 1),
+                )
+                await self._send(websocket, "update_cart_item_result", {
+                    "success": not message, "message": message, "cart": cart,
+                })
+
+            elif msg_type == "remove_cart_item":
+                user_id = await self._require_viewer(websocket, "remove_cart_item")
+                if not user_id:
+                    return
+                cart, _ = dm.remove_cart_item(
+                    user_id,
+                    str(msg_data.get("productId") or ""),
+                    str(msg_data.get("skuId") or ""),
+                )
+                await self._send(websocket, "remove_cart_item_result", {
+                    "success": True, "message": "已移除", "cart": cart,
+                })
+
+            elif msg_type == "clear_cart":
+                user_id = await self._require_viewer(websocket, "clear_cart")
+                if not user_id:
+                    return
+                keys = msg_data.get("keys") or []
+                if not isinstance(keys, list):
+                    keys = []
+                await self._send(websocket, "clear_cart_result", {
+                    "success": True, "cart": dm.clear_cart_items(user_id, keys),
+                })
+
+            elif msg_type == "place_cart_order":
+                # 购物车合并结算：items = [{productId, skuId, quantity, channel}]
+                user_id = await self._require_viewer(websocket, "place_cart_order")
+                if not user_id:
+                    return
+                address_id = (msg_data.get("addressId") or "").strip()
+                if not address_id:
+                    await self._send(websocket, "place_cart_order_result", {
+                        "success": False, "message": "请先选择收货地址", "order": None,
+                    })
+                    return
+                items = msg_data.get("items") or []
+                if not isinstance(items, list):
+                    items = []
+                acc = dm.get_viewer(user_id)
+                user_name = (acc.userName if acc else "") or "观众"
+                order, reason = dm.create_viewer_cart_order(
+                    items, user_id, user_name, address_id=address_id,
+                )
+                if order is not None:
+                    keys = [f"{x.productId}|{x.skuId or ''}" for x in order.items]
+                    dm.clear_cart_items(user_id, keys)
+                await self._send(websocket, "place_cart_order_result", {
+                    "success": order is not None,
+                    "message": "下单成功，请尽快付款" if order else (reason or "下单失败"),
+                    "order": order.model_dump() if order else None,
+                })
+
             elif msg_type == "place_order":
                 # 观众下单：生成「待付款」订单（不扣钱包/库存），随后由 pay_order 付款。
                 # 必须带 addressId —— 订单要绑定收货地址与手机号快照。
@@ -1591,8 +1718,11 @@ class LiveCommerceWebSocketManager:
                     quantity = 1
                 acc = dm.get_viewer(user_id)
                 user_name = (acc.userName if acc else "") or "观众"
+                sku_id = str(msg_data.get("skuId") or "")
+                channel = str(msg_data.get("channel") or "live_cart")
                 order, reason = dm.create_viewer_order(
-                    product_id, user_id, user_name, quantity, address_id=address_id
+                    product_id, user_id, user_name, quantity, address_id=address_id,
+                    sku_id=sku_id, channel=channel,
                 )
                 await self._send(websocket, "place_order_result", {
                     "success": order is not None,
@@ -1696,12 +1826,16 @@ class LiveCommerceWebSocketManager:
                 user_id = await self._require_viewer(websocket, "request_refund")
                 if not user_id:
                     return
+                refund_type = str(msg_data.get("refundType") or "refund")
                 order, reason = dm.request_refund(
-                    msg_data.get("orderId", ""), user_id, msg_data.get("reason", "")
+                    msg_data.get("orderId", ""), user_id, msg_data.get("reason", ""),
+                    refund_type=refund_type,
                 )
                 await self._send(websocket, "request_refund_result", {
                     "success": order is not None,
-                    "message": "退款申请已提交，等待主播审核" if order else (reason or "提交失败"),
+                    "message": ("退货退款申请已提交，等待主播审核" if refund_type == "return"
+                                else "退款申请已提交，等待主播审核")
+                    if order else (reason or "提交失败"),
                     "order": order.model_dump() if order else None,
                 })
 

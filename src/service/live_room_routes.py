@@ -140,7 +140,10 @@ async def create_live_order(
     payload: CreateLiveOrderRequest,
     identity: Annotated[dict, Depends(get_identity)],
 ) -> dict:
-    """观众在直播间下单：生成「待付款」订单记录（不扣钱包/库存，不做支付）。"""
+    """观众在直播间下单：生成「待付款」订单并锁定库存（不扣钱包/不做支付）。
+
+    未传 skuId 时按商品默认规格下单；取消/退款会自动回补锁定的库存。
+    """
     user_id = _require_viewer_identity(identity)
     row = await viewer_auth.get_viewer_row(user_id)
     if not row or not row.get("isActive", True):

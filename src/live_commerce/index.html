@@ -379,6 +379,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
       <input type="file" id="prodImgFileInput" accept="image/*" style="display:none">
       <!-- 统计卡 -->
       <div class="lc-grid lc-grid-4" id="prodStatRow"></div>
+      <!-- 低库存预警（阈值来自系统设置；按 SKU 判定） -->
+      <div id="prodLowStockBar" class="lc-card" style="display:none;margin-top:14px;border-left:3px solid #f59e0b;background:#fffbeb">
+        <div style="font-size:13px;font-weight:700;color:#92400e;margin-bottom:6px">⚠️ 库存低于预警阈值 <span id="prodLowStockCount"></span></div>
+        <div id="prodLowStockList" style="font-size:12px;color:#78350f;line-height:1.8"></div>
+      </div>
       <!-- 工具栏 -->
       <div class="lc-card" style="margin-top:16px">
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -432,9 +437,18 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
             <input class="lc-inp" id="pfStock" type="number" min="0" step="1" style="width:100%;margin-top:4px">
           </div>
           <div>
+            <label style="font-size:12px;color:#64748b">成本价 (¥)</label>
+            <input class="lc-inp" id="pfCost" type="number" min="0" step="0.01" style="width:100%;margin-top:4px" placeholder="用于计算单品毛利">
+          </div>
+          <div>
             <label style="font-size:12px;color:#64748b">商品外链图片URL（可多个，逗号/换行分隔；也可在商品卡点「⬆ 上传图片」本地选图）</label>
             <input class="lc-inp" id="pfImages" placeholder="https://...  或点商品卡「⬆ 上传图片」从本地上传" style="width:100%;margin-top:4px">
           </div>
+        </div>
+        <div style="margin-top:12px;padding:10px;background:#f8fafc;border-radius:8px;border:1px dashed #cbd5e1">
+          <label style="font-size:12px;color:#334155;font-weight:600">SKU 规格（每行一条：规格名 | 直播价 | 原价 | 库存 | 成本价）</label>
+          <textarea class="lc-inp" id="pfSkus" rows="3" style="width:100%;margin-top:6px;resize:vertical;font-family:ui-monospace,Consolas,monospace" placeholder="500g/箱 | 59.9 | 89 | 120 | 30&#10;1kg/箱 | 99 | 149 | 80 | 55"></textarea>
+          <div style="font-size:11px;color:#94a3b8;margin-top:4px">不同规格独立价格、独立库存、独立成本；填写 SKU 后商品总价/总库存以 SKU 为准。留空则自动创建一个「默认规格」。</div>
         </div>
         <div style="margin-top:12px">
           <label style="font-size:12px;color:#64748b">核心卖点（每行一条，卡片上高亮）</label>
@@ -941,6 +955,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
             <div class="lc-switch" id="switchBackup" onclick="toggleSwitch(this)"></div>
           </div>
           <div class="lc-setting-row">
+            <div><div class="lbl">库存预警阈值</div><div class="desc">任一 SKU 库存 ≤ 该值时触发低库存提示（0=关闭）</div></div>
+            <input class="lc-inp" id="setLowStockThreshold" type="number" min="0" max="99999" step="1" style="width:110px" placeholder="20">
+          </div>
+          <div class="lc-setting-row">
             <div><div class="lbl">模拟热度基数</div><div class="desc">「X 人在看」= 本基数 + 真实在线观众数</div></div>
             <input class="lc-inp" id="setOnlineBase" type="number" min="0" max="100000" step="1" style="width:110px" placeholder="120">
           </div>
@@ -1006,6 +1024,14 @@ var S = {
   // 独立订单模块：scope=real 只看真实订单（默认），mock 只看 AI 模拟测试订单
   ordersScope: 'real',
   adminOrderFilter: 'all',
+  // 商品 → 订单快捷查询：非空时订单列表只显示包含该商品的订单
+  adminProductFilter: '',
+  // 单品经营面板（SKU/售后/加购/渠道/付款时效）与库存流水
+  productOps: null,
+  productOpsProductId: '',
+  stockLogs: [],
+  lowStockItems: [],
+  lowStockThreshold: 0,
   mockOrders: [],
   mockOrdersLoaded: false,
   // 控制台「本场订单」：口径是当前这场直播 + 真实注册观众，与分析页的
@@ -1423,6 +1449,7 @@ function saveSettings() {
       smartAlertEnabled:document.getElementById('switchAlerts').classList.contains('on'),
       liveDurationReminderEnabled:document.getElementById('switchTimer').classList.contains('on'),
       dataAutoBackup:document.getElementById('switchBackup').classList.contains('on'),
+      lowStockThreshold: Math.max(0, parseInt(document.getElementById('setLowStockThreshold').value, 10)) || 0,
       // 留空时回退 120，避免把空串写进后端（后端 int() 兜底也会回 120）
       onlineCountBase: Math.max(0, parseInt(document.getElementById('setOnlineBase').value, 10)) || 120
     }
@@ -1832,6 +1859,11 @@ function prodStateFiltered(p) {
 }
 function renderProductsPage() {
   if (!S.products.length) { wsSend('get_products'); }
+  // 低库存预警：每 5 秒最多拉一次，避免搜索框每次输入都打一次 WS
+  if (!S._lowStockAt || Date.now()-S._lowStockAt>5000) {
+    S._lowStockAt=Date.now(); wsSend('get_low_stock');
+  }
+  renderLowStockBar();
   // 分类下拉（仅在首次/变化时重建）
   var cats = [];
   S.products.forEach(function(p){ if (cats.indexOf(p.category)<0 && p.category) cats.push(p.category); });
@@ -1901,12 +1933,16 @@ function deleteProduct(pid) {
 // 添加/编辑 表单
 function openProductForm(pid) {
   S.editingProductId = pid||null;
-  var f = {name:'',category:'美妆护肤',price:'',originalPrice:'',stock:100,images:'',points:'',specs:'',description:''};
+  var f = {name:'',category:'美妆护肤',price:'',originalPrice:'',stock:100,cost:0,skus:'',images:'',points:'',specs:'',description:''};
   if (pid) {
     var p = S.products.filter(function(x){return x.productId===pid;})[0];
     if (p) f = {name:p.name, category:p.category||'其他', price:p.price, originalPrice:p.originalPrice,
       // 自动生成的 SVG 主图不放进文本框（很长）；外链图才展示，留空则保留原图
-      stock:p.stock, images:(p.images||[]).filter(function(u){return u.indexOf('data:image/svg')!==0;}).join('\n'),
+      stock:p.stock, cost:p.costPrice||0,
+      skus:(p.skus||[]).map(function(s){
+        return [s.spec||'默认规格', s.price, s.originalPrice||s.price, s.stock, s.costPrice||0].join(' | ');
+      }).join('\n'),
+      images:(p.images||[]).filter(function(u){return u.indexOf('data:image/svg')!==0;}).join('\n'),
       points:(p.sellingPoints||[]).join('\n'),
       specs:(p.specs||[]).join('\n'), description:p.description||''};
   }
@@ -1916,6 +1952,8 @@ function openProductForm(pid) {
   document.getElementById('pfPrice').value = f.price;
   document.getElementById('pfOrigPrice').value = f.originalPrice;
   document.getElementById('pfStock').value = f.stock;
+  document.getElementById('pfCost').value = f.cost;
+  document.getElementById('pfSkus').value = f.skus;
   document.getElementById('pfImages').value = f.images;
   document.getElementById('pfPoints').value = f.points;
   document.getElementById('pfSpecs').value = f.specs;
@@ -1927,7 +1965,31 @@ function submitProductForm() {
   var name=(document.getElementById('pfName').value||'').trim();
   var price=parseFloat(document.getElementById('pfPrice').value);
   if(!name){toast('请填写商品名称','err');return;}
-  if(isNaN(price)||price<=0){toast('请填写有效售价','err');return;}
+  var baseCost=parseFloat(document.getElementById('pfCost').value)||0;
+  var existing=(S.editingProductId?S.products.filter(function(x){return x.productId===S.editingProductId;})[0]:null)||{};
+  var existingSkus=existing.skus||[];
+  var skus=(document.getElementById('pfSkus').value||'').split('\n').map(function(line){
+    var parts=String(line).split('|').map(function(s){return s.trim();});
+    if(!parts[0]) return null;
+    var p=parseFloat(parts[1]); var o=parseFloat(parts[2]); var st=parseInt(parts[3],10); var c=parseFloat(parts[4]);
+    // 保留原 SKU ID：规格名没改时沿用，避免历史订单的 skuId 与商品对不上
+    var hit=existingSkus.filter(function(s){return s.spec===parts[0];})[0];
+    return {
+      skuId: hit?hit.skuId:'',
+      spec: parts[0],
+      price: isNaN(p)||p<0 ? (price||0) : p,
+      originalPrice: isNaN(o)||o<0 ? (isNaN(p)?(price||0):p) : o,
+      stock: isNaN(st)||st<0 ? 0 : st,
+      costPrice: isNaN(c)||c<0 ? baseCost : c,
+      isEnabled: true
+    };
+  }).filter(Boolean);
+  if (skus.length) {
+    // SKU 是价格/库存的真源：商品卡展示最低价，库存取各 SKU 之和
+    price = Math.min.apply(null, skus.map(function(s){return s.price;}));
+    var totalStock = skus.reduce(function(a,s){return a+s.stock;},0);
+  }
+  if(isNaN(price)||price<=0){toast('请填写有效售价，或为 SKU 填写有效直播价','err');return;}
   var orig=parseFloat(document.getElementById('pfOrigPrice').value)||price;
   if (orig < price) orig = price;
   var images=(document.getElementById('pfImages').value||'').split(/[\n,]/).map(function(s){return s.trim();}).filter(Boolean);
@@ -1945,13 +2007,16 @@ function submitProductForm() {
     category: document.getElementById('pfCategory').value,
     price: price,
     originalPrice: orig,
-    stock: parseInt(document.getElementById('pfStock').value)||0,
+    // 有 SKU 时库存以 SKU 合计为准（后端也会再归一化一次），避免输入框里的旧值和规格库存打架
+    stock: skus.length ? totalStock : (parseInt(document.getElementById('pfStock').value)||0),
+    costPrice: baseCost,
+    skus: skus,
     images: images,
     imageUrl: images[0]||'',
     sellingPoints: points,
     specs: specs,
     description: (document.getElementById('pfDesc').value||'').trim(),
-    addedTime: new Date().toISOString(),
+    addedTime: (existing.addedTime||new Date().toISOString()),
     isInLibrary: true
   };
   wsSend('save_product',{product:product});
@@ -1974,6 +2039,17 @@ function openProductDetail(pid) {
   var pointsHtml = (p.sellingPoints&&p.sellingPoints.length)
     ? p.sellingPoints.map(function(pt){return '<span class="lc-tag lc-tag-green">'+esc(pt)+'</span>';}).join(' ')
     : (p.tags||[]).map(function(t){return '<span class="lc-tag lc-tag-blue">'+esc(t)+'</span>';}).join(' ');
+  var skuRowsHtml = (p.skus||[]).map(function(s){
+    var low=(S.lowStockThreshold>0 && s.stock<=S.lowStockThreshold);
+    return '<tr>'+
+      '<td style="font-weight:600">'+esc(s.spec||'默认规格')+'</td>'+
+      '<td style="color:#dc2626;font-weight:600">¥'+fmtPrice(s.price)+'</td>'+
+      '<td style="color:#94a3b8;text-decoration:line-through">¥'+fmtPrice(s.originalPrice||s.price)+'</td>'+
+      '<td style="'+(low?'color:#dc2626;font-weight:700':'')+'">'+fmtNum(s.stock)+' 件'+(low?' ⚠️':'')+'</td>'+
+      '<td style="color:#64748b">¥'+fmtPrice(s.costPrice||0)+'</td>'+
+      '<td>'+(s.isEnabled!==false?'<span class="lc-tag lc-tag-green">启用</span>':'<span class="lc-tag">停用</span>')+'</td>'+
+    '</tr>';
+  }).join('');
   var imgHtml;
   if (p.images && p.images.length) imgHtml = '<img src="'+esc(p.images[0])+'" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'" style="width:180px;height:180px;object-fit:cover;border-radius:12px">'+
     '<div style="display:none;width:180px;height:180px;border-radius:12px;align-items:center;justify-content:center;font-size:88px;background:'+cs.grad+'">'+cs.emoji+'</div>';
@@ -2004,6 +2080,10 @@ function openProductDetail(pid) {
     '</div>'+
     (p.description?'<div style="margin-top:12px;font-size:13px;color:#475569;line-height:1.7;background:#f8fafc;border-radius:8px;padding:10px">'+esc(p.description)+'</div>':'')+
     (specRows?'<table class="lc-spec-tbl"><tr><td colspan="2" style="background:#f8fafc;font-weight:600;color:#1e293b">📋 规格参数</td></tr>'+specRows+'</table>':'')+
+    (skuRowsHtml?'<table class="lc-spec-tbl" style="margin-top:10px"><tr><td colspan="6" style="background:#f8fafc;font-weight:600;color:#1e293b">🏷 SKU 规格、价格与库存</td></tr>'+
+      '<tr><th>规格</th><th>直播价</th><th>原价</th><th>库存</th><th>成本</th><th>状态</th></tr>'+skuRowsHtml+'</table>':'')+
+    '<div id="prodOpsPanel" style="margin-top:16px;border-top:1px solid #f1f5f9;padding-top:12px">'+
+      '<div style="color:#94a3b8;font-size:12px;padding:12px 0">经营数据加载中…</div></div>'+
     '<div style="display:flex;gap:8px;margin-top:14px" onclick="event.stopPropagation()">'+
       '<button class="lc-btn lc-btn-primary lc-btn-sm" onclick="setCurProdFromMgr(\''+p.productId+'\');closeProductDetail()">🎯 设为讲解</button>'+
       '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="openProductForm(\''+p.productId+'\');closeProductDetail()">✏️ 编辑</button>'+
@@ -2018,6 +2098,11 @@ function openProductDetail(pid) {
   S.detailReviews = [];
   document.getElementById('prodDetailReviews').innerHTML='<div style="color:#94a3b8;padding:12px;text-align:center">加载中…</div>';
   wsSend('get_product_reviews',{productId:pid});
+  // 单品经营面板：SKU 统计、售后、加购转化、优惠/毛利、渠道、付款时效、库存流水
+  S.productOps=null; S.productOpsProductId=pid; S.stockLogs=[];
+  wsSend('get_product_ops',{productId:pid});
+  wsSend('get_stock_logs',{productId:pid,limit:80});
+  wsSend('get_low_stock');
   document.getElementById('productDetailModal').classList.add('open');
 }
 function closeProductDetail() { document.getElementById('productDetailModal').classList.remove('open'); }
@@ -2034,6 +2119,141 @@ function renderDetailReviews() {
       '<div style="margin-top:4px;color:#475569">'+esc(r.content)+'</div>'+
     '</div>';
   }).join('');
+}
+// ============================================================
+// 单品经营面板（SKU / 售后 / 加购 / 优惠毛利 / 渠道 / 付款时效 / 库存流水）
+// ============================================================
+var ORDER_CHANNEL_NAME={live_cart:'直播间小黄车',replay:'直播回放',product_card:'商品卡',cart:'购物车',legacy:'历史订单'};
+function channelName(k){ return ORDER_CHANNEL_NAME[k]||k||'未标记'; }
+// 订单行兜底：旧订单没有 items，用顶层单商品字段合成一行
+function orderLines(o){
+  if(o && o.items && o.items.length) return o.items;
+  if(!o) return [];
+  return [{productId:o.productId,productName:o.productName,productImage:o.productImage,
+    skuId:o.skuId||'',skuSpec:o.skuSpec||'',quantity:o.quantity||1,unitPrice:o.unitPrice||0,
+    originalUnitPrice:o.unitPrice||0,amount:o.totalAmount||0,originalAmount:o.totalAmount||0,
+    discountAmount:0,totalAmount:o.totalAmount||0,channel:o.channel||'legacy'}];
+}
+function quickOrderLookup(pid){
+  if(!pid) return;
+  S.adminProductFilter=pid;
+  S.adminOrderFilter='all';
+  S.ordersScope='real';
+  closeProductDetail();
+  switchPage('orders');
+  loadAdminOrders();
+}
+function clearProductOrderFilter(){
+  S.adminProductFilter='';
+  loadAdminOrders();
+  renderAdminFilters();
+  renderAdminOrders();
+}
+function renderLowStockBar(){
+  var bar=document.getElementById('prodLowStockBar');
+  var list=document.getElementById('prodLowStockList');
+  var cnt=document.getElementById('prodLowStockCount');
+  if(!bar||!list) return;
+  var items=S.lowStockItems||[];
+  if(!items.length){ bar.style.display='none'; return; }
+  bar.style.display='';
+  if(cnt) cnt.textContent='（'+items.length+' 个 SKU，阈值 ≤ '+(S.lowStockThreshold||0)+' 件）';
+  list.innerHTML=items.slice(0,12).map(function(x){
+    return '<span style="display:inline-block;margin-right:14px">'+esc(x.productName)+' · '+esc(x.skuSpec)+
+      ' <b style="color:#dc2626">剩 '+x.stock+' 件</b>'+
+      (x.productId?'<button class="lc-mini-btn" style="margin-left:4px;padding:1px 6px" onclick="event.stopPropagation();openProductForm(\''+esc(x.productId)+'\')">补货</button>':'')+
+      '</span>';
+  }).join('');
+}
+function renderProductOps(){
+  var el=document.getElementById('prodOpsPanel');
+  if(!el) return;
+  var ops=S.productOps;
+  if(!ops || S.productOpsProductId!==S.detailProductId){
+    el.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:12px 0">经营数据加载中…</div>';
+    return;
+  }
+  if(!ops.success){
+    el.innerHTML='<div style="color:#dc2626;font-size:12px;padding:12px 0">'+esc(ops.message||'经营数据加载失败')+'</div>';
+    return;
+  }
+  var sm=ops.summary||{};
+  var rf=ops.refund||{};
+  var ct=ops.cart||{};
+  var pm=ops.payment||{};
+  var skuRows=(ops.skuStats||[]).map(function(s){
+    return '<tr>'+
+      '<td style="font-weight:600">'+esc(s.skuSpec||'默认规格')+'</td>'+
+      '<td>¥'+fmtPrice(s.price)+'</td>'+
+      '<td style="font-weight:600;color:#dc2626">¥'+fmtNum(s.gmv)+'</td>'+
+      '<td>'+fmtNum(s.qty)+'</td>'+
+      '<td style="color:#d97706">¥'+fmtNum(s.discountAmount)+'</td>'+
+      '<td style="color:#059669">¥'+fmtNum(s.grossProfit)+'</td>'+
+      '<td>'+fmtNum(s.stock)+(s.stock<=(S.lowStockThreshold||0)&&(S.lowStockThreshold||0)>0?' ⚠️':'')+'</td>'+
+      '<td>'+fmtNum(s.pendingCount)+'</td></tr>';
+  }).join('');
+  var channelBars=(ops.channels||[]).filter(function(c){return c.orderCount>0||c.gmv>0;}).map(function(c){
+    var w=Math.max(2,Math.round((c.ratio||0)));
+    return '<div style="margin-bottom:6px"><div style="display:flex;justify-content:space-between;font-size:11px;color:#475569">'+
+      '<span>'+esc(c.label||channelName(c.channel))+'</span><span>'+c.orderCount+'单 · ¥'+fmtNum(c.gmv)+' · '+(c.ratio||0)+'%</span></div>'+
+      '<div style="height:7px;background:#eef2f7;border-radius:4px;overflow:hidden"><div style="height:100%;width:'+w+'%;background:#2563eb;border-radius:4px"></div></div></div>';
+  }).join('');
+  var reasonHtml=(rf.reasons||[]).length?rf.reasons.map(function(r){
+    return '<span class="lc-tag" style="background:#fef2f2;color:#b91c1c;margin:2px 4px 2px 0">'+esc(r.reason)+' ×'+r.count+'（¥'+fmtNum(r.amount)+'）</span>';
+  }).join(''):'<span style="color:#94a3b8;font-size:11px">暂无退款</span>';
+  var lowHtml=(ops.stock&&ops.stock.lowItems||[]).length?(ops.stock.lowItems.map(function(x){
+    return '<span class="lc-tag" style="background:#fffbeb;color:#92400e;margin:2px 4px 2px 0">'+esc(x.skuSpec)+' 剩'+x.stock+'</span>';
+  }).join('')):'<span style="color:#059669;font-size:11px">全部规格库存充足</span>';
+  var logs=S.stockLogs||[];
+  var logRows=logs.slice(0,30).map(function(x){
+    var sign=x.change>0?'+':'';
+    var color=x.change>0?'#059669':'#dc2626';
+    var reason={order_create:'下单锁库存',order_cancel:'取消回补',refund:'退款回补',manual_update:'手工调整'}[x.reason]||x.reason;
+    return '<tr><td style="color:#94a3b8;font-size:10px">'+esc(fmtTime(x.timestamp))+'</td>'+
+      '<td>'+esc(x.skuSpec||'')+'</td><td style="color:'+color+';font-weight:600">'+sign+x.change+'</td>'+
+      '<td>'+x.beforeStock+' → '+x.afterStock+'</td><td>'+esc(reason)+'</td>'+
+      '<td style="color:#94a3b8;font-size:10px">'+esc(x.orderNo||'—')+'</td></tr>';
+  }).join('');
+  el.innerHTML=
+    '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">'+
+      '<div style="font-size:14px;font-weight:700">📊 商品经营面板</div>'+
+      '<button class="lc-btn lc-btn-primary lc-btn-sm" onclick="quickOrderLookup(\''+esc(ops.productId)+'\')">🔎 查该商品全部订单</button></div>'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:8px;margin-bottom:12px">'+
+      statMini('SKU 数',(ops.skuStats||[]).length,'#2563eb')+
+      statMini('成交件数',fmtNum(sm.qty),'#7c3aed')+
+      statMini('实收 GMV','¥'+fmtNum(sm.gmv),'#dc2626')+
+      statMini('优惠分摊','¥'+fmtNum(sm.discountAmount),'#d97706')+
+      statMini('成本','¥'+fmtNum(sm.costAmount),'#64748b')+
+      statMini('毛利','¥'+fmtNum(sm.grossProfit)+'（'+(sm.grossMargin||0)+'%）','#059669')+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">'+
+      '<div style="background:#fef2f2;border-radius:8px;padding:10px">'+
+        '<div style="font-size:12px;font-weight:700;color:#b91c1c;margin-bottom:4px">🔄 单品售后</div>'+
+        '<div style="font-size:12px;color:#475569;line-height:1.8">退款单数 <b>'+rf.count+'</b> 笔 · 退款金额 <b>¥'+fmtNum(rf.amount)+'</b><br>退款率 <b style="color:#dc2626">'+(rf.rate||0)+'%</b></div>'+
+        '<div style="margin-top:5px">'+reasonHtml+'</div></div>'+
+      '<div style="background:#eff6ff;border-radius:8px;padding:10px">'+
+        '<div style="font-size:12px;font-weight:700;color:#1d4ed8;margin-bottom:4px">🛒 加购转化</div>'+
+        '<div style="font-size:12px;color:#475569;line-height:1.8">加购人数 <b>'+ct.addUsers+'</b> · 加购次数 <b>'+ct.addCount+'</b><br>'+
+        '加购后下单 <b>'+ct.orderUsers+'</b> 人 · 转化率 <b style="color:#1d4ed8">'+(ct.conversionRate||0)+'%</b></div></div>'+
+      '<div style="background:#fffbeb;border-radius:8px;padding:10px">'+
+        '<div style="font-size:12px;font-weight:700;color:#92400e;margin-bottom:4px">⏱ 付款时效</div>'+
+        '<div style="font-size:12px;color:#475569;line-height:1.8">待付款 <b>'+pm.pendingCount+'</b> 笔（¥'+fmtNum(pm.pendingAmount)+'）<br>'+
+        '平均付款时长 <b>'+(pm.avgPayMinutes||0)+' 分钟</b> · 超时未付款 <b style="color:#dc2626">'+pm.timeoutCount+'</b> 笔</div></div>'+
+      '<div style="background:#f8fafc;border-radius:8px;padding:10px">'+
+        '<div style="font-size:12px;font-weight:700;color:#334155;margin-bottom:4px">🧭 渠道分布</div>'+
+        (channelBars||'<div style="font-size:11px;color:#94a3b8">暂无渠道数据</div>')+'</div>'+
+    '</div>'+
+    '<div style="font-size:12px;font-weight:700;margin:12px 0 6px">🏷 SKU 经营明细</div>'+
+    '<div style="overflow:auto"><table class="lc-spec-tbl" style="min-width:620px"><tr><th>规格</th><th>直播价</th><th>实收GMV</th><th>销量</th><th>优惠</th><th>毛利</th><th>库存</th><th>待付款</th></tr>'+skuRows+'</table></div>'+
+    '<div style="font-size:12px;font-weight:700;margin:12px 0 6px">⚠️ 低库存规格（阈值 ≤ '+(S.lowStockThreshold||0)+'）</div><div>'+lowHtml+'</div>'+
+    '<div style="font-size:12px;font-weight:700;margin:12px 0 6px">📜 库存变动流水（最近 30 条）</div>'+
+    (logRows?'<div style="overflow:auto"><table class="lc-spec-tbl" style="min-width:560px"><tr><th>时间</th><th>规格</th><th>变动</th><th>库存</th><th>原因</th><th>订单</th></tr>'+logRows+'</table></div>'
+      :'<div style="color:#94a3b8;font-size:11px">暂无库存变动</div>');
+}
+function statMini(label,val,color){
+  return '<div style="background:#f8fafc;border:1px solid #eef2f7;border-radius:8px;padding:8px;text-align:center">'+
+    '<div style="font-size:15px;font-weight:700;color:'+color+'">'+val+'</div>'+
+    '<div style="font-size:10px;color:#94a3b8;margin-top:2px">'+label+'</div></div>';
 }
 function renderDmList() {
   renderPinnedDm();
@@ -2443,17 +2663,26 @@ function setAdminOrderFilter(f){
 function renderAdminFilters(){
   var el=document.getElementById('adminOrderFilters');
   if(!el) return;
-  el.innerHTML=ADMIN_ORDER_FILTERS.map(function(f){
+  var html=ADMIN_ORDER_FILTERS.map(function(f){
     var on=(S.adminOrderFilter===f[0]);
     return '<button class="lc-mini-btn" data-aost="'+f[0]+'" onclick="setAdminOrderFilter(\''+f[0]+'\')" '+
       'style="'+(on?'border-color:#2563eb;color:#2563eb;font-weight:600':'')+'">'+f[1]+'</button>';
   }).join('');
+  if(S.adminProductFilter){
+    var p=(S.products||[]).filter(function(x){return x.productId===S.adminProductFilter;})[0];
+    html='<button class="lc-mini-btn" style="border-color:#dc2626;color:#dc2626;background:#fef2f2;font-weight:600" '+
+      'onclick="clearProductOrderFilter()">🔎 '+(p?esc(p.name):esc(S.adminProductFilter))+' ✕</button>'+html;
+  }
+  el.innerHTML=html;
 }
 function loadAdminOrders(){
+  // 商品快捷查单：把 productId 交给服务端过滤，避免只在前端已加载的 200 条里找，
+  // 老订单会被截断掉。
+  var pid=S.adminProductFilter||'';
   if(S.ordersScope==='mock'){
-    wsSend('get_orders',{scope:'mock',limit:200});
+    wsSend('get_orders',{scope:'mock',limit:200,productId:pid});
   } else {
-    wsSend('get_orders',{scope:'real',limit:200});
+    wsSend('get_orders',{scope:'real',limit:200,productId:pid});
     wsSend('get_order_stats');
   }
 }
@@ -2476,13 +2705,15 @@ function renderAdminOrders(){
   var el=document.getElementById('adminOrderTable');
   if(!el) return;
   var list=(S.orders||[]).filter(function(o){
-    return S.adminOrderFilter==='all'||o.status===S.adminOrderFilter;
+    if(S.adminOrderFilter!=='all' && o.status!==S.adminOrderFilter) return false;
+    if(S.adminProductFilter && !orderLines(o).some(function(x){return x.productId===S.adminProductFilter;})) return false;
+    return true;
   });
   if(!list.length){
-    el.innerHTML='<tr><td class="lc-empty-row">暂无真实订单</td></tr>';
+    el.innerHTML='<tr><td class="lc-empty-row">暂无真实订单'+(S.adminProductFilter?'（该商品暂无订单）':'')+'</td></tr>';
     return;
   }
-  el.innerHTML='<tr><th>单号</th><th>商品</th><th>买家</th><th>收货信息</th><th>数量</th><th>金额</th><th>状态</th><th>时间</th><th>操作</th></tr>'+
+  el.innerHTML='<tr><th>单号</th><th>商品</th><th>规格</th><th>买家</th><th>收货信息</th><th>数量</th><th>金额 / 优惠</th><th>状态</th><th>时间</th><th>操作</th></tr>'+
     list.slice(0,200).map(function(o){
       var acts;
       if(o.refundStatus==='pending'){
@@ -2491,14 +2722,32 @@ function renderAdminOrders(){
       } else {
         acts=orderActBtns(o);
       }
+      var lines=orderLines(o);
+      var more=lines.length>1?' <span style="color:#94a3b8">等 '+lines.length+' 件</span>':'';
+      // 合并单可能同时来自多个入口（小黄车 + 商品卡），逐行渠道去重后一起展示
+      var lineChannels=lines.map(function(x){return x.channel||o.channel||'legacy';});
+      var chLabels=lineChannels.filter(function(v,i){return lineChannels.indexOf(v)===i;})
+        .map(function(k){return channelName(k);}).join(' / ');
+      var totalQty=lines.reduce(function(a,x){return a+(Number(x.quantity)||0);},0)||Number(o.quantity)||0;
+      var specHtml=lines.slice(0,3).map(function(x){
+        return '<div style="font-size:11px;color:#475569;white-space:normal">'+esc(x.skuSpec||'默认规格')+' ×'+x.quantity+'</div>';
+      }).join('')+(lines.length>3?'<div style="font-size:10px;color:#94a3b8">…</div>':'');
+      var discount=Number(o.discountAmount||0)||lines.reduce(function(a,x){return a+(Number(x.discountAmount)||0);},0);
+      var original=Number(o.originalAmount||0)||lines.reduce(function(a,x){return a+(Number(x.originalAmount)||0);},0);
+      var amountHtml='<div style="color:#dc2626;font-weight:600">¥'+fmtNum(o.totalAmount)+'</div>'+
+        (discount>0?'<div style="font-size:10px;color:#d97706">优惠 -¥'+fmtNum(discount)+(o.couponName?(' · '+esc(o.couponName)):'')+'</div>':'')+
+        (original>Number(o.totalAmount||0)?'<div style="font-size:10px;color:#94a3b8;text-decoration:line-through">原价 ¥'+fmtNum(original)+'</div>':'');
       return '<tr>'+
         '<td style="color:#64748b;font-size:11px">'+esc(o.orderNo||o.orderId)+'</td>'+
-        '<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis">'+esc(o.productName)+'</td>'+
+        '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis">'+esc(lines[0].productName||o.productName||'商品')+more+
+          '<div style="font-size:10px;color:#2563eb">'+esc(chLabels)+'</div></td>'+
+        '<td>'+specHtml+'</td>'+
         '<td>'+esc(o.userName||'-')+'</td>'+
         '<td>'+orderContactHtml(o)+'</td>'+
-        '<td>×'+o.quantity+'</td>'+
-        '<td style="color:#dc2626;font-weight:600">¥'+fmtNum(o.totalAmount)+'</td>'+
-        '<td title="'+(o.shipTime?('发货时间 '+fmtTime(o.shipTime)):'')+'">'+orderStatusHtml(o)+'</td>'+
+        '<td>×'+totalQty+'</td>'+
+        '<td>'+amountHtml+'</td>'+
+        '<td title="'+(o.shipTime?('发货时间 '+fmtTime(o.shipTime)):'')+'">'+orderStatusHtml(o)+
+          (o.refundType==='return'&&o.refundStatus!=='none'?'<div style="font-size:10px;color:#b45309">退货退款</div>':'')+'</td>'+
         '<td style="color:#94a3b8;font-size:11px">'+fmtTime(o.createTime)+'</td>'+
         '<td>'+acts+'</td>'+
       '</tr>';
@@ -2538,7 +2787,7 @@ function renderRefundReview(){
         '<span style="font-size:12px;color:#1e293b">'+esc(o.productName||'商品')+' ×'+o.quantity+
           ' <span style="color:#94a3b8">· '+esc(o.userName||'-')+' · '+esc(o.orderNo||o.orderId)+'</span></span>'+
         '<span style="font-size:12px;font-weight:600;color:#dc2626">¥'+fmtNum(o.totalAmount)+'</span></div>'+
-      '<div style="font-size:12px;color:#475569;margin-top:4px">退款原因：'+esc(o.refundReason||'（未填写）')+'</div>'+
+      '<div style="font-size:12px;color:#475569;margin-top:4px">'+(o.refundType==='return'?'退货退款':'仅退款')+' · 原因：'+esc(o.refundReason||'（未填写）')+'</div>'+
       '<div style="font-size:10px;color:#94a3b8;margin-top:3px">申请时间 '+esc(fmtTime(o.refundApplyTime))+'</div>'+
       '<div style="margin-top:6px;display:flex;gap:6px">'+
         '<button class="lc-mini-btn" style="border-color:#dc2626;color:#dc2626;background:#fef2f2" onclick="reviewRefund(\''+esc(o.orderId)+'\',true)">✅ 同意退款</button>'+
@@ -2817,9 +3066,10 @@ function renderOrderByProduct(){
   el.innerHTML=top.slice(0,8).map(function(b){
     var w=Math.round(b.qty/maxQ*100);
     return '<div style="margin-bottom:8px">'+
-      '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px">'+
-        '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%">'+esc(b.name)+'</span>'+
-        '<span style="color:#64748b">'+b.qty+'件 · ¥'+fmtNum(b.amount)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px;gap:8px">'+
+        '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:50%">'+esc(b.name)+'</span>'+
+        '<span style="color:#64748b;white-space:nowrap">'+b.qty+'件 · ¥'+fmtNum(b.amount)+
+          ' <button class="lc-mini-btn" style="padding:0 5px;font-size:10px" onclick="quickOrderLookup(\''+esc(b.productId)+'\')">查单</button></span></div>'+
       '<div style="background:#eef2f7;border-radius:4px;height:8px;overflow:hidden"><div style="width:'+w+'%;background:#2563eb;height:100%;border-radius:4px"></div></div>'+
     '</div>';
   }).join('');
@@ -4128,6 +4378,22 @@ on('get_products_result',function(d){
   if(S.curPage==='products')renderProductsPage();
 });
 on('add_product_result',function(d){if(d.success){toast('商品添加成功','success');wsSend('get_products');}else toast('商品添加失败','err');});
+on('get_product_ops_result',function(d){
+  if(!d || d.productId!==S.productOpsProductId) return;
+  S.productOps=d;
+  renderProductOps();
+});
+on('get_stock_logs_result',function(d){
+  if((d.productId||'')!==S.productOpsProductId) return;
+  S.stockLogs=d.logs||[];
+  renderProductOps();
+});
+on('get_low_stock_result',function(d){
+  S.lowStockItems=d.items||[];
+  S.lowStockThreshold=d.threshold||0;
+  renderLowStockBar();
+  if(S.detailProductId && S.productOps) renderProductOps();
+});
 // 后端处理消息抛异常时会回 error（不带 *_result），没有这个处理器的话
 // 前端会完全静默 —— 弹窗照关、列表照旧，看起来像"点了没反应"
 on('error',function(d){toast((d&&d.message)||'服务端处理失败','err');});
@@ -4260,6 +4526,8 @@ function applySettings(s) {
     setSwitch('switchBackup',s.system.dataAutoBackup===true);
     var ob=document.getElementById('setOnlineBase');
     if(ob && s.system.onlineCountBase!=null) ob.value=s.system.onlineCountBase;
+    var lst=document.getElementById('setLowStockThreshold');
+    if(lst && s.system.lowStockThreshold!=null) lst.value=s.system.lowStockThreshold;
   }
 }
 function setSwitch(id,on){var el=document.getElementById(id);if(el)el.classList.toggle('on',!!on);}

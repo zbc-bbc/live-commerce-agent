@@ -9,15 +9,31 @@ from pydantic import BaseModel, Field
 
 
 # ============================================================
-# 商品模型（扩展自 data/live_commerce/products.py 的 Product dataclass）
+# SKU 规格模型
 # ============================================================
+class SkuItem(BaseModel):
+    """商品 SKU：同一商品的不同规格，各自绑定价格、库存与成本。
+
+    SKU 是本次商品/订单迭代的核心维度：订单行、库存流水、退款、渠道与毛利
+    统计都以 skuId 为最小粒度。历史商品没有 SKU 时，DataManager 在加载/保存时
+    自动补一个「默认规格」SKU，保证旧数据与旧前端继续可用。
+    """
+    skuId: str = Field(description="SKU 唯一标识（商品内唯一）")
+    spec: str = Field(default="默认规格", description="规格描述，如「500g/箱」「红色 / M」")
+    price: float = Field(default=0, ge=0, description="该规格直播价")
+    originalPrice: float = Field(default=0, ge=0, description="该规格原价")
+    stock: int = Field(default=0, ge=0, description="该规格可售库存（下单即锁）")
+    costPrice: float = Field(default=0, ge=0, description="该规格进货成本，用于单品毛利")
+    isEnabled: bool = Field(default=True, description="是否启用（停用后观众不可选）")
+
+
 class ProductItem(BaseModel):
     """商品数据模型（抖音式商品，含销量/评分/多图/卖点）"""
     productId: str = Field(description="商品唯一标识")
     name: str = Field(description="商品名称")
     originalPrice: float = Field(description="原价")
     price: float = Field(description="售卖价格")
-    stock: int = Field(description="库存数量")
+    stock: int = Field(description="库存数量（= 各 SKU 库存之和，由后端同步）")
     category: str = Field(default="", description="品类")
     description: str = Field(default="", description="商品描述/卖点")
     specs: list[str] = Field(default_factory=list, description="商品规格列表，每项形如 '键: 值'")
@@ -44,6 +60,9 @@ class ProductItem(BaseModel):
     reviewCount: int = Field(default=0, description="评价数量")
     images: list[str] = Field(default_factory=list, description="多图 URL 列表（可空）")
     sellingPoints: list[str] = Field(default_factory=list, description="独立卖点列表（卡片高亮展示）")
+    # ---- SKU / 成本（向后兼容：旧 JSON 没有这两个字段时由后端补默认 SKU）----
+    skus: list[SkuItem] = Field(default_factory=list, description="SKU 规格列表；空列表时后端补默认规格")
+    costPrice: float = Field(default=0, ge=0, description="商品默认进货成本（SKU 未设置成本时兜底）")
 
 
 # ============================================================
@@ -63,6 +82,30 @@ class AddressItem(BaseModel):
 # ============================================================
 # 商单/订单模型
 # ============================================================
+class OrderLineItem(BaseModel):
+    """订单行：一单可含多件商品/多个 SKU（购物车合并结算）。
+
+    每个字段都是**下单瞬间的快照**：商品之后改名、改价、删 SKU 都不影响
+    历史订单展示与退款金额计算。优惠按行金额比例分摊，行金额之和严格等于
+    订单实付，避免四舍五入后对不上账。
+    """
+    productId: str = Field(description="商品ID")
+    productName: str = Field(default="", description="商品名称快照")
+    productImage: str = Field(default="", description="商品图快照")
+    skuId: str = Field(default="", description="SKU ID 快照")
+    skuSpec: str = Field(default="", description="规格描述快照")
+    quantity: int = Field(default=1, ge=1, description="购买数量")
+    unitPrice: float = Field(default=0, description="直播价单价")
+    originalUnitPrice: float = Field(default=0, description="原价单价")
+    amount: float = Field(default=0, description="行小计（优惠前，unitPrice×quantity）")
+    originalAmount: float = Field(default=0, description="行原价小计（originalUnitPrice×quantity）")
+    discountAmount: float = Field(default=0, description="该行分摊到的优惠金额")
+    totalAmount: float = Field(default=0, description="该行实付（amount-discountAmount）")
+    costPrice: float = Field(default=0, description="成本单价快照")
+    costAmount: float = Field(default=0, description="成本小计（用于单品毛利）")
+    channel: str = Field(default="live_cart", description="该行来源渠道：live_cart/replay/product_card/cart")
+
+
 class OrderItem(BaseModel):
     """订单/商单数据模型（模拟成交为主，观众端真实下单为辅）"""
     orderId: str = Field(description="订单唯一标识")
@@ -100,6 +143,25 @@ class OrderItem(BaseModel):
     refundApplyTime: str = Field(default="", description="退款申请时间")
     refundReviewTime: str = Field(default="", description="主播审核时间")
     refundRejectReason: str = Field(default="", description="拒绝退款时的说明")
+    refundType: str = Field(default="", description="售后类型：refund=仅退款 / return=退货退款")
+    # ---- 商品/订单迭代扩展字段（均带默认值，向后兼容旧 JSON）----
+    items: list[OrderLineItem] = Field(
+        default_factory=list,
+        description="订单行（购物车多商品合并结算）；旧的单商品订单为空，读取时按顶层字段兜底",
+    )
+    skuId: str = Field(default="", description="首个商品 SKU ID（单商品订单兼容字段）")
+    skuSpec: str = Field(default="", description="首个商品规格快照（兼容字段）")
+    goodsAmount: float = Field(default=0, description="优惠前商品金额")
+    originalAmount: float = Field(default=0, description="原价总额（用于展示优惠力度）")
+    discountAmount: float = Field(default=0, description="优惠券/满减分摊总额")
+    couponId: str = Field(default="", description="使用的优惠券ID")
+    couponName: str = Field(default="", description="使用的优惠券名称")
+    channel: str = Field(default="live_cart", description="订单主渠道：live_cart/replay/product_card/cart")
+    costAmount: float = Field(default=0, description="订单总成本（用于毛利统计）")
+    stockDeducted: bool = Field(
+        default=False,
+        description="该单库存是否已锁定/扣减；取消/退款仅回补已扣减的库存，避免旧单重复回补",
+    )
 
 
 # 订单状态标签映射（供前端 badge / 后端统计复用）
@@ -111,6 +173,71 @@ ORDER_STATUS_LABELS = {
     "refunded": "已退款",
     "canceled": "已取消",
 }
+
+
+# ============================================================
+# 订单来源渠道
+# ============================================================
+ORDER_CHANNELS = [
+    {"key": "live_cart", "label": "直播间小黄车"},
+    {"key": "replay", "label": "直播回放"},
+    {"key": "product_card", "label": "商品卡"},
+    {"key": "cart", "label": "购物车"},
+    {"key": "legacy", "label": "历史订单"},
+]
+ORDER_CHANNEL_LABELS = {c["key"]: c["label"] for c in ORDER_CHANNELS}
+
+
+# ============================================================
+# 优惠券规则（演示用的平台券，下单时自动选最优一张）
+# ============================================================
+COUPON_RULES = [
+    {"couponId": "LIVE10", "name": "直播专享满99减10", "threshold": 99.0, "amount": 10.0},
+    {"couponId": "LIVE30", "name": "直播专享满299减30", "threshold": 299.0, "amount": 30.0},
+    {"couponId": "LIVE80", "name": "直播专享满599减80", "threshold": 599.0, "amount": 80.0},
+]
+
+
+def best_coupon(amount: float) -> dict:
+    """返回满足门槛且优惠金额最大的券；不满足任何门槛时返回空券。"""
+    try:
+        amount = float(amount or 0)
+    except (TypeError, ValueError):
+        amount = 0.0
+    eligible = [c for c in COUPON_RULES if amount >= c["threshold"]]
+    if not eligible:
+        return {"couponId": "", "name": "", "threshold": 0.0, "amount": 0.0}
+    return max(eligible, key=lambda c: c["amount"])
+
+
+# ============================================================
+# 购物车 / 库存流水模型
+# ============================================================
+class CartLineItem(BaseModel):
+    """购物车行（按观众 userId 持久化；productId + skuId 唯一）。"""
+    cartItemId: str = Field(default="", description="购物车行ID")
+    productId: str = Field(description="商品ID")
+    skuId: str = Field(default="", description="SKU ID；空串=默认规格")
+    quantity: int = Field(default=1, ge=1, description="数量")
+    channel: str = Field(default="live_cart", description="加购来源渠道")
+    addedTime: str = Field(default="", description="加购时间")
+
+
+class StockLogItem(BaseModel):
+    """库存变动流水：记录每一笔由订单/取消/退款引起的库存变更。"""
+    logId: str = Field(description="流水ID")
+    productId: str = Field(description="商品ID")
+    productName: str = Field(default="", description="商品名称快照")
+    skuId: str = Field(default="", description="SKU ID")
+    skuSpec: str = Field(default="", description="规格快照")
+    change: int = Field(description="变动件数：负数=扣减，正数=回补")
+    beforeStock: int = Field(default=0, description="变更前库存")
+    afterStock: int = Field(default=0, description="变更后库存")
+    reason: str = Field(description="变动原因：order_create/order_cancel/refund/manual_update")
+    orderId: str = Field(default="", description="关联订单ID")
+    orderNo: str = Field(default="", description="关联订单号")
+    operator: str = Field(default="system", description="操作人")
+    timestamp: str = Field(description="变动时间")
 
 
 # ============================================================

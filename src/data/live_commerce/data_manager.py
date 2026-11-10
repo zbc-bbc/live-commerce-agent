@@ -14,10 +14,12 @@ from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from schema.live_commerce_schema import (
-    LIVE_STAGES, ORDER_STATUS_LABELS, STAGE_STRATEGIES, AddressItem, BlacklistItem,
-    DanmakuItem, LiveCommerceSettings, LiveSessionState, LiveStatsData, OrderItem,
+    COUPON_RULES, LIVE_STAGES, ORDER_CHANNELS, ORDER_CHANNEL_LABELS, ORDER_STATUS_LABELS,
+    STAGE_STRATEGIES, AddressItem, BlacklistItem, CartLineItem, DanmakuItem,
+    LiveCommerceSettings, LiveSessionState, LiveStatsData, OrderItem, OrderLineItem,
     PresetPhraseItem, PrivateMessageItem, ProductItem, QuickReplyItem, ReviewItem,
-    SmartAlert, UserSessionItem, ViewerAccount, VirtualDanmakuSettings, WSMessage,
+    SkuItem, SmartAlert, StockLogItem, UserSessionItem, ViewerAccount,
+    VirtualDanmakuSettings, WSMessage, best_coupon,
 )
 
 # ============================================================
@@ -37,6 +39,13 @@ PRIVATE_MSGS_FILE = os.path.join(DATA_DIR, "private_msgs_data.json")
 QUICK_REPLIES_FILE = os.path.join(DATA_DIR, "quick_replies_data.json")
 ORDERS_FILE = os.path.join(DATA_DIR, "orders_data.json")
 VIEWERS_FILE = os.path.join(DATA_DIR, "viewers_data.json")
+# 购物车 / 库存流水 / 加购事件（商品订单迭代新增；均在 data/ 目录下，已被 .gitignore 忽略）
+CARTS_FILE = os.path.join(DATA_DIR, "carts_data.json")
+STOCK_LOGS_FILE = os.path.join(DATA_DIR, "stock_logs_data.json")
+CART_EVENTS_FILE = os.path.join(DATA_DIR, "cart_events_data.json")
+STOCK_LOGS_MAX = 2000
+CART_EVENTS_MAX = 5000
+ORDER_PAY_TIMEOUT_MINUTES = 30
 # 场控提示历史。原先是纯内存，重启服务就清空；落盘后跨重启仍在，
 # 但开播（start_live）会主动清空——提示属于「本场」的东西。
 ALERTS_FILE = os.path.join(DATA_DIR, "alerts_data.json")
@@ -423,6 +432,14 @@ class LiveCommerceDataManager:
         self._order_counter = 0
         # 观众账户（钱包）
         self.viewers: dict[str, ViewerAccount] = {}
+        # 购物车：userId -> [CartLineItem]
+        self.carts: dict[str, list[CartLineItem]] = {}
+        # 库存变动流水（上限 STOCK_LOGS_MAX，超出丢弃最旧）
+        self.stock_logs: list[StockLogItem] = []
+        # 加购事件：用于「加购人数 / 加购转下单转化率」统计
+        self.cart_events: list[dict] = []
+        # 低库存已提醒的键（productId / productId:skuId），补货后移除以便再次提醒
+        self._low_stock_alerted_keys: set[str] = set()
         # ── 直播间商品挂载 / 本场点击埋点 ──
         # 挂载状态本身与商品的 isOnSale 同步（isOnSale=True 即挂载到直播间），
         # 这样观众端沿用既有「只下发已上架商品」的过滤规则，不会出现两套口径。
@@ -539,8 +556,15 @@ class LiveCommerceDataManager:
             product = self.products.get(product_id)
             if product is None:
                 return
-            payload = {"productId": product_id, "stock": product.stock,
-                       "soldCount": product.soldCount}
+            payload = {
+                "productId": product_id,
+                "stock": product.stock,
+                "soldCount": product.soldCount,
+                "skus": [{"skuId": s.skuId, "spec": s.spec, "price": s.price,
+                          "originalPrice": s.originalPrice,
+                          "stock": s.stock, "isEnabled": s.isEnabled}
+                         for s in product.skus],
+            }
         self._broadcast("product_sales_changed", payload)
 
     def _broadcast_order(self, msg_type: str, order: OrderItem) -> None:
@@ -568,6 +592,9 @@ class LiveCommerceDataManager:
         self._load_danmaku()
         self._load_orders()
         self._load_viewers()
+        self._load_carts()
+        self._load_stock_logs()
+        self._load_cart_events()
         self._load_alerts()
         self._normalize_viewer_ids()
         # 必须排在 _normalize_viewer_ids 之后：归一化会重指 userId，
@@ -599,10 +626,310 @@ class LiveCommerceDataManager:
         if data:
             for item in data:
                 product = ProductItem(**item)
+                self._normalize_product_skus(product)
                 self.products[product.productId] = product
         # 从现有产品数据导入初始商品
         if not self.products:
             self._init_default_products()
+
+    def _normalize_product_skus(self, product: ProductItem) -> ProductItem:
+        """保证每个商品至少有一个 SKU，并让 product.stock 与 SKU 库存之和一致。
+
+        旧数据没有 skus 字段：按商品现有价格/库存补一个「默认规格」，这样
+        SKU 订单、库存流水、SKU 统计从第一天起就有稳定维度，不需要前端判断
+        「这个商品有没有 SKU」。
+        """
+        if not product.skus:
+            spec = " / ".join(product.specs) if product.specs else "默认规格"
+            product.skus = [SkuItem(
+                skuId=f"{product.productId}-S1",
+                spec=spec or "默认规格",
+                price=max(0.0, float(product.price or 0)),
+                originalPrice=max(0.0, float(product.originalPrice or product.price or 0)),
+                stock=max(0, int(product.stock or 0)),
+                costPrice=max(0.0, float(product.costPrice or 0)),
+                isEnabled=True,
+            )]
+        seen: set[str] = set()
+        for idx, sku in enumerate(product.skus):
+            if not sku.skuId or sku.skuId in seen:
+                sku.skuId = f"{product.productId}-S{idx + 1}"
+            seen.add(sku.skuId)
+            if sku.originalPrice <= 0:
+                sku.originalPrice = sku.price
+            if sku.costPrice <= 0:
+                sku.costPrice = product.costPrice
+        product.stock = sum(max(0, s.stock) for s in product.skus if s.isEnabled)
+        enabled_prices = [s.price for s in product.skus if s.isEnabled and s.price > 0]
+        if enabled_prices and product.price <= 0:
+            product.price = min(enabled_prices)
+        return product
+
+    def _default_sku(self, product: ProductItem) -> Optional[SkuItem]:
+        """取商品默认 SKU（第一个启用规格；没有则第一个规格）。"""
+        self._normalize_product_skus(product)
+        enabled = [s for s in product.skus if s.isEnabled]
+        return enabled[0] if enabled else (product.skus[0] if product.skus else None)
+
+    def _find_sku(self, product: ProductItem, sku_id: str = "") -> Optional[SkuItem]:
+        """按 skuId 查找规格；skuId 为空时返回默认规格。"""
+        self._normalize_product_skus(product)
+        if sku_id:
+            return next((s for s in product.skus if s.skuId == sku_id), None)
+        return self._default_sku(product)
+
+    # ---- SKU 库存联动 / 流水 ----
+    def _append_stock_log_locked(self, product: ProductItem, sku: Optional[SkuItem],
+                                 change: int, before: int, after: int, reason: str,
+                                 order: Optional[OrderItem] = None,
+                                 operator: str = "system") -> None:
+        """锁内追加一条库存流水（调用方负责落盘商品与流水文件）。"""
+        self.stock_logs.append(StockLogItem(
+            logId=f"stock_{int(time.time() * 1000)}_{len(self.stock_logs) + 1}",
+            productId=product.productId,
+            productName=product.name,
+            skuId=sku.skuId if sku else "",
+            skuSpec=sku.spec if sku else "默认规格",
+            change=change,
+            beforeStock=before,
+            afterStock=after,
+            reason=reason,
+            orderId=order.orderId if order else "",
+            orderNo=order.orderNo if order else "",
+            operator=operator,
+            timestamp=datetime.now().isoformat(),
+        ))
+        if len(self.stock_logs) > STOCK_LOGS_MAX:
+            self.stock_logs = self.stock_logs[-STOCK_LOGS_MAX:]
+        self._save_stock_logs()
+
+    def _change_sku_stock_locked(self, product: ProductItem, sku: Optional[SkuItem],
+                                 delta: int, reason: str, order: Optional[OrderItem] = None,
+                                 operator: str = "system") -> int:
+        """锁内变更某 SKU 库存（负数为扣减），同步商品总库存并写流水。
+
+        返回变更后的 SKU 库存。调用方必须先校验扣减不超库存；这里再加一道
+        max(0) 兜底，避免任何一条路径把库存写成负数。
+        """
+        if sku is not None:
+            before = max(0, int(sku.stock))
+            after = max(0, before + int(delta))
+            sku.stock = after
+        else:
+            before = max(0, int(product.stock))
+            after = max(0, before + int(delta))
+            product.stock = after
+        # 商品总库存 = 各启用 SKU 库存之和（有 SKU 时）
+        if product.skus:
+            product.stock = sum(max(0, s.stock) for s in product.skus if s.isEnabled)
+        self._append_stock_log_locked(
+            product, sku, after - before, before, after, reason, order, operator,
+        )
+        return after
+
+    @staticmethod
+    def _order_lines(order: OrderItem) -> list[OrderLineItem]:
+        """读取订单行；旧单没有 items 时用顶层单商品字段合成一行。"""
+        if order.items:
+            return order.items
+        return [OrderLineItem(
+            productId=order.productId,
+            productName=order.productName,
+            productImage=order.productImage,
+            skuId=order.skuId,
+            skuSpec=order.skuSpec,
+            quantity=order.quantity,
+            unitPrice=order.unitPrice,
+            originalUnitPrice=order.unitPrice,
+            amount=round(order.unitPrice * order.quantity, 2),
+            originalAmount=round(order.unitPrice * order.quantity, 2),
+            discountAmount=0,
+            totalAmount=order.totalAmount,
+            channel=order.channel or "legacy",
+        )]
+
+    def _product_has_order(self, order: OrderItem, product_id: str) -> bool:
+        return any(line.productId == product_id for line in self._order_lines(order))
+
+    def get_stock_logs(self, product_id: str = "", limit: int = 100) -> list[StockLogItem]:
+        """库存流水（时间倒序），可按商品过滤。仅运营台可读。"""
+        with self._lock:
+            rows = [x for x in self.stock_logs if not product_id or x.productId == product_id]
+            rows.sort(key=lambda x: x.timestamp, reverse=True)
+            return rows[:max(1, int(limit or 100))]
+
+    def get_coupon_rules(self) -> list[dict]:
+        return [dict(c) for c in COUPON_RULES]
+
+    def get_order_channels(self) -> list[dict]:
+        return [dict(c) for c in ORDER_CHANNELS]
+
+    # ============================================================
+    # 观众购物车
+    # ============================================================
+    @staticmethod
+    def _cart_key(product_id: str, sku_id: str) -> str:
+        return f"{product_id}|{sku_id or ''}"
+
+    def _cart_payload_locked(self, user_id: str) -> dict:
+        """锁内把购物车转成前端可渲染的实时快照（价格/库存以当前商品为准）。"""
+        rows = self.carts.get(user_id, [])
+        items: list[dict] = []
+        goods = 0.0
+        total_qty = 0
+        for row in rows:
+            product = self.products.get(row.productId)
+            sku = self._find_sku(product, row.skuId) if product else None
+            available = bool(
+                product and product.isOnSale and sku and sku.isEnabled
+                and sku.stock >= row.quantity
+            )
+            price = sku.price if sku else 0.0
+            line_amount = round(price * row.quantity, 2)
+            if available:
+                goods = round(goods + line_amount, 2)
+                total_qty += row.quantity
+            items.append({
+                "cartItemId": row.cartItemId or self._cart_key(row.productId, row.skuId),
+                "productId": row.productId,
+                "name": product.name if product else "商品已删除",
+                "image": ((product.images[0] if product.images else product.imageUrl) or "")
+                if product else "",
+                "skuId": row.skuId,
+                "skuSpec": sku.spec if sku else "规格已失效",
+                "price": price,
+                "originalPrice": (sku.originalPrice if sku else 0) or 0,
+                "quantity": row.quantity,
+                "stock": max(0, sku.stock) if sku else 0,
+                "channel": row.channel,
+                "available": available,
+                "addTime": row.addedTime,
+            })
+        coupon = best_coupon(goods)
+        discount = round(min(coupon["amount"], goods), 2)
+        return {
+            "items": items,
+            "lineCount": len(items),
+            "totalQty": total_qty,
+            "goodsAmount": goods,
+            "discountAmount": discount,
+            "couponId": coupon["couponId"],
+            "couponName": coupon["name"],
+            "totalAmount": round(goods - discount, 2),
+            "couponRules": self.get_coupon_rules(),
+        }
+
+    def get_cart(self, user_id: str) -> dict:
+        with self._lock:
+            return self._cart_payload_locked(user_id)
+
+    def add_cart_item(self, user_id: str, product_id: str, sku_id: str = "",
+                      quantity: int = 1, channel: str = "live_cart") -> tuple[dict, str]:
+        """加入购物车（同商品同 SKU 累加数量），并记录加购事件。"""
+        if not user_id:
+            return {}, "请先登录"
+        with self._lock:
+            product = self.products.get(product_id)
+            if not product:
+                return self._cart_payload_locked(user_id), "商品不存在"
+            if not product.isOnSale:
+                return self._cart_payload_locked(user_id), "商品已下架"
+            sku = self._find_sku(product, sku_id)
+            if sku is None or not sku.isEnabled:
+                return self._cart_payload_locked(user_id), "请选择有效的商品规格"
+            try:
+                qty = int(quantity or 1)
+            except (TypeError, ValueError):
+                qty = 1
+            if qty < 1:
+                qty = 1
+            rows = self.carts.setdefault(user_id, [])
+            if len(rows) >= 50:
+                return self._cart_payload_locked(user_id), "购物车最多放 50 种商品"
+            row = next((r for r in rows
+                        if r.productId == product_id and (r.skuId or "") == (sku.skuId or "")),
+                       None)
+            new_qty = min(99, (row.quantity if row else 0) + qty, max(0, sku.stock))
+            if new_qty <= 0:
+                return self._cart_payload_locked(user_id), "该规格库存不足"
+            if row is None:
+                row = CartLineItem(
+                    cartItemId=f"cart_{int(time.time() * 1000)}_{len(rows) + 1}",
+                    productId=product_id,
+                    skuId=sku.skuId,
+                    quantity=new_qty,
+                    channel=channel if channel in ORDER_CHANNEL_LABELS else "live_cart",
+                    addedTime=datetime.now().isoformat(),
+                )
+                rows.append(row)
+            else:
+                row.quantity = new_qty
+            self.cart_events.append({
+                "userId": user_id,
+                "productId": product_id,
+                "skuId": sku.skuId,
+                "channel": row.channel,
+                "timestamp": datetime.now().isoformat(),
+            })
+            if len(self.cart_events) > CART_EVENTS_MAX:
+                self.cart_events = self.cart_events[-CART_EVENTS_MAX:]
+            self._save_carts()
+            self._save_cart_events()
+            cap_msg = "（已达库存上限）" if new_qty >= sku.stock else ""
+            return self._cart_payload_locked(user_id), f"已加入购物车{cap_msg}"
+
+    def update_cart_item(self, user_id: str, product_id: str, sku_id: str = "",
+                         quantity: int = 1) -> tuple[dict, str]:
+        with self._lock:
+            rows = self.carts.get(user_id, [])
+            row = next((r for r in rows
+                        if r.productId == product_id and (r.skuId or "") == (sku_id or "")),
+                       None)
+            if row is None:
+                return self._cart_payload_locked(user_id), "购物车中没有该商品"
+            product = self.products.get(product_id)
+            sku = self._find_sku(product, sku_id) if product else None
+            if product is None or sku is None or not product.isOnSale:
+                return self._cart_payload_locked(user_id), "商品已失效"
+            try:
+                qty = int(quantity or 1)
+            except (TypeError, ValueError):
+                qty = 1
+            if qty < 1:
+                return self.remove_cart_item(user_id, product_id, sku_id)
+            row.quantity = min(qty, 99, max(0, sku.stock))
+            if row.quantity <= 0:
+                rows.remove(row)
+            if not rows:
+                self.carts.pop(user_id, None)
+            self._save_carts()
+            return self._cart_payload_locked(user_id), ""
+
+    def remove_cart_item(self, user_id: str, product_id: str,
+                         sku_id: str = "") -> tuple[dict, str]:
+        with self._lock:
+            rows = self.carts.get(user_id, [])
+            keep = [r for r in rows
+                    if not (r.productId == product_id and (r.skuId or "") == (sku_id or ""))]
+            if keep:
+                self.carts[user_id] = keep
+            else:
+                self.carts.pop(user_id, None)
+            self._save_carts()
+            return self._cart_payload_locked(user_id), ""
+
+    def clear_cart_items(self, user_id: str, keys: list[str]) -> dict:
+        """下单成功后移除已结算的行；keys 形如 productId|skuId。"""
+        with self._lock:
+            target = set(keys or [])
+            rows = self.carts.get(user_id, [])
+            keep = [r for r in rows if self._cart_key(r.productId, r.skuId) not in target]
+            if keep:
+                self.carts[user_id] = keep
+            else:
+                self.carts.pop(user_id, None)
+            self._save_carts()
+            return self._cart_payload_locked(user_id)
 
     def _init_default_products(self):
         """初始化默认商品列表（从现有数据库导入）"""
@@ -628,6 +955,7 @@ class LiveCommerceDataManager:
                     isInLibrary=True,
                     soldBase=p.sold_base,
                 )
+                self._normalize_product_skus(product)
                 self.products[product.productId] = product
             self._save_products()
         except ImportError:
@@ -767,9 +1095,54 @@ class LiveCommerceDataManager:
         if self.orders:
             # 恢复计数器，避免单号/ID 冲突
             self._order_counter = max(len(self.orders), self._order_counter)
+        # 旧订单在支付时才扣库存，且没有 stockDeducted 标记。这里把已成交/已退款的
+        # 历史单标成「库存已扣」，退款回补逻辑才不会漏；待付款旧单保持 False，
+        # 取消时也不会凭空加库存。新订单在创建时就会写入 True。
+        for order in self.orders.values():
+            if not order.stockDeducted and order.status in ("paid", "shipped", "completed", "refunded"):
+                order.stockDeducted = True
+            if not order.channel:
+                order.channel = "legacy"
+            if not order.items and order.goodsAmount <= 0:
+                order.goodsAmount = order.totalAmount
+                order.originalAmount = order.originalAmount or round(order.unitPrice * order.quantity, 2)
 
     def _save_orders(self):
         self._save_json(ORDERS_FILE, [o.model_dump() for o in self.orders.values()])
+
+    # ---- 购物车 / 库存流水 / 加购事件持久化 ----
+    def _load_carts(self):
+        data = self._load_json(CARTS_FILE, {})
+        self.carts = {}
+        if isinstance(data, dict):
+            for uid, rows in data.items():
+                try:
+                    self.carts[uid] = [CartLineItem(**r) for r in rows]
+                except Exception:
+                    continue
+
+    def _save_carts(self):
+        self._save_json(CARTS_FILE, {
+            uid: [r.model_dump() for r in rows] for uid, rows in self.carts.items() if rows
+        })
+
+    def _load_stock_logs(self):
+        data = self._load_json(STOCK_LOGS_FILE, [])
+        try:
+            self.stock_logs = [StockLogItem(**x) for x in data][-STOCK_LOGS_MAX:]
+        except Exception:
+            self.stock_logs = []
+
+    def _save_stock_logs(self):
+        self._save_json(STOCK_LOGS_FILE,
+                        [x.model_dump() for x in self.stock_logs[-STOCK_LOGS_MAX:]])
+
+    def _load_cart_events(self):
+        data = self._load_json(CART_EVENTS_FILE, [])
+        self.cart_events = data[-CART_EVENTS_MAX:] if isinstance(data, list) else []
+
+    def _save_cart_events(self):
+        self._save_json(CART_EVENTS_FILE, self.cart_events[-CART_EVENTS_MAX:])
 
     # ---- 观众账户（钱包）持久化 ----
     def _load_viewers(self):
@@ -1176,6 +1549,9 @@ class LiveCommerceDataManager:
         重新拉取「已上架」列表，未上架商品的内容不会外泄。
         """
         with self._lock:
+            self._normalize_product_skus(product)
+            if not product.addedTime:
+                product.addedTime = datetime.now().isoformat()
             self.products[product.productId] = product
             self._save_products()
         self._broadcast("product_updated", {
@@ -1190,10 +1566,42 @@ class LiveCommerceDataManager:
             if product_id not in self.products:
                 return None
             p = self.products[product_id]
-            for k, v in data.items():
-                if hasattr(p, k):
-                    setattr(p, k, v)
+            old_sku_stock = {s.skuId: s.stock for s in p.skus}
+            # 用「完整字段 + 更新字典」重新校验，而不是 setattr 直接塞值：
+            # 前端传来的 skus 是 dict 列表，setattr 会绕过 Pydantic 校验，
+            # 后续访问 sku.stock 就会炸。
+            merged = p.model_dump()
+            merged.update({k: v for k, v in data.items() if k in ProductItem.model_fields})
+            merged["productId"] = product_id
+            try:
+                updated = ProductItem(**merged)
+            except Exception:
+                return None
+            self._normalize_product_skus(updated)
+            # 兼容只传 price/originalPrice/stock 的旧调用（HTTP 单字段更新）：
+            # SKU 是价格与库存的真源，不把这几个字段同步到单规格商品的话，
+            # 接口返回「修改成功」但下单仍按旧价/旧库存走。
+            # 多规格商品的价格/库存无法从单个字段无歧义地拆分，必须显式传 skus。
+            if "skus" not in data and len(updated.skus) == 1:
+                only_sku = updated.skus[0]
+                if data.get("price") is not None:
+                    only_sku.price = max(0.0, float(data["price"]))
+                if data.get("originalPrice") is not None:
+                    only_sku.originalPrice = max(0.0, float(data["originalPrice"]))
+                if data.get("stock") is not None:
+                    only_sku.stock = max(0, int(data["stock"]))
+                self._normalize_product_skus(updated)
+            self.products[product_id] = updated
+            # 手工改库存也留流水，和订单引起的变更放在同一本账上。
+            for sku in updated.skus:
+                before = old_sku_stock.get(sku.skuId, sku.stock)
+                if before != sku.stock:
+                    self._append_stock_log_locked(
+                        updated, sku, sku.stock - before, before, sku.stock,
+                        reason="manual_update", operator="host",
+                    )
             self._save_products()
+            p = updated
             payload = {"productId": product_id, "isOnSale": p.isOnSale}
         # 广播放在锁外：回调只做入队，但避免持锁期间触碰别的模块
         self._broadcast("product_updated", payload)
@@ -1484,12 +1892,23 @@ class LiveCommerceDataManager:
                 if p is not None:
                     r["stock"] = p.stock
             for o in orders:
-                r = _row(o.productId, o.productName, o.unitPrice)
-                r["orderCount"] += 1
-                if o.status in paid_statuses:
-                    r["paidCount"] += 1
-                    r["qty"] += o.quantity
-                    r["gmv"] = round(r["gmv"] + o.totalAmount, 2)
+                # 合并单按商品聚合：同一单里的多件商品各自计入自己的行，
+                # 同一商品多个 SKU 也只给这个商品记一次订单数。
+                per_product: dict[str, dict] = {}
+                for line in self._order_lines(o):
+                    agg = per_product.setdefault(line.productId, {
+                        "name": line.productName, "price": line.unitPrice,
+                        "qty": 0, "amount": 0.0,
+                    })
+                    agg["qty"] += line.quantity
+                    agg["amount"] = round(agg["amount"] + line.totalAmount, 2)
+                for pid, agg in per_product.items():
+                    r = _row(pid, agg["name"], agg["price"])
+                    r["orderCount"] += 1
+                    if o.status in paid_statuses:
+                        r["paidCount"] += 1
+                        r["qty"] += agg["qty"]
+                        r["gmv"] = round(r["gmv"] + agg["amount"], 2)
 
             product_stats = sorted(
                 rows.values(),
@@ -2017,9 +2436,11 @@ class LiveCommerceDataManager:
             product = self.products.get(product_id)
             if not product:
                 return None
-            if product.stock < quantity:
+            sku = self._default_sku(product)
+            if sku is None:
                 return None
-            product.stock -= quantity
+            if sku.stock < quantity:
+                return None
             # 只有成交/履约类状态才累计销量
             if status in ("paid", "completed", "shipped"):
                 product.soldCount += quantity
@@ -2029,21 +2450,44 @@ class LiveCommerceDataManager:
             import random as _r
             buyer_name = user_name or _r.choice(self._BUYER_NAMES)
             now = datetime.now().isoformat()
+            amount = round(sku.price * quantity, 2)
+            line = OrderLineItem(
+                productId=product_id, productName=product.name,
+                productImage=(product.images[0] if product.images else product.imageUrl) or "",
+                skuId=sku.skuId, skuSpec=sku.spec, quantity=quantity,
+                unitPrice=sku.price, originalUnitPrice=sku.originalPrice or sku.price,
+                amount=amount, originalAmount=round((sku.originalPrice or sku.price) * quantity, 2),
+                discountAmount=0, totalAmount=amount,
+                costPrice=sku.costPrice or product.costPrice or 0,
+                costAmount=round((sku.costPrice or product.costPrice or 0) * quantity, 2),
+                channel="legacy",
+            )
             order = OrderItem(
                 orderId=f"order_{int(datetime.now().timestamp()*1000)}_{self._order_counter}",
                 orderNo=self._next_order_no(),
                 productId=product_id,
                 productName=product.name,
+                productImage=line.productImage,
+                skuId=sku.skuId,
+                skuSpec=sku.spec,
                 userId="",  # 模拟订单不绑定真实用户
                 userName=buyer_name,
                 quantity=quantity,
-                unitPrice=product.price,
-                totalAmount=round(product.price * quantity, 2),
+                unitPrice=sku.price,
+                items=[line],
+                goodsAmount=amount,
+                originalAmount=line.originalAmount,
+                totalAmount=amount,
+                costAmount=line.costAmount,
+                channel="legacy",
                 status=status,
                 payTime=now if status not in ("pending_pay", "canceled") else "",
                 createTime=now,
                 isVirtual=True,
+                stockDeducted=True,
             )
+            self._change_sku_stock_locked(product, sku, -quantity, "order_create", order,
+                                          operator="system")
             self.orders[order.orderId] = order
             self._save_orders()
             self._save_products()
@@ -2079,30 +2523,51 @@ class LiveCommerceDataManager:
             self._order_counter += 1
             now = datetime.now().isoformat()
             img = (product.images[0] if product.images else product.imageUrl) or ""
+            sku = self._default_sku(product)
+            price = sku.price if sku else product.price
+            amount = round(price * qty, 2)
+            line = OrderLineItem(
+                productId=product.productId, productName=product.name, productImage=img,
+                skuId=sku.skuId if sku else "", skuSpec=sku.spec if sku else "默认规格",
+                quantity=qty, unitPrice=price, originalUnitPrice=price,
+                amount=amount, originalAmount=amount, discountAmount=0, totalAmount=amount,
+                costPrice=(sku.costPrice if sku else product.costPrice) or 0,
+                costAmount=round(((sku.costPrice if sku else product.costPrice) or 0) * qty, 2),
+                channel="legacy",
+            )
             order = OrderItem(
                 orderId=f"test_order_{int(datetime.now().timestamp()*1000)}_{self._order_counter}",
                 orderNo="TEST" + datetime.now().strftime("%Y%m%d") + f"{self._order_counter:04d}",
                 productId=product.productId,
                 productName=product.name,
                 productImage=img,
+                skuId=sku.skuId if sku else "",
+                skuSpec=sku.spec if sku else "",
                 userId="",
                 userName=user_name or random.choice(self._BUYER_NAMES),
                 quantity=qty,
-                unitPrice=product.price,
-                totalAmount=round(product.price * qty, 2),
+                unitPrice=price,
+                items=[line],
+                goodsAmount=amount,
+                originalAmount=amount,
+                totalAmount=amount,
+                costAmount=line.costAmount,
+                channel="legacy",
                 status=order_status,
                 payTime=now if order_status in ("paid", "shipped", "completed") else "",
                 createTime=now,
                 isVirtual=True,
                 source="ai_test",
+                stockDeducted=False,
             )
             self.orders[order.orderId] = order
             self._save_orders()
             self._broadcast_order("order_new", order)
             return order
 
-    def get_orders(self, status: str = "", limit: int = 50, scope: str = "real") -> list[OrderItem]:
-        """获取订单列表（按时间倒序，可按状态筛选）。
+    def get_orders(self, status: str = "", limit: int = 50, scope: str = "real",
+                   product_id: str = "") -> list[OrderItem]:
+        """获取订单列表（按时间倒序，可按状态/商品筛选）。
 
         scope 是**真伪隔离**的唯一入口：
           real（默认）—— 只返回真实注册观众的订单，运营台默认看到的就是这些；
@@ -2117,6 +2582,8 @@ class LiveCommerceDataManager:
                 results = [o for o in results if not order_is_real(o)]
             if status:
                 results = [o for o in results if o.status == status]
+            if product_id:
+                results = [o for o in results if self._product_has_order(o, product_id)]
             results.sort(key=lambda o: o.createTime, reverse=True)
             return results[:limit]
 
@@ -2191,29 +2658,52 @@ class LiveCommerceDataManager:
             elif status == "refunded":
                 # 主播直接退款：回补库存/销量 + 钱包返充，并把退款申请标记为已通过
                 self._apply_refund_locked(order, now)
+            elif status == "canceled" and order.stockDeducted:
+                # 主播取消待付款单：同样要释放下单时锁定的库存
+                self._restock_order_locked(order, "order_cancel", "host")
             order.payTime = order.payTime or now
             self._save_orders()
             self._broadcast_order("order_updated", order)
-            self._broadcast_product_sales(order.productId)
+            for pid in {x.productId for x in self._order_lines(order)}:
+                self._broadcast_product_sales(pid)
             return order
+
+    def _restock_order_locked(self, order: OrderItem, reason: str,
+                              operator: str = "system") -> None:
+        """锁内按订单行回补库存并写流水，然后清除库存已扣标记。"""
+        for line in self._order_lines(order):
+            product = self.products.get(line.productId)
+            if product is None:
+                continue
+            sku = self._find_sku(product, line.skuId)
+            self._change_sku_stock_locked(
+                product, sku, line.quantity, reason, order, operator=operator,
+            )
+        order.stockDeducted = False
+        self._save_products()
 
     def _apply_refund_locked(self, order: OrderItem, now: str) -> None:
         """锁内执行退款落地：回补库存/销量、钱包返充、标记退款申请已通过。
 
         只应由 request_refund 的审核通过与 update_order_status 的直接退款分支调用。
+        只有 stockDeducted=True 的订单才回补库存：新单在下单时锁、旧单在支付时扣；
+        如果某条旧数据既没锁也没扣，退款再补就会凭空多出库存。
         """
-        product = self.products.get(order.productId)
-        if product:
-            product.stock += order.quantity
-            product.soldCount = max(0, product.soldCount - order.quantity)
-            self._save_products()
+        if order.stockDeducted:
+            self._restock_order_locked(order, "refund", "host")
+        for line in self._order_lines(order):
+            product = self.products.get(line.productId)
+            if product:
+                product.soldCount = max(0, product.soldCount - line.quantity)
+        self._save_products()
         self._credit_viewer(order.userId, order.totalAmount)
         order.status = "refunded"
         order.refundStatus = "approved"
         order.refundReviewTime = now
 
-    def request_refund(self, order_id: str, user_id: str, reason: str = "") -> tuple[Optional[OrderItem], str]:
-        """观众提交退款申请：只登记申请，不改 order.status、不动库存/余额。
+    def request_refund(self, order_id: str, user_id: str, reason: str = "",
+                       refund_type: str = "refund") -> tuple[Optional[OrderItem], str]:
+        """观众提交退款/退货申请：只登记申请，不改 order.status、不动库存/余额。
 
         真正退款要等主播在后台「同意」，由 review_refund 完成。申请状态单独放在
         refundStatus 上，这样待审核期间不会提前影响既有成交/GMV 统计口径。
@@ -2223,6 +2713,8 @@ class LiveCommerceDataManager:
             return None, "请填写退款原因"
         if len(reason) > 200:
             reason = reason[:200]
+        if refund_type not in ("refund", "return"):
+            refund_type = "refund"
         with self._lock:
             order = self.orders.get(order_id)
             if not order:
@@ -2237,6 +2729,7 @@ class LiveCommerceDataManager:
                 return None, "该订单已退款"
             order.refundStatus = "pending"
             order.refundReason = reason
+            order.refundType = refund_type
             order.refundApplyTime = datetime.now().isoformat()
             order.refundRejectReason = ""
             self._save_orders()
@@ -2503,21 +2996,86 @@ class LiveCommerceDataManager:
     # ============================================================
     def create_viewer_order(self, product_id: str, user_id: str, user_name: str = "",
                             quantity: int = 1,
-                            address_id: str = "") -> tuple[Optional[OrderItem], str]:
-        """观众下单：生成「待付款」订单，快照商品首图，不扣库存/销量。返回 (order, 错误原因)。"""
-        with self._lock:
-            product = self.products.get(product_id)
+                            address_id: str = "",
+                            sku_id: str = "",
+                            channel: str = "live_cart") -> tuple[Optional[OrderItem], str]:
+        """观众单商品下单（兼容旧调用）：转成一条购物车行交给统一结算。"""
+        return self.create_viewer_cart_order(
+            [{"productId": product_id, "skuId": sku_id,
+              "quantity": quantity, "channel": channel}],
+            user_id, user_name, address_id=address_id,
+        )
+
+    def _build_order_lines_locked(
+        self, items: list[dict], channel: str = "live_cart",
+    ) -> tuple[list[dict], str]:
+        """校验并合并下单行。返回 (lines, 错误原因)，此时还不改库存。"""
+        merged: dict[tuple[str, str], dict] = {}
+        for raw in items or []:
+            if not isinstance(raw, dict):
+                return [], "下单参数不正确"
+            pid = str(raw.get("productId") or "").strip()
+            if not pid:
+                return [], "商品不存在"
+            try:
+                qty = int(raw.get("quantity", 1) or 1)
+            except (TypeError, ValueError):
+                qty = 1
+            if qty < 1:
+                qty = 1
+            if qty > 99:
+                return [], "单件商品最多购买 99 件"
+            sku_id = str(raw.get("skuId") or "").strip()
+            key = (pid, sku_id)
+            if key in merged:
+                merged[key]["quantity"] += qty
+                if merged[key]["quantity"] > 99:
+                    return [], "单件商品最多购买 99 件"
+            else:
+                merged[key] = {
+                    "productId": pid, "skuId": sku_id, "quantity": qty,
+                    "channel": str(raw.get("channel") or channel or "live_cart"),
+                }
+        if not merged:
+            return [], "请选择要购买的商品"
+        if len(merged) > 20:
+            return [], "一单最多合并 20 种商品"
+
+        lines: list[dict] = []
+        for (pid, sku_id), row in merged.items():
+            product = self.products.get(pid)
             if not product:
-                return None, "商品不存在"
-            # 下架商品观众端已经看不到，正常点不到这里；兜住的是「详情弹层还开着时
-            # 商品被下架」这类陈旧视图，以及直接构造的请求。
+                return [], "商品不存在或已删除"
             if not product.isOnSale:
-                return None, "商品已下架"
-            qty = max(1, int(quantity or 1))
-            if product.stock < qty:
-                return None, "库存不足"
+                return [], f"商品「{product.name}」已下架"
+            sku = self._find_sku(product, sku_id)
+            if sku is None:
+                return [], f"商品「{product.name}」规格不存在"
+            if not sku.isEnabled:
+                return [], f"商品「{product.name}」的规格「{sku.spec}」已停用"
+            if sku.stock < row["quantity"]:
+                return [], f"「{product.name} {sku.spec}」库存不足，仅剩 {max(0, sku.stock)} 件"
+            lines.append({
+                "product": product, "sku": sku, "quantity": row["quantity"],
+                "channel": row["channel"] if row["channel"] in ORDER_CHANNEL_LABELS else "live_cart",
+            })
+        return lines, ""
+
+    def create_viewer_cart_order(
+        self, items: list[dict], user_id: str, user_name: str = "",
+        address_id: str = "",
+    ) -> tuple[Optional[OrderItem], str]:
+        """观众合并结算：校验 → 锁库存 → 生成待付款订单。
+
+        库存从「支付时扣」前移到「下单时锁」：待付款订单占用库存，避免同一件
+        最后一件商品被多人同时支付成功；取消/退款时按 stockDeducted 标记回补。
+        优惠券按商品金额自动选最优一张，并按行金额比例分摊到每个订单行。
+        """
+        with self._lock:
+            lines, reason = self._build_order_lines_locked(items)
+            if not lines:
+                return None, reason
             # 收货地址快照：下单时从地址簿复制，之后改/删地址不影响历史订单。
-            # address_id 为空时不强制（兼容内部/测试调用）；WS 层会要求观众必须选择。
             address = None
             if address_id:
                 acc = self.viewers.get(user_id)
@@ -2529,21 +3087,76 @@ class LiveCommerceDataManager:
                     return None, "收货地址不存在，请重新选择"
             now = datetime.now().isoformat()
             self._order_counter += 1
-            img = (product.images[0] if product.images else product.imageUrl) or ""
             full_address = ""
             if address is not None:
                 full_address = " ".join(x for x in (address.region, address.detail) if x)
+
+            goods_amount = round(sum(line["sku"].price * line["quantity"] for line in lines), 2)
+            original_amount = round(sum(
+                (line["sku"].originalPrice or line["sku"].price) * line["quantity"]
+                for line in lines), 2)
+            coupon = best_coupon(goods_amount)
+            discount = round(min(coupon["amount"], goods_amount), 2)
+            total = round(goods_amount - discount, 2)
+
+            # 优惠按行金额比例分摊；最后一行的差额兜底，保证行实付之和 == 订单实付。
+            order_lines: list[OrderLineItem] = []
+            allocated = 0.0
+            for idx, line in enumerate(lines):
+                product, sku, qty = line["product"], line["sku"], line["quantity"]
+                amount = round(sku.price * qty, 2)
+                if idx == len(lines) - 1:
+                    line_discount = round(discount - allocated, 2)
+                elif goods_amount > 0:
+                    line_discount = round(discount * amount / goods_amount, 2)
+                else:
+                    line_discount = 0.0
+                allocated = round(allocated + line_discount, 2)
+                cost = round((sku.costPrice or product.costPrice or 0) * qty, 2)
+                order_lines.append(OrderLineItem(
+                    productId=product.productId,
+                    productName=product.name,
+                    productImage=(product.images[0] if product.images else product.imageUrl) or "",
+                    skuId=sku.skuId,
+                    skuSpec=sku.spec,
+                    quantity=qty,
+                    unitPrice=sku.price,
+                    originalUnitPrice=sku.originalPrice or sku.price,
+                    amount=amount,
+                    originalAmount=round((sku.originalPrice or sku.price) * qty, 2),
+                    discountAmount=line_discount,
+                    totalAmount=round(amount - line_discount, 2),
+                    costPrice=sku.costPrice or product.costPrice or 0,
+                    costAmount=cost,
+                    channel=line["channel"],
+                ))
+
+            first = order_lines[0]
+            channels = {x.channel for x in order_lines}
+            order_channel = first.channel if len(channels) == 1 else "cart"
             order = OrderItem(
                 orderId=f"order_{int(datetime.now().timestamp()*1000)}_{self._order_counter}",
                 orderNo=self._next_order_no(),
-                productId=product_id,
-                productName=product.name,
-                productImage=img,
+                # 兼容字段取首行；完整明细在 items 中，旧前端/旧报表仍可读。
+                productId=first.productId,
+                productName=first.productName if len(order_lines) == 1
+                else f"{first.productName} 等 {len(order_lines)} 件商品",
+                productImage=first.productImage,
+                skuId=first.skuId,
+                skuSpec=first.skuSpec,
                 userId=user_id or "",
                 userName=user_name or "",
-                quantity=qty,
-                unitPrice=product.price,
-                totalAmount=round(product.price * qty, 2),
+                quantity=sum(x.quantity for x in order_lines),
+                unitPrice=first.unitPrice,
+                items=order_lines,
+                goodsAmount=goods_amount,
+                originalAmount=original_amount,
+                discountAmount=discount,
+                couponId=coupon["couponId"],
+                couponName=coupon["name"],
+                totalAmount=total,
+                costAmount=round(sum(x.costAmount for x in order_lines), 2),
+                channel=order_channel,
                 status="pending_pay",
                 payTime="",
                 shipTime="",
@@ -2554,17 +3167,34 @@ class LiveCommerceDataManager:
                 receiverName=address.receiverName if address else "",
                 receiverPhone=address.phone if address else "",
                 receiverAddress=full_address,
+                stockDeducted=True,
             )
+            # 锁库存：校验已经在 _build_order_lines_locked 完成，这里逐行扣减并写流水。
+            for line in order_lines:
+                product = self.products.get(line.productId)
+                sku = self._find_sku(product, line.skuId) if product else None
+                if product is not None and sku is not None:
+                    self._change_sku_stock_locked(
+                        product, sku, -line.quantity, "order_create", order,
+                        operator=user_id or "viewer",
+                    )
             self.orders[order.orderId] = order
+            self._save_products()
             self._save_orders()
             self._broadcast_order("order_new", order)
+            for pid in {x.productId for x in order_lines}:
+                self._broadcast_product_sales(pid)
             # 下单数量是本场数据统计的一项，实时推给运营台（不下发观众）。
             self._broadcast("live_room_stats_updated", self.get_live_room_stats(),
                             host_only=True)
             return order, ""
 
     def pay_order(self, order_id: str, user_id: str) -> tuple[Optional[OrderItem], str]:
-        """观众支付：pending_pay → paid；扣钱包余额 + 扣库存 + 累销量。返回 (order, 错误原因)。"""
+        """观众支付：pending_pay → paid；扣钱包余额 + 累销量。
+
+        新订单在下单时已经锁库存（stockDeducted=True），支付只做钱包扣款与销量累计；
+        兼容旧的待付款订单（下单时没锁库存）时，这里补扣一次并写流水。
+        """
         with self._lock:
             order = self.orders.get(order_id)
             if not order:
@@ -2574,24 +3204,39 @@ class LiveCommerceDataManager:
                 return None, "无权操作该订单"
             if order.status != "pending_pay":
                 return None, "订单状态不允许支付"
-            product = self.products.get(order.productId)
-            if not product:
-                return None, "商品不存在"
-            # 下架后不允许支付「待付款」的旧单 —— 但位置很关键：必须排在
-            # status != "pending_pay" 那关**之后**，这样已付款/已发货的订单在上一关
-            # 就被放行了，永远不会被「已下架」拦住（下架不影响已经成交的生意）。
-            if not product.isOnSale:
-                return None, "商品已下架，无法支付"
-            if product.stock < order.quantity:
-                return None, "库存不足，无法支付"
+            lines = self._order_lines(order)
+            products: list[tuple[ProductItem, Optional[SkuItem], int]] = []
+            for line in lines:
+                product = self.products.get(line.productId)
+                if not product:
+                    return None, "商品不存在"
+                # 下架后不允许支付「待付款」的旧单 —— 但位置很关键：必须排在
+                # status != "pending_pay" 那关**之后**，这样已付款/已发货的订单在上一关
+                # 就被放行了，永远不会被「已下架」拦住（下架不影响已经成交的生意）。
+                if not product.isOnSale:
+                    return None, "商品已下架，无法支付"
+                sku = self._find_sku(product, line.skuId)
+                if sku is None:
+                    return None, "商品规格不存在，无法支付"
+                if not order.stockDeducted and sku.stock < line.quantity:
+                    return None, "库存不足，无法支付"
+                products.append((product, sku, line.quantity))
             acc = self.viewers.get(user_id)
             if acc is None:
                 return None, "请先登录观众账户"
             if acc.balance < order.totalAmount:
                 return None, "钱包余额不足"
             acc.balance = round(acc.balance - order.totalAmount, 2)
-            product.stock -= order.quantity
-            product.soldCount += order.quantity
+            # 旧单没有在下单时锁库存，支付时补扣；新单已经扣过，绝不能重复扣。
+            if not order.stockDeducted:
+                for product, sku, qty in products:
+                    self._change_sku_stock_locked(
+                        product, sku, -qty, "order_create", order,
+                        operator=user_id or "viewer",
+                    )
+                order.stockDeducted = True
+            for product, sku, qty in products:
+                product.soldCount += qty
             now = datetime.now().isoformat()
             order.status = "paid"
             order.payTime = order.payTime or now
@@ -2599,7 +3244,8 @@ class LiveCommerceDataManager:
             self._save_products()
             self._save_orders()
             self._broadcast_order("order_updated", order)
-            self._broadcast_product_sales(order.productId)
+            for pid in {x.productId for x in lines}:
+                self._broadcast_product_sales(pid)
             # 付款后 GMV / 已付款单数变化，运营台的「本场数据」立即刷新
             self._broadcast("live_room_stats_updated", self.get_live_room_stats(),
                             host_only=True)
@@ -2622,7 +3268,7 @@ class LiveCommerceDataManager:
             return order, ""
 
     def cancel_viewer_order(self, order_id: str, user_id: str) -> tuple[Optional[OrderItem], str]:
-        """观众取消待付款订单：pending_pay → canceled"""
+        """观众取消待付款订单：pending_pay → canceled，并回补下单时锁定的库存。"""
         with self._lock:
             order = self.orders.get(order_id)
             if not order:
@@ -2632,9 +3278,15 @@ class LiveCommerceDataManager:
                 return None, "无权操作该订单"
             if order.status != "pending_pay":
                 return None, "仅待付款订单可取消"
+            if order.stockDeducted:
+                self._restock_order_locked(order, "order_cancel", user_id or "viewer")
             order.status = "canceled"
             self._save_orders()
             self._broadcast_order("order_updated", order)
+            for pid in {x.productId for x in self._order_lines(order)}:
+                self._broadcast_product_sales(pid)
+            self._broadcast("live_room_stats_updated", self.get_live_room_stats(),
+                            host_only=True)
             return order, ""
 
     def get_user_orders(self, user_id: str, status: str = "") -> list[OrderItem]:
@@ -2668,14 +3320,22 @@ class LiveCommerceDataManager:
             total_sales = round(sum(o.totalAmount for o in effective), 2)
             total_qty = sum(o.quantity for o in effective)
             refund_orders = sum(1 for o in orders if o.status == "refunded")
+            refund_amount = round(sum(
+                line.totalAmount for o in orders if o.status == "refunded"
+                for line in self._order_lines(o)), 2)
             today_orders = sum(1 for o in effective if o.createTime[:10] == today)
             today_sales = round(sum(o.totalAmount for o in effective if o.createTime[:10] == today), 2)
-            # 按商品聚合销量
+            # 按商品聚合销量：按订单行聚合，购物车合并单不会漏掉其它商品
             by_product: dict[str, dict] = {}
             for o in effective:
-                b = by_product.setdefault(o.productId, {"productId": o.productId, "name": o.productName, "qty": 0, "amount": 0.0})
-                b["qty"] += o.quantity
-                b["amount"] = round(b["amount"] + o.totalAmount, 2)
+                for line in self._order_lines(o):
+                    b = by_product.setdefault(line.productId, {
+                        "productId": line.productId, "name": line.productName,
+                        "qty": 0, "amount": 0.0, "discount": 0.0,
+                    })
+                    b["qty"] += line.quantity
+                    b["amount"] = round(b["amount"] + line.totalAmount, 2)
+                    b["discount"] = round(b["discount"] + line.discountAmount, 2)
             by_product_list = sorted(by_product.values(), key=lambda x: x["qty"], reverse=True)
             return {
                 "totalOrders": total_orders,
@@ -2684,6 +3344,10 @@ class LiveCommerceDataManager:
                 "todayOrders": today_orders,
                 "todaySales": today_sales,
                 "refundCount": refund_orders,
+                "refundAmount": refund_amount,
+                "refundRate": round(
+                    (refund_orders / (total_orders + refund_orders) * 100)
+                    if (total_orders + refund_orders) else 0.0, 1),
                 "byProduct": by_product_list,
                 # 口径披露：被排除的模拟订单数（real_only=False 时为 0）
                 "mockOrdersExcluded": mock_excluded,
@@ -2705,11 +3369,15 @@ class LiveCommerceDataManager:
                 # AI 模拟测试订单不参与任何销量展示（观众端「已售 N 件」也不掺）
                 if o.status not in paid_statuses or getattr(o, "source", "") == "ai_test":
                     continue
-                s = sales.setdefault(o.productId, {"qty": 0, "amount": 0.0, "todayQty": 0})
-                s["qty"] += o.quantity
-                s["amount"] = round(s["amount"] + o.totalAmount, 2)
-                if o.createTime[:10] == today:
-                    s["todayQty"] += o.quantity
+                # 按订单行聚合：购物车合并单必须把销量记到每一件商品上，
+                # 只读顶层 productId 会把其余商品漏掉。
+                for line in self._order_lines(o):
+                    s = sales.setdefault(line.productId,
+                                         {"qty": 0, "amount": 0.0, "todayQty": 0})
+                    s["qty"] += line.quantity
+                    s["amount"] = round(s["amount"] + line.totalAmount, 2)
+                    if o.createTime[:10] == today:
+                        s["todayQty"] += line.quantity
         return sales
 
     def get_real_product_sales_map(self) -> dict:
@@ -2728,12 +3396,288 @@ class LiveCommerceDataManager:
             for o in self.orders.values():
                 if o.status not in paid_statuses or not order_is_real(o):
                     continue
-                s = sales.setdefault(o.productId, {"qty": 0, "amount": 0.0, "todayQty": 0})
-                s["qty"] += o.quantity
-                s["amount"] = round(s["amount"] + o.totalAmount, 2)
-                if o.createTime[:10] == today:
-                    s["todayQty"] += o.quantity
+                for line in self._order_lines(o):
+                    s = sales.setdefault(line.productId,
+                                         {"qty": 0, "amount": 0.0, "todayQty": 0})
+                    s["qty"] += line.quantity
+                    s["amount"] = round(s["amount"] + line.totalAmount, 2)
+                    if o.createTime[:10] == today:
+                        s["todayQty"] += line.quantity
         return sales
+
+    # ============================================================
+    # 商品经营面板：SKU / 售后 / 加购 / 优惠 / 渠道 / 付款时效
+    # ============================================================
+    def get_product_ops_stats(self, product_id: str = "") -> dict:
+        """单品（或全部商品）经营指标。
+
+        只统计真实观众订单（AI 测试单永远不参与），返回：
+          * skuStats   —— 每个 SKU 的销量/GMV/优惠/成本/毛利/库存；
+          * refund     —— 退款单数、退款金额、退款率、退款原因汇总；
+          * cart       —— 加购人数、加购次数、下单人数、加购转下单转化率；
+          * channels   —— 直播间小黄车/回放/商品卡/购物车来源分布；
+          * payment    —— 待付款单数、平均付款时长、超时未付款单数；
+          * summary    —— 商品整体销量/实收/优惠/成本/毛利。
+        """
+        now_dt = datetime.now()
+        paid_statuses = ("paid", "shipped", "completed")
+        with self._lock:
+            orders = [o for o in self.orders.values() if order_is_real(o)]
+            if product_id:
+                if product_id not in self.products:
+                    return {"success": False, "message": "商品不存在"}
+                orders = [o for o in orders if self._product_has_order(o, product_id)]
+
+            sku_rows: dict[tuple[str, str], dict] = {}
+            summary = {
+                "orderCount": 0, "qty": 0, "gmv": 0.0, "goodsAmount": 0.0,
+                "originalAmount": 0.0, "discountAmount": 0.0, "costAmount": 0.0,
+                "grossProfit": 0.0, "buyerCount": 0,
+            }
+            buyers: set[str] = set()
+            paid_orders = 0
+            pending_count = 0
+            pending_amount = 0.0
+            pay_seconds: list[float] = []
+            timeout_count = 0
+            refund = {"count": 0, "amount": 0.0, "reasons": {}}
+            channels = {c["key"]: {"channel": c["key"], "label": c["label"],
+                                    "orderCount": 0, "gmv": 0.0}
+                        for c in ORDER_CHANNELS if c["key"] != "legacy"}
+            channel_orders = {k: set() for k in channels}
+            seen_sku_orders: dict[tuple[str, str], set[str]] = {}
+
+            for order in orders:
+                lines = [ln for ln in self._order_lines(order)
+                         if not product_id or ln.productId == product_id]
+                if not lines:
+                    continue
+                valid = order.status in paid_statuses
+                if valid:
+                    paid_orders += 1
+                    if order.userId:
+                        buyers.add(order.userId)
+                    summary["orderCount"] += 1
+                    summary["qty"] += sum(ln.quantity for ln in lines)
+                    summary["gmv"] = round(summary["gmv"] + sum(ln.totalAmount for ln in lines), 2)
+                    summary["goodsAmount"] = round(
+                        summary["goodsAmount"] + sum(ln.amount for ln in lines), 2)
+                    summary["originalAmount"] = round(
+                        summary["originalAmount"] + sum(ln.originalAmount for ln in lines), 2)
+                    summary["discountAmount"] = round(
+                        summary["discountAmount"] + sum(ln.discountAmount for ln in lines), 2)
+                    summary["costAmount"] = round(
+                        summary["costAmount"] + sum(ln.costAmount for ln in lines), 2)
+                    # 平均付款时长 / 超时未付款
+                    created = _parse_dt(order.createTime)
+                    paid_at = _parse_dt(order.payTime)
+                    if created and paid_at:
+                        secs = max(0.0, (paid_at - created).total_seconds())
+                        pay_seconds.append(secs)
+                elif order.status == "pending_pay":
+                    pending_count += 1
+                    pending_amount = round(
+                        pending_amount + sum(ln.totalAmount for ln in lines), 2)
+                    created = _parse_dt(order.createTime)
+                    if created and (now_dt - created).total_seconds() > ORDER_PAY_TIMEOUT_MINUTES * 60:
+                        timeout_count += 1
+                elif order.status == "refunded":
+                    amount = round(sum(ln.totalAmount for ln in lines), 2)
+                    refund["count"] += 1
+                    refund["amount"] = round(refund["amount"] + amount, 2)
+                    reason = (order.refundReason or "未填写原因").strip()[:80] or "未填写原因"
+                    item = refund["reasons"].setdefault(reason, {"reason": reason,
+                                                                  "count": 0, "amount": 0.0})
+                    item["count"] += 1
+                    item["amount"] = round(item["amount"] + amount, 2)
+                if order.status == "canceled":
+                    continue
+
+                # 渠道分布：按**订单行**渠道算。购物车合并单可能同时来自
+                # 小黄车 + 商品卡 + 回放，用订单级 channel（会被压成 cart）
+                # 会把这些入口全部吞掉，单品渠道分析就失真了。
+                line_channels: dict[str, list] = {}
+                for ln in lines:
+                    ch = ln.channel or order.channel or "legacy"
+                    line_channels.setdefault(ch, []).append(ln)
+                for ch, ch_lines in line_channels.items():
+                    if ch not in channels:
+                        channels[ch] = {"channel": ch,
+                                        "label": ORDER_CHANNEL_LABELS.get(ch, ch),
+                                        "orderCount": 0, "gmv": 0.0}
+                        channel_orders[ch] = set()
+                    if order.orderId not in channel_orders[ch]:
+                        channel_orders[ch].add(order.orderId)
+                        channels[ch]["orderCount"] += 1
+                    if valid:
+                        channels[ch]["gmv"] = round(
+                            channels[ch]["gmv"] + sum(ln.totalAmount for ln in ch_lines), 2)
+
+                for line in lines:
+                    key = (line.productId, line.skuId or "")
+                    row = sku_rows.get(key)
+                    if row is None:
+                        product = self.products.get(line.productId)
+                        sku = self._find_sku(product, line.skuId) if product else None
+                        row = {
+                            "productId": line.productId,
+                            "productName": line.productName,
+                            "skuId": line.skuId,
+                            "skuSpec": line.skuSpec or (sku.spec if sku else "默认规格"),
+                            "price": sku.price if sku else line.unitPrice,
+                            "costPrice": (sku.costPrice if sku else 0) or line.costPrice,
+                            "stock": max(0, sku.stock) if sku else 0,
+                            "enabled": bool(sku and sku.isEnabled),
+                            "qty": 0, "gmv": 0.0, "originalAmount": 0.0,
+                            "discountAmount": 0.0, "costAmount": 0.0,
+                            "grossProfit": 0.0, "orderCount": 0, "pendingCount": 0,
+                        }
+                        sku_rows[key] = row
+                        seen_sku_orders[key] = set()
+                    if valid:
+                        if order.orderId not in seen_sku_orders[key]:
+                            seen_sku_orders[key].add(order.orderId)
+                            row["orderCount"] += 1
+                        row["qty"] += line.quantity
+                        row["gmv"] = round(row["gmv"] + line.totalAmount, 2)
+                        row["originalAmount"] = round(
+                            row["originalAmount"] + line.originalAmount, 2)
+                        row["discountAmount"] = round(
+                            row["discountAmount"] + line.discountAmount, 2)
+                        row["costAmount"] = round(row["costAmount"] + line.costAmount, 2)
+                    elif order.status == "pending_pay":
+                        row["pendingCount"] += 1
+
+            # 当前库存为 0 但有订单历史 / 尚未产生订单的 SKU 也要出现在面板里，
+            # 因此再把商品目录里的 SKU 补齐一次。
+            for product in self.products.values():
+                if product_id and product.productId != product_id:
+                    continue
+                for sku in product.skus:
+                    key = (product.productId, sku.skuId)
+                    if key not in sku_rows:
+                        sku_rows[key] = {
+                            "productId": product.productId, "productName": product.name,
+                            "skuId": sku.skuId, "skuSpec": sku.spec, "price": sku.price,
+                            "costPrice": sku.costPrice or product.costPrice,
+                            "stock": max(0, sku.stock), "enabled": sku.isEnabled,
+                            "qty": 0, "gmv": 0.0, "originalAmount": 0.0,
+                            "discountAmount": 0.0, "costAmount": 0.0,
+                            "grossProfit": 0.0, "orderCount": 0, "pendingCount": 0,
+                        }
+                    else:
+                        row = sku_rows[key]
+                        row["price"] = sku.price
+                        row["costPrice"] = sku.costPrice or product.costPrice
+                        row["stock"] = max(0, sku.stock)
+                        row["enabled"] = sku.isEnabled
+            for row in sku_rows.values():
+                row["grossProfit"] = round(row["gmv"] - row["costAmount"], 2)
+                row["grossMargin"] = round(
+                    (row["grossProfit"] / row["gmv"] * 100) if row["gmv"] > 0 else 0.0, 1)
+            sku_list = sorted(sku_rows.values(), key=lambda x: (-x["gmv"], -x["qty"]))
+
+            summary["grossProfit"] = round(summary["gmv"] - summary["costAmount"], 2)
+            summary["grossMargin"] = round(
+                (summary["grossProfit"] / summary["gmv"] * 100)
+                if summary["gmv"] > 0 else 0.0, 1)
+            summary["buyerCount"] = len(buyers)
+            summary["avgOrderAmount"] = round(
+                (summary["gmv"] / summary["orderCount"])
+                if summary["orderCount"] else 0.0, 2)
+
+            # 加购 → 下单转化：加购用户去重，转化为其中已产生有效订单的用户
+            add_users = {
+                e.get("userId") for e in self.cart_events
+                if (e.get("userId") and (not product_id or e.get("productId") == product_id))
+            }
+            add_users.discard("")
+            add_count = sum(
+                1 for e in self.cart_events
+                if not product_id or e.get("productId") == product_id
+            )
+            converted = add_users & buyers
+            cart_stats = {
+                "addUsers": len(add_users),
+                "addCount": add_count,
+                "orderUsers": len(converted),
+                "conversionRate": round(
+                    (len(converted) / len(add_users) * 100) if add_users else 0.0, 1),
+            }
+
+            total_channel_gmv = sum(c["gmv"] for c in channels.values())
+            channel_list = []
+            for c in channels.values():
+                c = dict(c)
+                c["ratio"] = round(
+                    (c["gmv"] / total_channel_gmv * 100) if total_channel_gmv else 0.0, 1)
+                channel_list.append(c)
+            channel_list.sort(key=lambda x: -x["gmv"])
+
+            avg_pay_seconds = round(sum(pay_seconds) / len(pay_seconds), 1) if pay_seconds else 0.0
+            refund_rate = round(
+                (refund["count"] / (paid_orders + refund["count"]) * 100)
+                if (paid_orders + refund["count"]) else 0.0, 1)
+            reasons = sorted(refund["reasons"].values(),
+                             key=lambda x: (-x["count"], -x["amount"]))
+            threshold = max(0, int(self.settings.system.lowStockThreshold or 0))
+            low_items = [
+                {"productId": r["productId"], "productName": r["productName"],
+                 "skuId": r["skuId"], "skuSpec": r["skuSpec"], "stock": r["stock"]}
+                for r in sku_list
+                if r["enabled"] and threshold > 0 and 0 <= r["stock"] <= threshold
+            ]
+            product_name = (self.products.get(product_id).name
+                            if product_id and product_id in self.products else "全部商品")
+            return {
+                "success": True,
+                "productId": product_id,
+                "productName": product_name,
+                "summary": summary,
+                "skuStats": sku_list,
+                "refund": {
+                    "count": refund["count"], "amount": refund["amount"],
+                    "rate": refund_rate, "reasons": reasons,
+                    "paidOrderCount": paid_orders,
+                },
+                "cart": cart_stats,
+                "channels": channel_list,
+                "payment": {
+                    "pendingCount": pending_count,
+                    "pendingAmount": pending_amount,
+                    "paidCount": len(pay_seconds),
+                    "avgPaySeconds": avg_pay_seconds,
+                    "avgPayMinutes": round(avg_pay_seconds / 60, 1),
+                    "timeoutCount": timeout_count,
+                    "timeoutMinutes": ORDER_PAY_TIMEOUT_MINUTES,
+                },
+                "stock": {
+                    "threshold": threshold,
+                    "lowCount": len(low_items),
+                    "lowItems": low_items[:30],
+                },
+            }
+
+    def get_low_stock_overview(self) -> list[dict]:
+        """当前低于设置阈值的 SKU 列表（供运营台预警条/商品页红点）。"""
+        threshold = max(0, int(self.settings.system.lowStockThreshold or 0))
+        if threshold <= 0:
+            return []
+        rows = []
+        with self._lock:
+            for product in self.products.values():
+                for sku in product.skus:
+                    if sku.isEnabled and sku.stock <= threshold:
+                        rows.append({
+                            "productId": product.productId,
+                            "productName": product.name,
+                            "skuId": sku.skuId,
+                            "skuSpec": sku.spec,
+                            "stock": sku.stock,
+                            "threshold": threshold,
+                        })
+        rows.sort(key=lambda x: x["stock"])
+        return rows
 
     # ============================================================
     # AI 话术历史（内存）
@@ -2861,6 +3805,7 @@ class LiveCommerceDataManager:
             # 人数，本场第一个检查点就会拿它去算涨跌，凭空报一条假提示。
             self._last_alert_real_online = None
             self._low_stock_alerted = False
+            self._low_stock_alerted_keys.clear()
             self._save_alerts()
             self.high_freq_questions = {}
             self.virtual_freq_questions = {}
@@ -3279,6 +4224,7 @@ class LiveCommerceDataManager:
                 # 假涨跌。清成未知，等于重新开跑，第一次只建基准。
                 self._last_alert_real_online = None
                 self._low_stock_alerted = False
+                self._low_stock_alerted_keys.clear()
                 continue
             try:
                 alerts = self._check_alerts()
@@ -3335,30 +4281,36 @@ class LiveCommerceDataManager:
                 ))
         self._last_alert_real_online = real
 
-        # ── 库存：按上架量的比例 ──
-        # 上架量 = 现存 + 已售（守恒量，见商品数据不变量）。soldBase 是纯展示基数，
-        # schema 明确它不参与任何经营统计，这里也不能算进去。
-        product = self.get_current_product()
-        if product:
-            listed = max(0, product.stock) + max(0, product.soldCount)
-            threshold = int(listed * ALERT_LOW_STOCK_RATIO)
-            low = product.stock > 0 and product.stock <= threshold
-            if low and not self._low_stock_alerted:
-                # 只在「进入告急」时报一次；库存补回来后再告急才会再报
-                self._low_stock_alerted = True
-                alerts.append(SmartAlert(
-                    alertId=f"alert_{int(time.time())}_stock",
-                    type="low_stock",
-                    title="库存不足提醒",
-                    message=(
-                        f"当前商品「{product.name}」库存仅剩{product.stock}件"
-                        f"（上架{listed}件，剩不足{int(ALERT_LOW_STOCK_RATIO * 100)}%），"
-                        f"建议控单或准备换下一款商品"
-                    ),
-                    timestamp=now,
-                ))
-            elif not low:
-                self._low_stock_alerted = False
+        # ── 库存：按系统设置阈值，逐个 SKU 判定 ──
+        # 旧实现只看「当前讲解商品」且用比例阈值，主播看不到非讲解商品/其它规格
+        # 的库存告急。现在使用 SystemSettings.lowStockThreshold，按 SKU 告警；
+        # 同一 SKU 在「进入告急」时只报一次，补货后移除标记，下次再低会重新报。
+        threshold = max(0, int(self.settings.system.lowStockThreshold or 0))
+        low_keys: set[str] = set()
+        if threshold > 0:
+            for product in list(self.products.values()):
+                for sku in product.skus:
+                    key = f"{product.productId}:{sku.skuId}"
+                    if not sku.isEnabled or sku.stock > threshold:
+                        continue
+                    low_keys.add(key)
+                    if key in self._low_stock_alerted_keys:
+                        continue
+                    self._low_stock_alerted_keys.add(key)
+                    stock_text = "已售罄" if sku.stock <= 0 else f"仅剩{sku.stock}件"
+                    alerts.append(SmartAlert(
+                        alertId=f"alert_{int(time.time())}_stock_{product.productId}_{sku.skuId}",
+                        type="low_stock",
+                        title="库存不足提醒",
+                        message=(
+                            f"商品「{product.name}」规格「{sku.spec}」{stock_text}"
+                            f"（预警阈值 {threshold} 件），建议补货或控单"
+                        ),
+                        timestamp=now,
+                    ))
+        # 补货/调高阈值后允许再次告警
+        self._low_stock_alerted_keys &= low_keys
+        self._low_stock_alerted = bool(low_keys)
         return alerts
 
     # ============================================================

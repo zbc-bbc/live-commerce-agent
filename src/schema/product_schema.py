@@ -9,6 +9,18 @@
 from pydantic import BaseModel, Field
 
 
+class SkuRequest(BaseModel):
+    """商品 SKU 入参（与 live_commerce_schema.SkuItem 对齐）。"""
+
+    skuId: str = Field(default="", max_length=64, description="SKU ID；留空由服务端补齐")
+    spec: str = Field(default="默认规格", max_length=100, description="规格描述")
+    price: float = Field(default=0, ge=0, description="直播价")
+    originalPrice: float = Field(default=0, ge=0, description="原价")
+    stock: int = Field(default=0, ge=0, description="库存")
+    costPrice: float = Field(default=0, ge=0, description="成本价")
+    isEnabled: bool = Field(default=True, description="是否启用")
+
+
 class ProductCreateRequest(BaseModel):
     """新增商品。
 
@@ -33,6 +45,8 @@ class ProductCreateRequest(BaseModel):
     tags: list[str] = Field(default_factory=list, description="商品标签")
     sellingPoints: list[str] = Field(default_factory=list, description="独立卖点列表")
     isInLibrary: bool = Field(default=True, description="是否在备选商品库中")
+    skus: list[SkuRequest] = Field(default_factory=list, description="SKU 规格列表；空则由服务端补默认规格")
+    costPrice: float = Field(default=0, ge=0, description="商品默认成本价")
 
 
 class ProductUpdateRequest(BaseModel):
@@ -54,6 +68,8 @@ class ProductUpdateRequest(BaseModel):
     tags: list[str] | None = None
     sellingPoints: list[str] | None = None
     isInLibrary: bool | None = None
+    skus: list[SkuRequest] | None = None
+    costPrice: float | None = Field(default=None, ge=0)
 
 
 class ProductOnSaleRequest(BaseModel):
