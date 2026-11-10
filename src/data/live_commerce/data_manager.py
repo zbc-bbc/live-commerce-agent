@@ -70,6 +70,35 @@ DANMAKU_SESSIONS_DIRNAME = "danmaku_sessions"
 DANMAKU_SESSION_INDEX = "index.json"
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
+# ── 复盘报告独立存储 ──
+# 每份报告落盘为 reports/<reportId>.json，index.json 只保存摘要。
+# reportId 含时间戳 + 随机串，重新生成会新增一份，**不覆盖**历史报告。
+REPORTS_INDEX = "index.json"
+_REPORT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,120}$")
+_QUESTION_PUNCT_RE = re.compile(r"[\s？?！!。，,、；;：:~～…\.]+")
+
+
+def _question_key(text: str) -> str:
+    """高频问题归并键：去空白 / 标点后截前 30 字。"""
+    return _QUESTION_PUNCT_RE.sub("", (text or ""))[:30]
+
+
+def _parse_dt(value: Any) -> Optional[datetime]:
+    """宽松解析 ISO 时间戳；失败返回 None。"""
+    try:
+        return datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _timestamp_in_window(ts: Any, start: Any, end: Any) -> bool:
+    """时间戳是否落在 [start, end] 内；end 缺失时只校验下界。"""
+    t, a = _parse_dt(ts), _parse_dt(start)
+    if t is None or a is None:
+        return False
+    b = _parse_dt(end)
+    return t >= a and (b is None or t <= b)
+
 
 def danmaku_sessions_dir() -> str:
     """返回场次弹幕归档目录（不存在则创建）。"""
@@ -1019,6 +1048,12 @@ class LiveCommerceDataManager:
         start_time = self.live_state.startTime or ""
         start_label = start_time[:16].replace("T", " ") if start_time else end_time[:16].replace("T", " ")
         counts = self._count_session_danmaku(items)
+        # 复盘重新生成时场次内存快照已不存在，在线人数 / 真实观众 / 话术使用等
+        # 指标必须随场次一起固化，否则历史报告只能退回 0。
+        avg_online = (round(self._online_sum / self._online_samples)
+                      if self._online_samples else 0)
+        avg_real = (max(0, avg_online - self._online_base)
+                    if self._online_samples else 0)
         meta = {
             "sessionId": sid,
             "title": f"{product_name} · {start_label}",
@@ -1028,6 +1063,16 @@ class LiveCommerceDataManager:
             "endTime": end_time,
             "duration": self.live_state.liveDuration,
             **counts,
+            "realUsers": len(self._session_real_users),
+            "peakOnline": self._online_peak,
+            "avgOnline": avg_online,
+            "peakRealViewers": self._online_real_peak,
+            "avgRealViewers": avg_real,
+            "onlineBase": self._online_base,
+            "presetUsedCount": sum(1 for p in self.presets.values() if p.useCount > 0),
+            "humanTransferCount": sum(
+                1 for uid, s in self.user_sessions.items()
+                if is_real_user_id(uid) and s.status == "human_reception"),
             "archivedAt": end_time,
         }
         session_dir = danmaku_sessions_dir()
@@ -3615,152 +3660,341 @@ class LiveCommerceDataManager:
     # ============================================================
     # 复盘报告生成
     # ============================================================
-    def generate_report(self, save: bool = True) -> dict:
-        """生成直播复盘报告（**真实用户口径**，线程安全，快速返回）。
+    # ============================================================
+    # 复盘报告（按直播场次；商品 / 弹幕双维度；历史独立存储）
+    # ============================================================
+    def generate_report(self, save: bool = True, session_id: Optional[str] = None,
+                        regenerated: bool = False) -> dict:
+        """生成一份**绑定直播场次**的复盘报告。
 
-        这份报告里的每一个数字都来自真实观众的真实行为：本场真实弹幕、真实私信、
-        真实订单、真实评价。模拟数据（u001~u010 / virtual_* / userId 为空的订单）
-        只用于直播间营造氛围，一条都不进报告 —— 被排除的量在 `scope.excluded*`
-        与 `chapter8_conversion.mockOrdersExcluded` 里**显式披露**，让看报告的人
-        立刻明白「为什么 GMV 只有几十块」，而不是当成 bug。
+        报告只统计真实注册观众（v_* 账号）在本场内的真实行为；模拟弹幕 / 模拟订单
+        只用于营造氛围，排除量在 `scope` 里显式披露。每份报告独立落盘、索引可查，
+        reportId 含时间戳与随机串，重新生成会新增一份，**不覆盖**历史记录。
 
-        旧实现的问题（全部删除）：
-          · online_peak / totalViewers / chapter2.score / peakHeat 直接 random
-          · chapter3.realCount 取 totalDanmaku —— 而虚拟弹幕生成器绕过 add_danmaku
-            直接累加，所以那个"真实弹幕数"里混着氛围弹幕
-          · 没有真实数据时用 too_short / actual_duration=3600 兜底，**凭空造出一场
-            一小时的直播**。现在没有真实数据就如实显示空态。
-          · 完全不读 orders（成交数据明明已经在 get_order_stats 里）
-
-        save=False 供自检探针使用：报告会写入 data/reports/，探针不该留下垃圾文件。
+        session_id 为空 → 复盘当前场次；传历史场次ID → 从场次归档重建（重新生成）。
         """
-        now = datetime.now()
-        with self._lock:
-            # ---- 本场真实数据快照（一次取齐，避免报告内部各章节口径漂移）----
-            real_dm = self._session_real_danmaku()
-            real_reviews = [r for r in self.reviews if is_real_user_id(r.userId)]
-            real_msgs = [m for uid, msgs in self.private_messages.items()
-                         if is_real_user_id(uid)
-                         for m in msgs if self._in_session(m.timestamp)]
-            real_replies = [d for d in real_dm if d.isReplied]
-            virtual_count = sum(1 for d in self.danmaku_list
-                                if classify_user_id(d.userId) == "virtual")
-            mock_dm_excluded = sum(
-                1 for d in self.danmaku_list
-                if classify_user_id(d.userId) in ("virtual", "mock")
-                and self._in_session(d.timestamp))
-            unique_real = len(self._session_real_users)
-            base = self._online_base
-            online_peak = self._online_peak
-            online_avg = (round(self._online_sum / self._online_samples)
-                          if self._online_samples else 0)
-            real_peak = self._online_real_peak
-            # 减去模拟热度基数才是"真实观众数"；没有采样时平均值无意义，报 0
-            avg_real = max(0, online_avg - base) if self._online_samples else 0
-            duration = self.live_state.liveDuration
-            start_time = self.live_state.startTime or ""
-            product = self.get_current_product()
-            product_name = product.name if product else "未上架商品"
-            preset_used = sum(1 for p in self.presets.values() if p.useCount > 0)
-            human_transfer = sum(
-                1 for uid, s in self.user_sessions.items()
-                if is_real_user_id(uid) and s.status == "human_reception")
-            top_questions = self.get_high_freq_questions(10)
-            stats_snapshot = {
-                "mentionCount": self.stats.mentionCount,
-                "intentScore": self.stats.intentScore,
-                "aiReplySuccessRate": self.stats.aiReplySuccessRate,
-                "avgResponseTime": self.stats.avgResponseTime,
-                "humanTransferCount": human_transfer,
-                "presetUsedCount": preset_used,
-                "virtualDanmakuCount": virtual_count,
-                "potentialOrderCount": self.stats.potentialOrderCount,
-            }
+        sid = (session_id or "").strip()
+        current_sid = self.live_state.sessionId or ""
+        if sid and sid != current_sid:
+            ds = self._report_dataset_from_archive(sid)
+            if ds is None:
+                return {"success": False, "message": "场次不存在或尚未归档"}
+        else:
+            if not current_sid:
+                return {"success": False, "message": "尚未开播，暂无绑定场次的复盘数据"}
+            with self._lock:
+                ds = self._report_dataset_current_locked()
+        report = self._build_report_payload(ds, regenerated=regenerated)
+        if save:
+            self._save_report(report)
+        return report
 
-            # ---- 成交（本场真实观众订单）----
-            real_orders = self._session_orders_locked()
-            mock_orders_excluded = sum(1 for o in self.orders.values() if not order_is_real(o))
-            paid_statuses = ("paid", "shipped", "completed")
-            paid_orders = [o for o in real_orders if o.status in paid_statuses]
-            gmv = round(sum(o.totalAmount for o in paid_orders), 2)
-            sold_qty = sum(o.quantity for o in paid_orders)
-            refund_count = sum(1 for o in real_orders if o.status == "refunded")
-            by_product: dict[str, dict] = {}
-            for o in paid_orders:
-                b = by_product.setdefault(o.productId, {
-                    "productId": o.productId, "name": o.productName,
-                    "qty": 0, "amount": 0.0})
-                b["qty"] += o.quantity
-                b["amount"] = round(b["amount"] + o.totalAmount, 2)
-
-            # ---- 转化阻碍：对**真实弹幕**做关键词分类计数（旧实现是 5 个魔数）----
-            barrier_counts: dict[str, int] = {}
-            for d in real_dm:
-                k = classify_barrier(d.content)
-                if k != "other":
-                    barrier_counts[k] = barrier_counts.get(k, 0) + 1
-
-            # ---- 优缺点：全部来自真实评价，没有就留空（前端隐藏该行）----
-            positive_tags: dict[str, int] = {}
-            concern_tags: dict[str, int] = {}
-            for r in real_reviews:
-                bucket = positive_tags if r.sentiment == "positive" else concern_tags
-                if r.sentiment not in ("positive", "negative"):
-                    continue
-                if r.tags:
-                    for t in r.tags:
-                        bucket[t] = bucket.get(t, 0) + 1
-                else:
-                    # 观众提交的评价没有 tags，退化成"用户原话里命中的情绪词"
-                    for w in (_POSITIVE_WORDS if r.sentiment == "positive" else _NEGATIVE_WORDS):
-                        if w in r.content:
-                            bucket[w] = bucket.get(w, 0) + 1
-            positive_points = [k for k, _ in sorted(
-                positive_tags.items(), key=lambda kv: -kv[1])[:3]]
-            concern_points = [k for k, _ in sorted(
-                concern_tags.items(), key=lambda kv: -kv[1])[:3]]
-
-            # ---- 评价聚合（只算真实评价）----
-            total_reviews = len(real_reviews)
-            positive = sum(1 for r in real_reviews if r.sentiment == "positive")
-            negative = sum(1 for r in real_reviews if r.sentiment == "negative")
-            positive_rate = (positive / total_reviews * 100) if total_reviews else 0.0
-            real_rating = (round(sum(r.rating for r in real_reviews) / total_reviews, 1)
-                           if total_reviews else None)
-
-            # ---- 本场真实弹幕回复覆盖率与平均响应耗时 ----
-            reply_rate = (len(real_replies) / len(real_dm) * 100) if real_dm else 0.0
-            latencies: list[float] = []
-            for d in real_replies:
-                try:
-                    latencies.append((
-                        datetime.fromisoformat(d.replyTime)
-                        - datetime.fromisoformat(d.timestamp)).total_seconds())
-                except (TypeError, ValueError):
-                    continue
-            avg_response = round(sum(latencies) / len(latencies), 1) if latencies else 0.0
-
-        duration_min = duration // 60
-        grade = self._calculate_grade(positive_rate, len(real_replies), len(real_dm))
-
-        live_data = {
-            "status": self.live_state.status,
-            "liveDuration": duration,
+    def _report_dataset_current_locked(self) -> dict:
+        """采集当前场次的复盘数据快照（调用方需持锁）。"""
+        sid = self.live_state.sessionId or ""
+        items = list(self.current_session_danmaku)
+        if not items:
+            # 直播结束后缓冲已归档清空；从滚动列表按 sessionId 兜底，
+            # 保证 end_live 自动生成报告时仍有完整场次数据。
+            items = [d for d in self.danmaku_list if d.sessionId == sid]
+        real_dm = [d for d in items if is_real_user_id(d.userId)]
+        real_reviews = [r for r in self.reviews
+                        if is_real_user_id(r.userId) and self._in_session(r.timestamp)]
+        real_msgs = [m for uid, msgs in self.private_messages.items()
+                     if is_real_user_id(uid)
+                     for m in msgs if self._in_session(m.timestamp)]
+        real_orders = self._session_orders_locked()
+        mock_orders_excluded = sum(
+            1 for o in self.orders.values()
+            if not order_is_real(o) and self._in_session(o.createTime))
+        product = self.get_current_product()
+        product_id = product.productId if product else ""
+        product_name = product.name if product else "未上架商品"
+        start_time = self.live_state.startTime or ""
+        duration = int(self.live_state.liveDuration or 0)
+        online_avg = (round(self._online_sum / self._online_samples)
+                      if self._online_samples else 0)
+        base = int(self._online_base or 0)
+        unique_real = len(self._session_real_users) or len({d.userId for d in real_dm})
+        start_label = start_time[:16].replace("T", " ")
+        return {
+            "source": "current",
+            "sessionId": sid,
+            "sessionTitle": f"{product_name} · {start_label}" if start_label else product_name,
+            "product": product,
+            "productId": product_id,
+            "productName": product_name,
             "startTime": start_time,
-            "endTime": now.isoformat(),
-            "onlineCount": online_peak,
-            "totalDanmaku": len(real_dm),
-            "totalAIReplies": len(real_replies),
-            "totalPrivateMessages": len(real_msgs),
-            "currentProductId": self.current_product_id,
-            "currentProductName": product_name,
+            "endTime": datetime.now().isoformat(),
+            "duration": duration,
+            "real_dm": real_dm,
+            "all_dm": items,
+            "real_reviews": real_reviews,
+            "real_msgs": real_msgs,
+            "real_orders": real_orders,
+            "unique_real": unique_real,
+            "online_peak": int(self._online_peak or 0),
+            "online_avg": online_avg,
+            "real_peak": int(self._online_real_peak or 0),
+            "avg_real": max(0, online_avg - base) if self._online_samples else 0,
+            "base": base,
+            "virtual_count": sum(1 for d in items
+                                 if classify_user_id(d.userId) == "virtual"),
+            "mock_dm_excluded": sum(1 for d in items
+                                    if classify_user_id(d.userId) in ("virtual", "mock")),
+            "mock_orders_excluded": mock_orders_excluded,
+            "preset_used": sum(1 for p in self.presets.values() if p.useCount > 0),
+            "human_transfer": sum(
+                1 for uid, s in self.user_sessions.items()
+                if is_real_user_id(uid) and s.status == "human_reception"),
+            "potential_orders": int(self.stats.potentialOrderCount or 0),
+            "intent_score": float(self.stats.intentScore or 0),
+            "mention_count": int(self.stats.mentionCount or 0),
         }
 
-        # 小结文字：只陈述本场真实发生的事，没有真实数据就直说没有
+    def _report_dataset_from_archive(self, session_id: str) -> Optional[dict]:
+        """从场次归档重建复盘数据（历史场次 / 重新生成）。"""
+        archive = self._load_session_archive(session_id)
+        if archive is None:
+            return None
+        meta = archive["session"]
+        items = archive["danmaku"]
+        sid = str(meta.get("sessionId") or session_id)
+        start_time = str(meta.get("startTime") or "")
+        end_time = str(meta.get("endTime") or "")
+        product_id = str(meta.get("productId") or "")
+        product_name = str(meta.get("productName") or "未上架商品")
+        real_dm = [d for d in items if is_real_user_id(d.userId)]
+        with self._lock:
+            real_orders = [
+                o for o in self.orders.values()
+                if order_is_real(o)
+                and _timestamp_in_window(o.createTime, start_time, end_time)]
+            mock_orders_excluded = sum(
+                1 for o in self.orders.values()
+                if not order_is_real(o)
+                and _timestamp_in_window(o.createTime, start_time, end_time))
+            real_reviews = [
+                r for r in self.reviews
+                if is_real_user_id(r.userId)
+                and _timestamp_in_window(r.timestamp, start_time, end_time)]
+            real_msgs = [
+                m for uid, msgs in self.private_messages.items()
+                if is_real_user_id(uid)
+                for m in msgs
+                if _timestamp_in_window(m.timestamp, start_time, end_time)]
+            product = self.products.get(product_id) if product_id else None
+        unique_real = (int(meta.get("realUsers") or 0)
+                       or len({d.userId for d in real_dm}))
+        duration = int(meta.get("duration") or 0)
+        title = str(meta.get("title") or "")
+        if not title:
+            label = start_time[:16].replace("T", " ")
+            title = f"{product_name} · {label}" if label else product_name
+        mention_count = self._count_product_mentions(real_dm, product, product_name)
+        return {
+            "source": "history",
+            "sessionId": sid,
+            "sessionTitle": title,
+            "product": product,
+            "productId": product_id,
+            "productName": product_name,
+            "startTime": start_time,
+            "endTime": end_time or datetime.now().isoformat(),
+            "duration": duration,
+            "real_dm": real_dm,
+            "all_dm": items,
+            "real_reviews": real_reviews,
+            "real_msgs": real_msgs,
+            "real_orders": real_orders,
+            "unique_real": unique_real,
+            "online_peak": int(meta.get("peakOnline") or 0),
+            "online_avg": int(meta.get("avgOnline") or 0),
+            "real_peak": int(meta.get("peakRealViewers") or 0),
+            "avg_real": int(meta.get("avgRealViewers") or 0),
+            "base": int(meta.get("onlineBase") or 0),
+            "virtual_count": sum(1 for d in items
+                                 if classify_user_id(d.userId) == "virtual"),
+            "mock_dm_excluded": sum(1 for d in items
+                                    if classify_user_id(d.userId) in ("virtual", "mock")),
+            "mock_orders_excluded": mock_orders_excluded,
+            "preset_used": int(meta.get("presetUsedCount") or 0),
+            "human_transfer": int(meta.get("humanTransferCount") or 0),
+            "potential_orders": sum(
+                1 for o in real_orders if o.status == "pending_pay"),
+            "intent_score": self._compute_intent_score(
+                real_dm, real_msgs, real_orders, unique_real),
+            "mention_count": mention_count,
+        }
+
+    def _build_report_payload(self, ds: dict, regenerated: bool = False) -> dict:
+        """把场次数据快照渲染成报告（商品 / 弹幕双维度 + 文字总结）。"""
+        now = datetime.now()
+        sid = ds.get("sessionId") or ""
+        session_title = ds.get("sessionTitle") or "未命名场次"
+        start_time = ds.get("startTime") or ""
+        end_time = ds.get("endTime") or now.isoformat()
+        duration = int(ds.get("duration") or 0)
+        product = ds.get("product")
+        product_id = ds.get("productId") or ""
+        product_name = ds.get("productName") or "未上架商品"
+        real_dm: list[DanmakuItem] = ds.get("real_dm") or []
+        all_dm: list[DanmakuItem] = ds.get("all_dm") or []
+        real_reviews: list[ReviewItem] = ds.get("real_reviews") or []
+        real_msgs: list[PrivateMessageItem] = ds.get("real_msgs") or []
+        real_orders: list[OrderItem] = ds.get("real_orders") or []
+        unique_real = int(ds.get("unique_real") or 0)
+        virtual_count = int(ds.get("virtual_count") or 0)
+        mock_dm_excluded = int(ds.get("mock_dm_excluded") or 0)
+        mock_orders_excluded = int(ds.get("mock_orders_excluded") or 0)
+        preset_used = int(ds.get("preset_used") or 0)
+        human_transfer = int(ds.get("human_transfer") or 0)
+        potential_orders = int(ds.get("potential_orders") or 0)
+        mention_count = int(ds.get("mention_count") or 0)
+
+        paid_statuses = ("paid", "shipped", "completed")
+        paid_orders = [o for o in real_orders if o.status in paid_statuses]
+        gmv = round(sum(o.totalAmount for o in paid_orders), 2)
+        sold_qty = sum(o.quantity for o in paid_orders)
+        refund_count = sum(1 for o in real_orders if o.status == "refunded")
+        buyer_count = len({o.userId for o in paid_orders})
+        conversion_rate = (round(buyer_count / unique_real * 100, 1)
+                           if unique_real else 0.0)
+        by_product: dict[str, dict] = {}
+        for o in paid_orders:
+            b = by_product.setdefault(o.productId, {
+                "productId": o.productId, "name": o.productName,
+                "qty": 0, "amount": 0.0})
+            b["qty"] += o.quantity
+            b["amount"] = round(b["amount"] + o.totalAmount, 2)
+
+        # ---- 弹幕维度：问题、情绪、顾虑、时间分布 ----
+        real_replies = [d for d in real_dm if d.isReplied]
+        question_count = sum(1 for d in real_dm if d.isQuestion)
+        reply_rate = (len(real_replies) / len(real_dm) * 100) if real_dm else 0.0
+        latencies: list[float] = []
+        for d in real_replies:
+            a, b = _parse_dt(d.timestamp), _parse_dt(d.replyTime)
+            if a is not None and b is not None:
+                latencies.append((b - a).total_seconds())
+        avg_response = round(sum(latencies) / len(latencies), 1) if latencies else 0.0
+        sentiment_counts = {"positive": 0, "negative": 0, "neutral": 0}
+        barrier_counts: dict[str, int] = {}
+        for d in real_dm:
+            s = d.sentiment or classify_sentiment(d.content)
+            sentiment_counts[s if s in sentiment_counts else "neutral"] += 1
+            k = classify_barrier(d.content)
+            if k != "other":
+                barrier_counts[k] = barrier_counts.get(k, 0) + 1
+        top_questions = self._rank_questions(real_dm, 10)
+        question_categories = self._rank_question_categories(real_dm)
+        failed_questions = self._get_failed_questions(real_dm)
+        timeline = self._build_timeline(real_dm, start_time)
+
+        # ---- 商品维度：每个商品的提及 / 提问 / 成交 / 退款 / 评价 ----
+        product_rows: dict[str, dict] = {}
+
+        def _row(pid: str, name: str) -> dict:
+            key = pid or f"name:{name}"
+            row = product_rows.get(key)
+            if row is None:
+                row = {
+                    "productId": pid, "name": name or "未指定商品",
+                    "mentions": 0, "questions": 0,
+                    "orderCount": 0, "paidCount": 0, "qty": 0, "gmv": 0.0,
+                    "refundCount": 0, "reviewCount": 0, "rating": None,
+                    "positive": 0, "negative": 0, "_ratingSum": 0,
+                }
+                product_rows[key] = row
+            return row
+
+        if product_id or product_name:
+            _row(product_id, product_name)
+        for o in real_orders:
+            row = _row(o.productId, o.productName)
+            row["orderCount"] += 1
+            if o.status in paid_statuses:
+                row["paidCount"] += 1
+                row["qty"] += o.quantity
+                row["gmv"] = round(row["gmv"] + o.totalAmount, 2)
+            if o.status == "refunded":
+                row["refundCount"] += 1
+        for r in real_reviews:
+            row = _row(r.productId or product_id, r.productName or product_name)
+            row["reviewCount"] += 1
+            row["_ratingSum"] += r.rating
+            if r.sentiment == "positive":
+                row["positive"] += 1
+            elif r.sentiment == "negative":
+                row["negative"] += 1
+        # 弹幕提及：商品名 / 卖点 / 标签命中即计一次；提问另计
+        targets = []
+        for row in product_rows.values():
+            pid = row.get("productId") or ""
+            p = self.products.get(pid) if pid else None
+            if p is not None:
+                keys = [p.name] + list(p.sellingPoints) + list(p.tags)
+            else:
+                keys = [row.get("name") or ""]
+            keys = [k for k in keys if k and len(k) >= 2]
+            targets.append((row, keys))
+        for d in real_dm:
+            text = (d.content or "").lower()
+            if not text:
+                continue
+            for row, keys in targets:
+                if any(k.lower() in text for k in keys):
+                    row["mentions"] += 1
+                    if d.isQuestion:
+                        row["questions"] += 1
+        products_out = []
+        for row in product_rows.values():
+            row["rating"] = (round(row["_ratingSum"] / row["reviewCount"], 1)
+                             if row["reviewCount"] else None)
+            row.pop("_ratingSum", None)
+            products_out.append(row)
+        products_out.sort(
+            key=lambda r: (-r["gmv"], -r["mentions"], -r["orderCount"], r["name"]))
+        top_product_name = (products_out[0]["name"] if products_out
+                            else product_name)
+
+        # ---- 评价聚合（只算本场真实评价）----
+        positive_tags: dict[str, int] = {}
+        concern_tags: dict[str, int] = {}
+        for r in real_reviews:
+            if r.sentiment not in ("positive", "negative"):
+                continue
+            bucket = positive_tags if r.sentiment == "positive" else concern_tags
+            if r.tags:
+                for t in r.tags:
+                    bucket[t] = bucket.get(t, 0) + 1
+            else:
+                for w in (_POSITIVE_WORDS if r.sentiment == "positive"
+                          else _NEGATIVE_WORDS):
+                    if w in r.content:
+                        bucket[w] = bucket.get(w, 0) + 1
+        positive_points = [k for k, _ in sorted(
+            positive_tags.items(), key=lambda kv: -kv[1])[:3]]
+        concern_points = [k for k, _ in sorted(
+            concern_tags.items(), key=lambda kv: -kv[1])[:3]]
+        total_reviews = len(real_reviews)
+        positive = sum(1 for r in real_reviews if r.sentiment == "positive")
+        negative = sum(1 for r in real_reviews if r.sentiment == "negative")
+        positive_rate = (positive / total_reviews * 100) if total_reviews else 0.0
+        real_rating = (round(sum(r.rating for r in real_reviews) / total_reviews, 1)
+                       if total_reviews else None)
+
+        grade = self._calculate_grade(positive_rate, len(real_replies), len(real_dm))
+        duration_min = duration // 60
+        start_dt = _parse_dt(start_time)
+        date_str = (start_dt or now).strftime("%Y-%m-%d")
+
+        # ---- 文字总结 / 建议（全部由本场真实数据推导）----
         highlights: list[str] = []
         if real_dm:
             highlights.append(
-                f"本场收到真实观众弹幕 {len(real_dm)} 条，来自 {unique_real} 位真实观众")
+                f"本场收到真实观众弹幕 {len(real_dm)} 条、提问 {question_count} 个，"
+                f"来自 {unique_real} 位真实观众")
         else:
             highlights.append("本场没有真实观众发言（统计只算真实用户，不含模拟氛围弹幕）")
         if real_dm:
@@ -3776,24 +4010,87 @@ class LiveCommerceDataManager:
                 f"（{positive}/{total_reviews}）")
         else:
             highlights.append("本场没有真实用户评价")
+        if products_out and products_out[0]["gmv"] > 0:
+            highlights.append(
+                f"成交集中在「{products_out[0]['name']}」"
+                f"（{products_out[0]['qty']} 件 / ¥{products_out[0]['gmv']}）")
+
+        improvements: list[str] = []
+        unanswered = sum(1 for d in real_dm if d.isQuestion and not d.isReplied)
+        if unanswered:
+            improvements.append(
+                f"本场有 {unanswered} 个真实提问未被回复，建议补充话术或安排场控跟进")
+        if barrier_counts:
+            top_key = max(barrier_counts.items(), key=lambda kv: kv[1])[0]
+            top_cat = next((c for c in _BARRIER_CATEGORIES
+                            if c["type"] == top_key), None)
+            if top_cat:
+                improvements.append(
+                    f"「{top_cat['title']}」类顾虑最多（{barrier_counts[top_key]} 条），"
+                    f"建议{top_cat['suggestion']}")
+        if not paid_orders:
+            improvements.append("本场没有真实成交，建议检查讲解节奏、价格锚点与下单引导")
+        if concern_points:
+            improvements.append(
+                "观众主要顾虑：" + "、".join(concern_points) + "，建议在讲解中主动回应")
+        if not improvements:
+            improvements.append("保持本场节奏，继续补充常见问题话术库")
+
+        if not real_dm and not paid_orders:
+            conclusion = ("本场没有真实观众弹幕与真实成交，报告仅保留场次信息。"
+                          "建议下一场提前预热，并引导观众登录后参与互动与下单。")
+        else:
+            conclusion = (
+                f"本场共 {len(real_dm)} 条真实观众弹幕（{question_count} 个提问），"
+                f"真实成交 {len(paid_orders)} 单 / GMV ¥{gmv}，"
+                f"AI 回复覆盖率 {reply_rate:.0f}%。"
+            )
+            if sentiment_counts["positive"] or sentiment_counts["negative"]:
+                conclusion += (f"弹幕情绪正面 {sentiment_counts['positive']} 条、"
+                               f"负面 {sentiment_counts['negative']} 条。")
+
+        stats_snapshot = {
+            "mentionCount": mention_count,
+            "intentScore": int(ds.get("intent_score") or 0),
+            "potentialOrderCount": potential_orders,
+        }
+        # _get_failed_questions 已经返回 dict 列表，截断后直接复用
+        failed_brief = failed_questions[:10]
+        categories_out = [
+            {
+                "type": cat["type"], "title": cat["title"],
+                "count": barrier_counts.get(cat["type"], 0),
+                "suggestion": cat["suggestion"],
+            }
+            for cat in _BARRIER_CATEGORIES
+        ] + [{
+            "type": "other", "title": "其他问题",
+            "count": sum(1 for d in real_dm if classify_barrier(d.content) == "other"
+                         and d.isQuestion),
+            "suggestion": "补充通用答疑话术，覆盖更多长尾问题",
+        }]
 
         report = {
-            # schemaVersion 2：章节编号与字段口径都在本版改过。
-            # 前端遇到没有该字段的历史报告会提示「历史报告」，不去猜旧格式的语义。
-            "schemaVersion": 2,
-            "reportId": f"report_{int(time.time())}",
-            "title": f"{now.strftime('%Y年%m月%d日')} 直播复盘报告",
+            # schemaVersion 3：复盘按直播场次隔离，商品 / 弹幕双维度，报告独立存储。
+            "schemaVersion": 3,
+            "reportId": self._new_report_id(sid),
+            "sessionId": sid,
+            "sessionTitle": session_title,
+            "title": f"{date_str} 直播复盘报告",
             "generateTime": now.isoformat(),
+            "regenerated": bool(regenerated),
+            "source": ds.get("source", "current"),
             "liveDuration": duration,
             "liveDurationStr": f"{duration_min // 60}小时{duration_min % 60}分钟",
             "grade": grade,
-            # 等级阈值（_calculate_grade）是按"一场有几百条弹幕"标定的，真实演示
-            # 场景下弹幕只有几十条，等级会偏低。这是产品标定问题，本版不擅自改数字，
-            # 而是在报告里把口径讲清楚。
             "gradeNote": "等级阈值按单场 50/200/500 条弹幕标定；真实场景弹幕量级更小时等级偏低属正常",
             "productName": product_name,
             "scope": {
-                "caliber": "本报告只统计真实注册观众（服务端发号的 v_* 账号）",
+                "caliber": "本报告只统计真实注册观众（v_* 账号）在本场直播内的弹幕 / 私信 / 订单 / 评价",
+                "sessionId": sid,
+                "sessionTitle": session_title,
+                "startTime": start_time,
+                "endTime": end_time,
                 "excludedMockUsers": 10,
                 "excludedVirtualDanmaku": virtual_count,
                 "excludedMockDanmaku": mock_dm_excluded,
@@ -3803,32 +4100,64 @@ class LiveCommerceDataManager:
             },
             "summary": {
                 "overallGrade": grade,
-                "topProduct": product_name,
+                "topProduct": top_product_name,
                 "topQuestions": [q["question"] for q in top_questions[:3]],
                 "highlights": highlights,
-                "improvements": [
-                    "建议补充常见问题的话术库，提高AI回复精准度",
-                    "适当增加与观众的互动频次",
-                ],
+                "improvements": improvements[:5],
+                "conclusion": conclusion,
             },
+            # ---- 新：商品维度 / 弹幕维度（图表直接消费这两个对象）----
+            "productDimension": {
+                "sessionId": sid,
+                "sessionTitle": session_title,
+                "productId": product_id,
+                "productName": product_name,
+                "products": products_out,
+                "orderCount": len(real_orders),
+                "paidCount": len(paid_orders),
+                "qty": sold_qty,
+                "gmv": gmv,
+                "buyerCount": buyer_count,
+                "refundCount": refund_count,
+                "conversionRate": conversion_rate,
+                "byProduct": sorted(by_product.values(), key=lambda x: -x["qty"]),
+                "mentionCount": mention_count,
+                "reviewCount": total_reviews,
+                "rating": real_rating,
+            },
+            "danmakuDimension": {
+                "sessionId": sid,
+                "sessionTitle": session_title,
+                "total": len(all_dm) or len(real_dm),
+                "real": len(real_dm),
+                "virtual": virtual_count,
+                "questionCount": question_count,
+                "repliedCount": len(real_replies),
+                "replyRate": round(reply_rate, 1),
+                "avgResponseTime": avg_response,
+                "sentiment": sentiment_counts,
+                "categories": categories_out,
+                "topQuestions": top_questions,
+                "failedQuestions": failed_brief,
+                "timeline": timeline,
+            },
+            # ---- 兼容旧版章节结构（导出 / 旧前端仍可读）----
             "chapter1_overview": {
                 "basic": {
-                    "date": now.strftime("%Y-%m-%d"),
+                    "date": date_str,
                     "duration": duration,
                     "startTime": start_time,
-                    "endTime": now.isoformat(),
+                    "endTime": end_time,
                 },
                 "audience": {
-                    # 头条是真实口径
-                    "peakRealViewers": real_peak,
-                    "avgRealViewers": avg_real,
+                    "peakRealViewers": int(ds.get("real_peak") or 0),
+                    "avgRealViewers": int(ds.get("avg_real") or 0),
                     "uniqueRealViewers": unique_real,
-                    # 对外展示的含基数数字，标注清楚，不算进上面的分析
-                    "peakOnline": online_peak,
-                    "avgOnline": online_avg,
+                    "peakOnline": int(ds.get("online_peak") or 0),
+                    "avgOnline": int(ds.get("online_avg") or 0),
                     "baseNote": {
                         "label": "模拟热度基数（不计入分析）",
-                        "value": base,
+                        "value": int(ds.get("base") or 0),
                     },
                 },
                 "interaction": {
@@ -3840,14 +4169,13 @@ class LiveCommerceDataManager:
                 },
                 "conversion": {
                     "inquiryUsers": len({m.userId for m in real_msgs}),
-                    "intentUsers": int(stats_snapshot["intentScore"]),
+                    "intentUsers": stats_snapshot["intentScore"],
                     "potentialOrders": stats_snapshot["potentialOrderCount"],
                     "humanTransferCount": human_transfer,
                 },
             },
             "chapter2_product": {
                 "productName": product_name,
-                # None = 没有真实评价。前端显示「—」，**不要**退回 70 分这种默认值
                 "score": real_rating,
                 "realReviewCount": total_reviews,
                 "intentTrend": stats_snapshot["intentScore"],
@@ -3861,6 +4189,10 @@ class LiveCommerceDataManager:
                 "virtualCount": virtual_count,
                 "violationCount": sum(1 for d in real_dm if d.isViolation),
                 "virtualRealRatio": f"{virtual_count}:{len(real_dm)}",
+                "questionCount": question_count,
+                "sentiment": sentiment_counts,
+                "topQuestions": top_questions,
+                "categories": categories_out,
             },
             "chapter4_reviews": {
                 "totalReviews": total_reviews,
@@ -3875,45 +4207,331 @@ class LiveCommerceDataManager:
                 "humanTransferCount": human_transfer,
                 "avgResponseTime": avg_response,
                 "presetUsedCount": preset_used,
-                "failedQuestions": self._get_failed_questions(real_dm),
+                "failedQuestions": failed_brief,
             },
-            # 编号修正：旧版 chapter5_ai 与 chapter5_barriers 重号，顺延重排
-            "chapter6_barriers": [
-                {
-                    "type": cat["type"],
-                    "title": cat["title"],
-                    "count": barrier_counts.get(cat["type"], 0),
-                    "suggestion": cat["suggestion"],
-                }
-                for cat in _BARRIER_CATEGORIES
-            ],
+            "chapter6_barriers": categories_out[:-1],
             "chapter7_highlights": self._generate_highlights(real_dm, start_time),
-            # 新增：旧报告完全不读订单，成交数据明明已经聚合好了却没人用
             "chapter8_conversion": {
                 "realOrders": len(paid_orders),
                 "realPaidOrders": sum(1 for o in real_orders if o.status == "paid"),
                 "realGMV": gmv,
                 "realQty": sold_qty,
                 "refundCount": refund_count,
-                "buyerCount": len({o.userId for o in paid_orders}),
-                "conversionRate": (round(len({o.userId for o in paid_orders}) / unique_real * 100, 1)
-                                   if unique_real else 0.0),
+                "buyerCount": buyer_count,
+                "conversionRate": conversion_rate,
                 "byProduct": sorted(by_product.values(), key=lambda x: -x["qty"]),
-                # 刻意披露：让看报告的人立刻理解 GMV 为什么这么小
                 "mockOrdersExcluded": mock_orders_excluded,
             },
             "chapter9_improvements": {
-                "product": ["补充更多商品详情信息，增加规格参数展示", "优化卖点描述，突出差异化优势"],
-                "presets": ["常见问题建议配置标准话术，减少重复回答", "售后话术需要完善，提高用户满意度"],
-                "operation": ["建议增加互动频次，每10分钟发起一次投票/抽奖", "优化直播节奏，核心商品讲解控制在5-8分钟"],
-                "content": ["增加商品对比环节，帮助用户做决策", "追加用户评价展示，增强社交证明"],
+                "product": ["补充更多商品详情信息，增加规格参数展示",
+                            "优化卖点描述，突出差异化优势"],
+                "presets": ["常见问题建议配置标准话术，减少重复回答",
+                            "售后话术需要完善，提高用户满意度"],
+                "operation": ["建议增加互动频次，每10分钟发起一次投票/抽奖",
+                              "优化直播节奏，核心商品讲解控制在5-8分钟"],
+                "content": ["增加商品对比环节，帮助用户做决策",
+                            "追加用户评价展示，增强社交证明"],
             },
         }
-        if save:
-            # 保存报告（不持有锁）
-            report_file = os.path.join(REPORTS_DIR, f"report_{int(time.time())}.json")
-            self._save_json(report_file, report)
         return report
+
+    # ---- 问题排行 / 商品提及 / 时间分布 ----
+    def _rank_questions(self, items: list[DanmakuItem], top_n: int = 10) -> list[dict]:
+        """从弹幕中提取提问并按频次排行（同一问句先去标点归并）。"""
+        buckets: dict[str, dict] = {}
+        for d in items:
+            if not d.isQuestion:
+                continue
+            key = _question_key(d.content)
+            if not key:
+                continue
+            row = buckets.get(key)
+            if row is None:
+                row = {
+                    "question": (d.content or "").strip()[:60],
+                    "count": 0, "realCount": 0,
+                    "category": classify_barrier(d.content),
+                    "lastAskedAt": d.timestamp,
+                }
+                buckets[key] = row
+            row["count"] += 1
+            if is_real_user_id(d.userId):
+                row["realCount"] += 1
+            if (d.timestamp or "") > (row["lastAskedAt"] or ""):
+                row["lastAskedAt"] = d.timestamp
+        rows = sorted(buckets.values(),
+                      key=lambda r: (-r["count"], -r["realCount"],
+                                     r.get("lastAskedAt") or ""))
+        titles = {c["type"]: c["title"] for c in _BARRIER_CATEGORIES}
+        titles["other"] = "其他问题"
+        for row in rows:
+            row["categoryTitle"] = titles.get(row["category"], "其他问题")
+            row["hasPreset"] = self._has_preset_for(row["question"])
+        return rows[:top_n]
+
+    def _rank_question_categories(self, items: list[DanmakuItem]) -> list[dict]:
+        """按问题类型聚合，给出「哪类问题问得最多」。"""
+        counts: dict[str, int] = {}
+        for d in items:
+            if not d.isQuestion:
+                continue
+            k = classify_barrier(d.content)
+            counts[k] = counts.get(k, 0) + 1
+        suggestions = {c["type"]: c["suggestion"] for c in _BARRIER_CATEGORIES}
+        titles = {c["type"]: c["title"] for c in _BARRIER_CATEGORIES}
+        titles["other"] = "其他问题"
+        suggestions["other"] = "补充通用答疑话术，覆盖更多长尾问题"
+        return [
+            {"type": k, "title": titles.get(k, "其他问题"), "count": v,
+             "suggestion": suggestions.get(k, "")}
+            for k, v in sorted(counts.items(), key=lambda kv: -kv[1])
+        ]
+
+    def _has_preset_for(self, question: str) -> bool:
+        q = (question or "").lower()
+        for p in self.presets.values():
+            if p.isEnabled and any(kw.lower() in q for kw in p.keywords):
+                return True
+        return False
+
+    @staticmethod
+    def _count_product_mentions(items: list[DanmakuItem], product: Any,
+                                product_name: str = "") -> int:
+        keys: list[str] = []
+        if product is not None:
+            keys = [product.name] + list(product.sellingPoints) + list(product.tags)
+        elif product_name:
+            keys = [product_name]
+        keys = [k for k in keys if k and len(k) >= 2]
+        if not keys:
+            return 0
+        n = 0
+        for d in items:
+            text = (d.content or "").lower()
+            if text and any(k.lower() in text for k in keys):
+                n += 1
+        return n
+
+    @staticmethod
+    def _compute_intent_score(real_dm: list[DanmakuItem],
+                              real_msgs: list[PrivateMessageItem],
+                              real_orders: list[OrderItem],
+                              unique_real: int) -> float:
+        """与实时面板同口径的意向指数（历史场次可复算）。"""
+        if unique_real <= 0:
+            return 0.0
+        dm_rate = min(1.0, len(real_dm) / unique_real / 5)
+        msg_rate = min(1.0, len({m.userId for m in real_msgs}) / unique_real)
+        buyers = len({o.userId for o in real_orders
+                      if o.status in ("paid", "shipped", "completed")})
+        order_rate = min(1.0, buyers / unique_real)
+        return round(100 * (0.4 * dm_rate + 0.3 * msg_rate + 0.3 * order_rate), 1)
+
+    @staticmethod
+    def _build_timeline(real_dm: list[DanmakuItem], start_time: str,
+                        max_buckets: int = 48) -> list[dict]:
+        """按 5 分钟分桶的弹幕时间分布（供报告折线图）。"""
+        t0 = _parse_dt(start_time)
+        if t0 is None:
+            return []
+        buckets: dict[int, dict] = {}
+        for d in real_dm:
+            t = _parse_dt(d.timestamp)
+            if t is None:
+                continue
+            offset = int((t - t0).total_seconds())
+            if offset < 0:
+                continue
+            idx = min(offset // 300, max_buckets - 1)
+            b = buckets.setdefault(
+                idx, {"count": 0, "questions": 0, "positive": 0, "negative": 0})
+            b["count"] += 1
+            if d.isQuestion:
+                b["questions"] += 1
+            s = d.sentiment or classify_sentiment(d.content)
+            if s in ("positive", "negative"):
+                b[s] += 1
+        if not buckets:
+            return []
+        empty = {"count": 0, "questions": 0, "positive": 0, "negative": 0}
+        return [
+            {"slot": f"{i * 5}-{i * 5 + 5}分钟", "minute": i * 5,
+             **buckets.get(i, empty)}
+            for i in range(max(buckets) + 1)
+        ]
+
+    # ---- 报告存储 / 历史 / 重新生成 ----
+    def _load_session_archive(self, session_id: str) -> Optional[dict]:
+        sid = (session_id or "").strip()
+        if not _SESSION_ID_RE.fullmatch(sid):
+            return None
+        with self._lock:
+            data = self._load_json(
+                os.path.join(danmaku_sessions_dir(), f"{sid}.json"), None)
+        if not isinstance(data, dict) or not data.get("session"):
+            return None
+        items: list[DanmakuItem] = []
+        for raw in data.get("danmaku") or []:
+            try:
+                items.append(DanmakuItem(**raw))
+            except Exception:
+                continue
+        return {"session": data.get("session") or {}, "danmaku": items}
+
+    @staticmethod
+    def _new_report_id(session_id: str) -> str:
+        base = re.sub(r"[^A-Za-z0-9_-]", "", session_id or "session")[:48] or "session"
+        return f"report_{base}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+
+    @staticmethod
+    def _report_summary(report: dict) -> dict:
+        dd = report.get("danmakuDimension") or {}
+        conv = report.get("chapter8_conversion") or {}
+        inter = (report.get("chapter1_overview") or {}).get("interaction") or {}
+        return {
+            "reportId": report.get("reportId", ""),
+            "sessionId": report.get("sessionId", ""),
+            "sessionTitle": report.get("sessionTitle") or report.get("title", ""),
+            "title": report.get("title", ""),
+            "generateTime": report.get("generateTime", ""),
+            "liveDuration": report.get("liveDuration", 0),
+            "grade": report.get("grade", ""),
+            "productName": report.get("productName", ""),
+            "gmv": conv.get("realGMV", 0),
+            "realDanmaku": dd.get("real", inter.get("totalDanmaku", 0)),
+            "questionCount": dd.get("questionCount", 0),
+            "schemaVersion": report.get("schemaVersion", 1),
+            "source": report.get("source", ""),
+        }
+
+    def _save_report(self, report: dict) -> None:
+        """报告独立落盘 + 更新索引；同一 reportId 只写一次，绝不覆盖旧文件。"""
+        rid = report.get("reportId") or self._new_report_id(
+            report.get("sessionId", ""))
+        report["reportId"] = rid
+        with self._lock:
+            self._save_json(os.path.join(REPORTS_DIR, f"{rid}.json"), report)
+            index_path = os.path.join(REPORTS_DIR, REPORTS_INDEX)
+            index = self._load_json(index_path, [])
+            if not isinstance(index, list):
+                index = []
+            index = [r for r in index
+                     if isinstance(r, dict) and r.get("reportId") != rid]
+            index.insert(0, self._report_summary(report))
+            self._save_json(index_path, index)
+
+    def get_report_history(self) -> list[dict]:
+        """历史报告摘要列表（新→旧）。索引缺失时从报告文件重建。"""
+        with self._lock:
+            index_path = os.path.join(REPORTS_DIR, REPORTS_INDEX)
+            index = self._load_json(index_path, [])
+            if not isinstance(index, list):
+                index = []
+            known = {r.get("reportId") for r in index
+                     if isinstance(r, dict) and r.get("reportId")}
+            try:
+                files = os.listdir(REPORTS_DIR)
+            except OSError:
+                files = []
+            for fn in files:
+                if not fn.endswith(".json") or fn == REPORTS_INDEX:
+                    continue
+                rid = fn[:-5]
+                if rid in known:
+                    continue
+                data = self._load_json(os.path.join(REPORTS_DIR, fn), None)
+                if isinstance(data, dict) and data.get("reportId"):
+                    index.append(self._report_summary(data))
+        seen: set = set()
+        out: list[dict] = []
+        for row in index:
+            if not isinstance(row, dict):
+                continue
+            rid = row.get("reportId")
+            if not rid or rid in seen:
+                continue
+            # 只列绑定场次的报告：本功能之前生成的旧报告没有 sessionId，
+            # 无法对应到任何一场直播，混进历史列表只会让用户点开后对不上场次。
+            if not row.get("sessionId"):
+                continue
+            seen.add(rid)
+            out.append(row)
+        out.sort(key=lambda r: str(r.get("generateTime", "")), reverse=True)
+        return out
+
+    def get_report(self, report_id: str) -> Optional[dict]:
+        """按 ID 读取一份历史报告（路径白名单校验，防路径穿越）。"""
+        rid = (report_id or "").strip()
+        if not _REPORT_ID_RE.fullmatch(rid):
+            return None
+        with self._lock:
+            data = self._load_json(os.path.join(REPORTS_DIR, f"{rid}.json"), None)
+        return data if isinstance(data, dict) else None
+
+    def regenerate_report(self, session_id: str) -> dict:
+        """基于场次归档重新生成报告：新增一份，不覆盖原报告。"""
+        sid = (session_id or "").strip()
+        if not sid:
+            return {"success": False, "message": "缺少场次ID"}
+        report = self.generate_report(session_id=sid, save=True, regenerated=True)
+        if report.get("success") is False:
+            return report
+        return {"success": True, "report": report}
+
+    def get_session_high_freq_questions(self, session_id: str = "",
+                                        top_n: int = 10) -> dict:
+        """某一场的高频问题排行（本场 / 历史任意场次）。
+
+        只统计真实观众提问（项目既有口径）；模拟/虚拟弹幕数量在 scope 中披露。
+        当前场次读内存缓冲，历史场次读场次归档文件 —— 两者用同一套提取与归并规则。
+        """
+        try:
+            top_n = max(1, min(50, int(top_n)))
+        except (TypeError, ValueError):
+            top_n = 10
+        sid = (session_id or "").strip()
+        source = "history"
+        title = ""
+        if sid in ("", "current", "__current__"):
+            source = "current"
+            with self._lock:
+                sid = self.live_state.sessionId or ""
+                items = list(self.current_session_danmaku)
+                if not items and sid:
+                    items = [d for d in self.danmaku_list if d.sessionId == sid]
+                product = self.get_current_product()
+                product_name = product.name if product else "未上架商品"
+                start_label = (self.live_state.startTime or "")[:16].replace("T", " ")
+                title = (f"{product_name} · {start_label}"
+                         if start_label else product_name)
+            if not items and sid:
+                archive = self._load_session_archive(sid)
+                if archive is not None:
+                    items = archive["danmaku"]
+                    title = str(archive["session"].get("title") or title)
+                    source = "history"
+        else:
+            archive = self._load_session_archive(sid)
+            if archive is None:
+                return {"success": False, "message": "场次不存在或尚未归档"}
+            items = archive["danmaku"]
+            title = str(archive["session"].get("title") or sid)
+        real_dm = [d for d in items if is_real_user_id(d.userId)]
+        return {
+            "success": True,
+            "sessionId": sid,
+            "sessionTitle": title,
+            "source": source,
+            "total": len(items),
+            "real": len(real_dm),
+            "excludedVirtual": sum(1 for d in items
+                                   if classify_user_id(d.userId) == "virtual"),
+            "excludedMock": sum(1 for d in items
+                                if classify_user_id(d.userId) == "mock"),
+            "questionCount": sum(1 for d in real_dm if d.isQuestion),
+            "items": self._rank_questions(real_dm, top_n),
+            "categories": self._rank_question_categories(real_dm),
+        }
 
     def _calculate_grade(self, positive_rate: float, ai_replies: int, total_danmaku: int) -> str:
         """计算直播等级"""

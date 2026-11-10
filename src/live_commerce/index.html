@@ -756,14 +756,51 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
     <!-- ============ PAGE 5: 直播复盘报告 ============ -->
     <div class="lc-inner" id="page-report">
       <div class="lc-page-hdr">
-        <div><h2>📋 直播复盘报告</h2><div class="sub">自动汇总直播数据，生成带货总结和优化建议</div></div>
-        <button class="lc-btn lc-btn-primary" onclick="generateReport()">📊 生成报告</button>
-      </div>
-      <div id="reportContent">
-        <div class="lc-card">
-          <div class="lc-empty"><div class="icon">📋</div>点击「生成报告」查看本场直播复盘数据</div>
+        <div><h2>📋 直播复盘报告</h2><div class="sub">按直播场次生成 · 商品 + 弹幕双维度统计 · 历史报告独立保存</div></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="lc-btn lc-btn-primary" onclick="generateReport()">📊 生成本场报告</button>
+          <button class="lc-btn lc-btn-outline" onclick="loadReportHistory()">↻ 刷新历史</button>
         </div>
       </div>
+
+      <!-- 历史报告：每份报告独立存储，可查看 / 下载 / 重新生成 -->
+      <div class="lc-card" style="margin-bottom:14px">
+        <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+          <span>🗂 历史复盘报告</span>
+          <span style="font-size:11px;color:#94a3b8">每场直播结束自动生成，重新生成不会覆盖旧记录</span>
+        </div>
+        <div class="lc-scroll" id="reportHistoryList" style="max-height:250px">
+          <div class="lc-empty"><div class="icon">🗂</div>暂无历史报告，开播后结束直播会自动生成</div>
+        </div>
+      </div>
+
+      <div id="reportContent">
+        <div class="lc-card">
+          <div class="lc-empty"><div class="icon">📋</div>点击「生成本场报告」查看当前场次复盘，或从上方历史记录打开任意一场</div>
+        </div>
+      </div>
+
+      <!-- 高频问题排行榜：本场 + 任意历史场次 -->
+      <div class="lc-card" style="margin-top:16px">
+        <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <span>🏆 高频问题排行榜</span>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select class="lc-sel" id="hfqSessionSelect" style="min-width:280px" onchange="loadHfq(this.value)">
+              <option value="">本场（直播中）</option>
+            </select>
+            <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="loadHfq(document.getElementById('hfqSessionSelect').value)">↻ 刷新</button>
+          </div>
+        </div>
+        <div id="hfqMeta" style="font-size:12px;color:#64748b;margin:8px 0">统计本场真实观众提问，按频次从高到低排序</div>
+        <div class="lc-grid lc-grid-2">
+          <div><div id="hfqRankChart" style="height:320px"></div></div>
+          <div class="lc-scroll" id="hfqRankList" style="max-height:320px">
+            <div class="lc-empty"><div class="icon">❓</div>暂无提问数据</div>
+          </div>
+        </div>
+        <div id="hfqCatList" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"></div>
+      </div>
+
       <!-- 场次弹幕复盘：选定已归档场次，按提问 / 情绪筛选本场弹幕 -->
       <div class="lc-card" style="margin-top:16px">
         <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
@@ -1004,8 +1041,14 @@ var S = {
   dmSummaryAI: null,
   // 评价总结（纯统计，无 AI 那一半）
   rvSummary: null,
-  // 最近一次生成的复盘报告（切页不重新请求，直接重渲染）
+  // 最近一次生成/打开的复盘报告（切页不重新请求，直接重渲染）
   lastReport: null,
+  // 历史复盘报告摘要列表 / 当前高频问题排行 / 选中的排行场次（空=本场）
+  reportHistory: [],
+  reportAutoDownload: false,
+  // 复盘页的高频问题排行回包（与弹幕页的 S.hfq 数组互不覆盖）
+  hfqRank: null,
+  hfqSessionId: '',
   host: {hostName:'主播', hostAvatar:''},
   // 大模型接入端口：列表来自服务端（apiKey 只有掩码），editingEndpointId 为空表示新增
   llmEndpoints: [], llmActiveId: '', llmActiveLabel: '', editingEndpointId: null
@@ -1126,7 +1169,12 @@ function switchPage(page) {
   if (page==='reviews') { renderReviewsPage(); loadReviewSummary(); }
   if (page==='viewers') renderViewersPage();
   if (page==='inbox') refreshInbox();
-  if (page==='report') { renderReport(S.lastReport); loadDmSessions(); }
+  if (page==='report') {
+    renderReport(S.lastReport);
+    loadDmSessions();
+    loadReportHistory();
+    loadHfq(S.hfqSessionId || '');
+  }
   if (page==='settings') { loadSettings(); loadLlmEndpoints(); }
 }
 
@@ -1382,9 +1430,154 @@ function saveSettings() {
 }
 
 // ============================================================
-// Report
+// Report: 生成 / 历史 / 下载 / 重新生成 / 高频问题排行
 // ============================================================
 function generateReport() { wsSend('request_report'); }
+function loadReportHistory() { wsSend('get_report_history', {}); }
+
+function viewReport(reportId) {
+  if (!reportId) return;
+  wsSend('get_report', {reportId: reportId});
+}
+
+function regenerateReport(sessionId) {
+  if (!sessionId) { toast('缺少场次ID', 'err'); return; }
+  if (!confirm('重新生成会新增一份报告，不会覆盖原记录。确定继续？')) return;
+  wsSend('regenerate_report', {sessionId: sessionId});
+}
+
+function downloadReportById(reportId) {
+  if (!reportId) return;
+  if (S.lastReport && S.lastReport.reportId === reportId) { downloadReport(); return; }
+  S.reportAutoDownload = true;
+  viewReport(reportId);
+}
+
+function downloadReport() {
+  var r = S.lastReport;
+  if (!r) { toast('请先打开或生成一份报告', 'err'); return; }
+  try {
+    var blob = new Blob([JSON.stringify(r, null, 2)], {type: 'application/json;charset=utf-8'});
+    var a = document.createElement('a');
+    var stamp = (r.generateTime || '').replace(/[:T]/g, '-').slice(0, 19);
+    a.href = URL.createObjectURL(blob);
+    a.download = '复盘报告_' + (r.sessionId || 'report') + '_' + stamp + '.json';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); if (a.parentNode) a.parentNode.removeChild(a); }, 1000);
+    toast('报告已下载', 'success');
+  } catch (e) { toast('下载失败', 'err'); }
+}
+
+function renderReportHistory(list) {
+  S.reportHistory = list || [];
+  var el = document.getElementById('reportHistoryList');
+  if (!el) return;
+  if (!S.reportHistory.length) {
+    el.innerHTML = '<div class="lc-empty"><div class="icon">🗂</div>暂无历史报告，直播结束后会自动生成并独立保存</div>';
+    return;
+  }
+  el.innerHTML = S.reportHistory.map(function(r){
+    var dt = (r.generateTime || '').replace('T', ' ').slice(0, 19);
+    var legacy = (r.schemaVersion || 1) < 3 ? ' <span class="lc-tag lc-tag-yellow">旧版</span>' : '';
+    var sid = esc(r.sessionId || '');
+    return '<div class="lc-dm-item" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
+      '<div style="flex:1;min-width:220px">'+
+        '<div style="font-weight:600;font-size:13px">'+esc(r.sessionTitle || r.title || '未命名场次')+legacy+'</div>'+
+        '<div style="font-size:11px;color:#94a3b8;margin-top:3px">'+sid+
+          ' · 生成于 '+esc(dt)+' · 💬 '+fmtNum(r.realDanmaku||0)+' 条弹幕 · ❓ '+fmtNum(r.questionCount||0)+' 个提问 · GMV ¥'+fmtNum(r.gmv||0)+'</div>'+
+      '</div>'+
+      '<span class="lc-badge lc-badge-live" style="font-size:12px;padding:2px 12px">'+esc(r.grade||'—')+'</span>'+
+      '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="viewReport(\''+esc(r.reportId)+'\')">👁 查看</button>'+
+      '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="downloadReportById(\''+esc(r.reportId)+'\')">⬇ 下载</button>'+
+      (sid ? '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="regenerateReport(\''+sid+'\')">🔄 重新生成</button>' : '')+
+    '</div>';
+  }).join('');
+}
+
+// ---- 高频问题排行（本场 + 历史任意场次）----
+function loadHfq(sessionId) {
+  S.hfqSessionId = sessionId || '';
+  wsSend('get_session_high_freq_questions', {
+    sessionId: S.hfqSessionId,
+    topN: 20
+  });
+}
+
+function renderHfq(d) {
+  S.hfqRank = d || null;
+  var meta = document.getElementById('hfqMeta');
+  var listEl = document.getElementById('hfqRankList');
+  var catEl = document.getElementById('hfqCatList');
+  if (!d || !d.success) {
+    if (meta) meta.textContent = (d && d.message) || '暂无排行数据';
+    if (listEl) listEl.innerHTML = '<div class="lc-empty"><div class="icon">❓</div>'+esc((d&&d.message)||'暂无提问数据')+'</div>';
+    if (catEl) catEl.innerHTML = '';
+    renderHfqChart([]);
+    return;
+  }
+  if (meta) {
+    meta.innerHTML = '场次：<strong>'+esc(d.sessionTitle||d.sessionId||'')+'</strong>'+
+      ' · 真实弹幕 '+fmtNum(d.real||0)+' 条 · 提问 '+fmtNum(d.questionCount||0)+' 个'+
+      ' · 已排除模拟/虚拟弹幕 '+fmtNum((d.excludedVirtual||0)+(d.excludedMock||0))+' 条';
+  }
+  var items = d.items || [];
+  if (listEl) {
+    if (!items.length) {
+      listEl.innerHTML = '<div class="lc-empty"><div class="icon">❓</div>该场没有真实观众提问</div>';
+    } else {
+      listEl.innerHTML = items.map(function(q, i){
+        var medal = i===0?'🥇':(i===1?'🥈':(i===2?'🥉':('#'+(i+1))));
+        return '<div class="lc-dm-item" style="display:flex;gap:10px;align-items:flex-start">'+
+          '<div style="width:34px;text-align:center;font-weight:700;color:'+(i<3?'#f59e0b':'#94a3b8')+'">'+medal+'</div>'+
+          '<div style="flex:1;min-width:0">'+
+            '<div style="font-size:13px;font-weight:600;color:#1e293b">'+esc(q.question)+'</div>'+
+            '<div style="font-size:11px;color:#94a3b8;margin-top:3px">'+esc(q.categoryTitle||'其他问题')+
+              ' · '+(q.hasPreset?'<span class="lc-tag lc-tag-green">已配置话术</span>':'<span class="lc-tag lc-tag-yellow">未配置话术</span>')+
+              ' · 最后提问 '+esc(fmtTime(q.lastAskedAt||''))+'</div>'+
+          '</div>'+
+          '<div style="text-align:right;min-width:54px"><div style="font-size:18px;font-weight:700;color:#2563eb">'+fmtNum(q.count)+'</div><div style="font-size:10px;color:#94a3b8">次</div></div>'+
+        '</div>';
+      }).join('');
+    }
+  }
+  var cats = d.categories || [];
+  if (catEl) {
+    catEl.innerHTML = cats.length ? cats.map(function(c){
+      return '<span class="lc-tag lc-tag-blue">'+esc(c.title)+' '+fmtNum(c.count)+' 次</span>';
+    }).join('') : '';
+  }
+  renderHfqChart(items);
+}
+
+function renderHfqChart(items) {
+  var el = document.getElementById('hfqRankChart');
+  if (!el) return;
+  if (window.__hfqRankChart) {
+    try { window.__hfqRankChart.dispose(); } catch(e) {}
+    window.__hfqRankChart = null;
+  }
+  if (!items || !items.length) {
+    el.innerHTML = '<div style="text-align:center;padding:120px 0;color:#94a3b8">暂无提问数据</div>';
+    return;
+  }
+  try {
+    var chart = echarts.init(el);
+    window.__hfqRankChart = chart;
+    var top = items.slice(0, 10).slice().reverse();
+    chart.setOption({
+      tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
+      grid:{left:10,right:40,top:10,bottom:20,containLabel:true},
+      xAxis:{type:'value',minInterval:1},
+      yAxis:{type:'category',data:top.map(function(q){
+        return q.question.length>14?q.question.slice(0,14)+'…':q.question;
+      }),axisLabel:{fontSize:11}},
+      series:[{type:'bar',data:top.map(function(q){return q.count;}),barMaxWidth:22,
+        itemStyle:{color:function(p){var c=['#2563eb','#3b82f6','#60a5fa','#93c5fd','#bfdbfe'];return c[p.dataIndex%c.length];}},
+        label:{show:true,position:'right',fontSize:11}}]
+    });
+  } catch(e) {}
+}
 
 // ============================================================
 // Tab switching
@@ -2080,6 +2273,7 @@ function loadDmSessions(){
 }
 function renderDmSessions(sessions){
   S.dmSessions=sessions||[];
+  populateHfqSessionSelect();
   var sel=document.getElementById('dmSessionSelect');
   if(!sel) return;
   if(!S.dmSessions.length){
@@ -2096,6 +2290,21 @@ function renderDmSessions(sessions){
       esc(s.title||s.sessionId)+'（'+fmtNum(s.total||0)+'条）</option>';
   }).join('');
   selectDmSession(cur);
+}
+// 高频问题排行的场次下拉：本场 + 全部已归档场次
+function populateHfqSessionSelect(){
+  var sel=document.getElementById('hfqSessionSelect');
+  if(!sel) return;
+  var cur=S.hfqSessionId||'';
+  var html='<option value="">本场（直播中）</option>';
+  (S.dmSessions||[]).forEach(function(s){
+    html+='<option value="'+esc(s.sessionId)+'">'+
+      esc((s.title||s.sessionId)+' · 真实弹幕 '+fmtNum(s.real||0)+' 条')+'</option>';
+  });
+  sel.innerHTML=html;
+  var exists=cur && (S.dmSessions||[]).some(function(s){return s.sessionId===cur});
+  S.hfqSessionId=exists?cur:'';
+  sel.value=S.hfqSessionId;
 }
 function selectDmSession(id){
   if(!id) return;
@@ -2809,7 +3018,221 @@ function updateReviewStats() {
 // ============================================================
 // Render Report
 // ============================================================
+// ============================================================
+// Rendering: 复盘报告 v3（商品 / 弹幕双维度 + 图表）
+// ============================================================
 function renderReport(data) {
+  var el = document.getElementById('reportContent');
+  if (!el) return;
+  if (!data) {
+    el.innerHTML = '<div class="lc-card"><div class="lc-empty"><div class="icon">📋</div>'+
+      '点击「生成本场报告」查看当前场次复盘，或从上方历史记录打开任意一场</div></div>';
+    return;
+  }
+  if (!data.sessionId || (data.schemaVersion || 0) < 3) { renderReportLegacy(data); return; }
+
+  var pd = data.productDimension || {}, dd = data.danmakuDimension || {}, sm = data.summary || {};
+  var dur = data.liveDuration || 0, hh = Math.floor(dur/3600), mm = Math.floor((dur%3600)/60);
+  var ds = (hh>0?hh+'小时':'')+mm+'分钟';
+  var sent = dd.sentiment || {};
+  var prods = pd.products || [];
+  var qs = dd.topQuestions || [];
+  var cats = dd.categories || [];
+  var failed = dd.failedQuestions || [];
+  var gen = (data.generateTime||'').replace('T',' ').slice(0,19);
+  var sid = esc(data.sessionId||'');
+  var regenBtn = sid ? '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="regenerateReport(\''+sid+'\')">🔄 重新生成</button>' : '';
+
+  var prodRows = prods.length ? prods.map(function(p){
+    return '<tr><td>'+esc(p.name)+'</td><td>'+fmtNum(p.mentions||0)+'</td><td>'+fmtNum(p.questions||0)+
+      '</td><td>'+fmtNum(p.qty||0)+'</td><td>¥'+fmtNum(p.gmv||0)+'</td><td>'+fmtNum(p.refundCount||0)+
+      '</td><td>'+(p.reviewCount?(p.rating+' 分 / '+fmtNum(p.reviewCount)+' 条'):'—')+'</td></tr>';
+  }).join('') : '<tr><td colspan="7" style="text-align:center;color:#94a3b8">本场暂无商品成交与提及数据</td></tr>';
+
+  var qRows = qs.length ? qs.map(function(q,i){
+    return '<div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid #f1f5f9">'+
+      '<span style="color:#94a3b8;width:24px">#'+(i+1)+'</span>'+
+      '<span style="flex:1;font-size:12px">'+esc(q.question)+'</span>'+
+      '<span class="lc-tag lc-tag-blue">'+fmtNum(q.count)+' 次</span></div>';
+  }).join('') : '<div style="color:#94a3b8;padding:10px 0">本场没有真实观众提问</div>';
+
+  var catChips = cats.filter(function(c){return c.count>0;}).map(function(c){
+    return '<span class="lc-tag '+(c.type==='other'?'lc-tag-yellow':'lc-tag-blue')+'">'+esc(c.title)+' '+fmtNum(c.count)+'</span>';
+  }).join('');
+
+  var failedHtml = failed.length ? failed.map(function(f){
+    return '<div style="padding:3px 0;color:#b45309;font-size:11px">· '+esc(f.content)+'</div>';
+  }).join('') : '<div style="color:#94a3b8;font-size:11px">没有未答复的真实观众提问</div>';
+
+  var highlights = (sm.highlights||[]).map(function(x){return '✅ '+esc(x)+'<br>';}).join('');
+  var improvements = (sm.improvements||[]).map(function(x){return '👉 '+esc(x)+'<br>';}).join('');
+
+  el.innerHTML =
+    '<div class="lc-card" style="margin-bottom:14px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">'+
+        '<div>'+
+          '<div style="font-size:16px;font-weight:700">📋 '+esc(data.title||'直播复盘报告')+(data.regenerated?' <span class="lc-tag lc-tag-yellow">重新生成</span>':'')+'</div>'+
+          '<div style="font-size:12px;color:#64748b;margin-top:4px">'+esc(data.sessionTitle||'')+' · 场次 '+sid+' · 生成于 '+esc(gen)+'</div>'+
+        '</div>'+
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+          '<span class="lc-badge lc-badge-live" style="font-size:16px;padding:4px 18px">'+esc(data.grade||'—')+'</span>'+
+          '<button class="lc-btn lc-btn-primary lc-btn-sm" onclick="downloadReport()">⬇ 下载报告</button>'+
+          regenBtn+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+    '<div class="lc-grid lc-grid-4">'+
+      kpiCard(ds,'直播时长','#0f172a')+
+      kpiCard(fmtNum(dd.real||0)+' 条','真实观众弹幕','#2563eb')+
+      kpiCard(fmtNum(dd.questionCount||0)+' 个','真实提问','#8b5cf6')+
+      kpiCard('¥'+fmtNum(pd.gmv||0),'真实 GMV / '+fmtNum(pd.paidCount||0)+' 单','#10b981')+
+    '</div>'+
+    '<div class="lc-grid lc-grid-2" style="margin-top:14px">'+
+      '<div class="lc-card"><div class="lc-card-title">📦 商品维度：提及 / 提问 / 成交</div><div id="repProdChart" style="height:320px"></div></div>'+
+      '<div class="lc-card"><div class="lc-card-title">💬 弹幕维度：情绪分布</div><div id="repSentChart" style="height:320px"></div></div>'+
+    '</div>'+
+    '<div class="lc-grid lc-grid-2" style="margin-top:14px">'+
+      '<div class="lc-card"><div class="lc-card-title">🏆 高频问题 TOP10（真实观众）</div><div id="repQChart" style="height:320px"></div></div>'+
+      '<div class="lc-card"><div class="lc-card-title">📈 弹幕时间分布（5 分钟/桶）</div><div id="repTimelineChart" style="height:320px"></div></div>'+
+    '</div>'+
+    '<div class="lc-grid lc-grid-2" style="margin-top:14px">'+
+      '<div class="lc-card"><div class="lc-card-title">📝 复盘结论</div>'+
+        '<div style="font-size:12px;line-height:1.8;color:#475569">'+esc(sm.conclusion||'')+'</div>'+
+        '<div style="margin-top:10px;font-size:12px;line-height:1.9">'+(highlights||'<span style="color:#94a3b8">暂无总结</span>')+'</div>'+
+      '</div>'+
+      '<div class="lc-card"><div class="lc-card-title">💡 优化建议</div>'+
+        '<div style="font-size:12px;line-height:1.9;color:#475569">'+(improvements||'<span style="color:#94a3b8">暂无建议</span>')+'</div>'+
+      '</div>'+
+    '</div>'+
+    '<div class="lc-grid lc-grid-2" style="margin-top:14px">'+
+      '<div class="lc-card"><div class="lc-card-title">🛒 商品明细（本场）</div>'+
+        '<div class="lc-scroll" style="max-height:300px"><table class="lc-tbl">'+
+        '<tr><td><strong>商品</strong></td><td><strong>提及</strong></td><td><strong>提问</strong></td><td><strong>成交</strong></td><td><strong>GMV</strong></td><td><strong>退款</strong></td><td><strong>评价</strong></td></tr>'+
+        prodRows+'</table></div>'+
+      '</div>'+
+      '<div class="lc-card"><div class="lc-card-title">❓ 问题分布与未答问题</div>'+
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">'+(catChips||'<span style="font-size:11px;color:#94a3b8">暂无分类数据</span>')+'</div>'+
+        '<div style="font-size:11px;color:#64748b;font-weight:600;margin:6px 0">TOP 问题</div>'+qRows+
+        '<div style="font-size:11px;color:#64748b;font-weight:600;margin:10px 0 4px">未答上的提问（'+failed.length+'）</div>'+failedHtml+
+      '</div>'+
+    '</div>'+
+    '<div class="lc-card" style="margin-top:14px"><div class="lc-card-title">🔍 完整报告数据</div>'+
+      '<pre style="font-size:11px;color:#64748b;max-height:400px;overflow-y:auto;background:#f8fafc;padding:12px;border-radius:6px">'+esc(JSON.stringify(data,null,2))+'</pre></div>';
+
+  requestAnimationFrame(function(){ renderReportCharts(data); });
+}
+
+function kpiCard(value, label, color) {
+  return '<div class="lc-card"><div class="lc-stat"><div class="nv" style="color:'+(color||'#0f172a')+'">'+
+    value+'</div><div class="lb">'+label+'</div></div></div>';
+}
+
+function _repChart(id, option, emptyText) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  if (window.__repCharts && window.__repCharts[id]) {
+    try { window.__repCharts[id].dispose(); } catch(e) {}
+    delete window.__repCharts[id];
+  }
+  if (!option) {
+    el.innerHTML = '<div style="text-align:center;padding:120px 0;color:#94a3b8">'+esc(emptyText||'暂无数据')+'</div>';
+    return;
+  }
+  try {
+    var chart = echarts.init(el);
+    chart.setOption(option);
+    window.__repCharts = window.__repCharts || {};
+    window.__repCharts[id] = chart;
+  } catch(e) {}
+}
+
+function renderReportCharts(data) {
+  if (!window.echarts) return;
+  var pd = data.productDimension || {}, dd = data.danmakuDimension || {};
+  var prods = pd.products || [];
+  var sent = dd.sentiment || {};
+  var qs = dd.topQuestions || [];
+  var timeline = dd.timeline || [];
+
+  // 1) 商品维度：提及 / 提问 / 成交件数（柱） + GMV（线）
+  if (prods.length) {
+    var names = prods.map(function(p){ return p.name.length>10?p.name.slice(0,10)+'…':p.name; });
+    _repChart('repProdChart', {
+      tooltip:{trigger:'axis'},
+      legend:{bottom:0,textStyle:{fontSize:11}},
+      grid:{left:40,right:55,top:20,bottom:55},
+      xAxis:{type:'category',data:names,axisLabel:{fontSize:10,interval:0,rotate:names.length>3?18:0}},
+      yAxis:[{type:'value',name:'条 / 件',axisLabel:{fontSize:10}},
+             {type:'value',name:'¥',axisLabel:{fontSize:10}}],
+      series:[
+        {name:'弹幕提及',type:'bar',data:prods.map(function(p){return p.mentions||0;}),barMaxWidth:18,itemStyle:{color:'#2563eb'}},
+        {name:'提问',type:'bar',data:prods.map(function(p){return p.questions||0;}),barMaxWidth:18,itemStyle:{color:'#60a5fa'}},
+        {name:'成交件数',type:'bar',data:prods.map(function(p){return p.qty||0;}),barMaxWidth:18,itemStyle:{color:'#10b981'}},
+        {name:'GMV',type:'line',yAxisIndex:1,data:prods.map(function(p){return p.gmv||0;}),itemStyle:{color:'#f59e0b'},symbolSize:7}
+      ]
+    });
+  } else {
+    _repChart('repProdChart', null, '本场暂无商品数据');
+  }
+
+  // 2) 弹幕情绪
+  var sentTotal = (sent.positive||0)+(sent.negative||0)+(sent.neutral||0);
+  if (sentTotal) {
+    _repChart('repSentChart', {
+      tooltip:{trigger:'item',formatter:'{b}: {c} 条 ({d}%)'},
+      legend:{bottom:0,textStyle:{fontSize:11}},
+      series:[{type:'pie',radius:['42%','68%'],center:['50%','45%'],
+        label:{formatter:'{b}\n{d}%',fontSize:11},
+        data:[
+          {name:'正面',value:sent.positive||0,itemStyle:{color:'#10b981'}},
+          {name:'负面',value:sent.negative||0,itemStyle:{color:'#ef4444'}},
+          {name:'中性',value:sent.neutral||0,itemStyle:{color:'#94a3b8'}}
+        ]}]
+    });
+  } else {
+    _repChart('repSentChart', null, '本场暂无真实弹幕');
+  }
+
+  // 3) 高频问题
+  if (qs.length) {
+    var top = qs.slice(0,10).slice().reverse();
+    _repChart('repQChart', {
+      tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
+      grid:{left:10,right:40,top:10,bottom:20,containLabel:true},
+      xAxis:{type:'value',minInterval:1},
+      yAxis:{type:'category',data:top.map(function(q){
+        return q.question.length>14?q.question.slice(0,14)+'…':q.question;
+      }),axisLabel:{fontSize:11}},
+      series:[{type:'bar',data:top.map(function(q){return q.count;}),barMaxWidth:20,
+        itemStyle:{color:'#8b5cf6'},
+        label:{show:true,position:'right',fontSize:11}}]
+    });
+  } else {
+    _repChart('repQChart', null, '本场没有真实观众提问');
+  }
+
+  // 4) 时间分布
+  if (timeline.length) {
+    _repChart('repTimelineChart', {
+      tooltip:{trigger:'axis'},
+      legend:{bottom:0,textStyle:{fontSize:11}},
+      grid:{left:40,right:20,top:20,bottom:45},
+      xAxis:{type:'category',data:timeline.map(function(t){return t.slot;}),axisLabel:{fontSize:10}},
+      yAxis:{type:'value',name:'条',axisLabel:{fontSize:10}},
+      series:[
+        {name:'弹幕',type:'line',smooth:true,data:timeline.map(function(t){return t.count||0;}),itemStyle:{color:'#2563eb'},areaStyle:{opacity:0.12}},
+        {name:'提问',type:'line',smooth:true,data:timeline.map(function(t){return t.questions||0;}),itemStyle:{color:'#8b5cf6'}},
+        {name:'正面',type:'line',smooth:true,data:timeline.map(function(t){return t.positive||0;}),itemStyle:{color:'#10b981'}},
+        {name:'负面',type:'line',smooth:true,data:timeline.map(function(t){return t.negative||0;}),itemStyle:{color:'#ef4444'}}
+      ]
+    });
+  } else {
+    _repChart('repTimelineChart', null, '暂无时间分布数据');
+  }
+}
+
+// 旧版报告（无 sessionId / schemaVersion < 3）渲染：保留原样，历史旧报告仍可查看
+function renderReportLegacy(data) {
   var el=document.getElementById('reportContent');
   if(!el) return;
   if(!data||!data.liveDuration){
@@ -3398,14 +3821,14 @@ on('live_ended',function(d){
   if(d.report){S.lastReport=d.report;if(S.curPage==='report')renderReport(d.report);}
   // 本场弹幕已固化：刷新复盘页的场次下拉，并默认切到刚结束的这一场
   if(d.danmakuSession&&d.danmakuSession.sessionId)S.dmSessionId=d.danmakuSession.sessionId;
-  if(S.curPage==='report')loadDmSessions();
-  toast('直播已结束，本场弹幕已归档','success');
+  if(S.curPage==='report'){loadDmSessions();loadReportHistory();loadHfq(S.hfqSessionId||'');}
+  toast('直播已结束，本场弹幕与复盘报告已归档','success');
 });
 on('start_live_result',function(d){if(!d.success) toast(d.message||'开始失败','err');});
 on('end_live_result',function(d){
   if(d.report){S.lastReport=d.report;if(S.curPage==='report')renderReport(d.report);}
   if(d.danmakuSession&&d.danmakuSession.sessionId)S.dmSessionId=d.danmakuSession.sessionId;
-  if(S.curPage==='report')loadDmSessions();
+  if(S.curPage==='report'){loadDmSessions();loadReportHistory();loadHfq(S.hfqSessionId||'');}
 });
 
 on('new_danmaku',function(d){
@@ -3596,11 +4019,38 @@ on('test_llm_endpoint_result',function(d){
   if(open){showLlmTestResult(d);}
   else{toast((d.ok?'✅ ':'❌ ')+(d.message||''),d.ok?'success':'err');}
 });
-on('request_report_result',function(d){if(d.success&&d.report){S.lastReport=d.report;renderReport(d.report);toast('报告生成成功','success');}else toast(d.message||'报告生成失败','err');});
+on('request_report_result',function(d){
+  if(d.success&&d.report){
+    S.lastReport=d.report;renderReport(d.report);
+    loadReportHistory();loadHfq(S.hfqSessionId||'');
+    toast('报告生成成功，已独立保存','success');
+  }else toast(d.message||'报告生成失败','err');
+});
 // 场次弹幕复盘：场次列表 / 单场弹幕（均为主播专用，观众连接会被后端拒绝）
 on('get_danmaku_sessions_result',function(d){renderDmSessions((d&&d.sessions)||[]);});
 on('get_session_danmaku_result',function(d){renderDmSessionResult(d);});
-on('generate_report_result',function(d){if(d.success&&d.report){S.lastReport=d.report;renderReport(d.report);toast('报告生成成功','success');}});
+on('generate_report_result',function(d){
+  if(d.success&&d.report){
+    S.lastReport=d.report;renderReport(d.report);
+    loadReportHistory();loadHfq(S.hfqSessionId||'');
+    toast('报告生成成功，已独立保存','success');
+  }else toast(d.message||'报告生成失败','err');
+});
+// ---- 复盘历史 / 单份报告 / 重新生成 / 高频问题排行 ----
+on('get_report_history_result',function(d){renderReportHistory((d&&d.reports)||[]);});
+on('get_report_result',function(d){
+  if(!d.success||!d.report){toast(d.message||'报告不存在','err');S.reportAutoDownload=false;return;}
+  S.lastReport=d.report;renderReport(d.report);
+  toast('已打开历史报告','success');
+  if(S.reportAutoDownload){S.reportAutoDownload=false;downloadReport();}
+});
+on('regenerate_report_result',function(d){
+  if(!d.success||!d.report){toast(d.message||'重新生成失败','err');return;}
+  S.lastReport=d.report;renderReport(d.report);
+  loadReportHistory();loadHfq(S.hfqSessionId||'');
+  toast('已重新生成一份新报告（旧报告保留）','success');
+});
+on('get_session_high_freq_questions_result',function(d){renderHfq(d);});
 on('get_reviews_result',function(d){if(d.reviews)S.reviews=d.reviews;if(S.curPage==='reviews')renderReviewsPage();});
 on('review_summary_result',function(d){S.rvSummary=d;renderReviewSummary();});
 on('mark_review_handled_result',function(d){

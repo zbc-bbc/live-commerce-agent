@@ -1016,7 +1016,9 @@ class LiveCommerceWebSocketManager:
 
             elif msg_type == "generate_report":
                 report = dm.generate_report()
-                await self._send(websocket, "generate_report_result", {"success": True, "report": report})
+                payload = (report if report.get("success") is False
+                           else {"success": True, "report": report})
+                await self._send(websocket, "generate_report_result", payload)
 
             elif msg_type == "update_settings":
                 settings_data = msg_data.get("settings", {})
@@ -1244,10 +1246,35 @@ class LiveCommerceWebSocketManager:
 
             elif msg_type == "request_report":
                 report = dm.generate_report()
-                await self._send(websocket, "request_report_result", {
-                    "success": True,
-                    "report": report,
+                payload = (report if report.get("success") is False
+                           else {"success": True, "report": report})
+                await self._send(websocket, "request_report_result", payload)
+
+            # ── 复盘报告历史：仅运营台可达（不在 _VIEWER_ALLOWED 白名单内）──
+            elif msg_type == "get_report_history":
+                await self._send(websocket, "get_report_history_result", {
+                    "reports": dm.get_report_history(),
                 })
+
+            elif msg_type == "get_report":
+                report = dm.get_report(msg_data.get("reportId", ""))
+                await self._send(websocket, "get_report_result", {
+                    "success": bool(report),
+                    "report": report,
+                    "message": "" if report else "报告不存在",
+                })
+
+            elif msg_type == "regenerate_report":
+                result = dm.regenerate_report(msg_data.get("sessionId", ""))
+                await self._send(websocket, "regenerate_report_result", result)
+
+            elif msg_type == "get_session_high_freq_questions":
+                result = dm.get_session_high_freq_questions(
+                    msg_data.get("sessionId", ""),
+                    msg_data.get("topN", 10) or 10,
+                )
+                await self._send(websocket, "get_session_high_freq_questions_result",
+                                 result)
 
             elif msg_type == "mark_review_handled":
                 review_id = msg_data.get("reviewId", "")
@@ -1853,7 +1880,8 @@ class LiveCommerceWebSocketManager:
         elif export_type == "products":
             return {"products": [p.model_dump() for p in dm.products.values()]}
         elif export_type == "report":
-            return dm.generate_report()
+            # 导出不应在复盘历史里再留一份新报告：复用当前场次数据但不落盘
+            return dm.generate_report(save=False)
         return {}
 
 
