@@ -585,6 +585,16 @@ if os.path.exists(live_commerce_dir):
 else:
     logger.warning(f"Live Commerce 前端目录不存在: {live_commerce_dir}")
 
+# 前端框架迁移版（Vue 3 + Vite）——构建产物 frontend/app-dist。
+# 仅新增独立入口 /app/，旧入口 /live-commerce/ 与 /viewer 保持不变，可随时回滚。
+frontend_dist = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "app-dist"))
+if os.path.isdir(frontend_dist):
+    app.mount("/app", StaticFiles(directory=frontend_dist, html=True), name="frontend_app")
+    logger.info(f"前端框架迁移版已挂载: {frontend_dist} → /app/")
+else:
+    logger.info(f"前端框架迁移版未构建（可选）: {frontend_dist}")
+
 # 头像上传：读写目录 + 静态访问 /uploads/<file>（POST 走 /api/avatar/upload）
 try:
     os.makedirs(UPLOADS_DIR, exist_ok=True)

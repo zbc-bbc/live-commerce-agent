@@ -38,6 +38,7 @@ AI Agent 在后台承担话术生成、弹幕意图识别与自动回复、高�
 | 主播运营台 | `http://<HOST>:<PORT>/live-commerce/` | 桌面端 Web，左侧导航 | 主播账号（`auth.db`） | 7 天 |
 | 观众直播间 | `http://<HOST>:<PORT>/viewer` | 移动优先 H5 单页，底部浮层操作 | 观众账号（`viewers.db`）或游客 | 24 小时 |
 | 登录页 | `http://<HOST>:<PORT>/login` | 登录 / 注册 | 主播账号 | — |
+| Vue 3 外壳（Phase 1） | `http://<HOST>:<PORT>/app/#/login` | Vue Router + Pinia，主播/观众页通过同源 iframe 桥接 | 主播账号 | — |
 | 实时通道 | `ws://<HOST>:<PORT>/ws/live-commerce` | WebSocket 长连接 | 按握手凭据判定 | 随 Token |
 
 ### 主播运营台（9 个功能页面）
@@ -92,7 +93,7 @@ AI Agent 在后台承担话术生成、弹幕意图识别与自动回复、高�
 | 实时通信 | WebSocket（Starlette） | 单一端点 `/ws/live-commerce`，消息信封 `{type, data, timestamp}` |
 | 鉴权 | 自实现 JWT（HMAC-SHA256） | 双角色 `scope=host/viewer`，PBKDF2-HMAC-SHA256 口令散列，仅用标准库 + `sqlite3` / `aiosqlite` |
 | AI 编排 | LangGraph / LangChain | `src/agents/live_commerce_agent/` 业务智能体，OpenAI-compatible 接入 |
-| 前端 | 原生 HTML / CSS / JavaScript | 无构建步骤、无 npm；运营台与观众端均为单文件页面 |
+| 前端 | Vue 3 + Vite + Vue Router + Pinia；旧页面为原生 HTML / CSS / JavaScript | Phase 1 新增 `/app/` 外壳与工程化构建；运营台、观众端旧页面保留并由 iframe 桥接 |
 | 可视化 | ECharts（本地离线副本） | `src/live_commerce/echarts.min.js`，断网可用 |
 | 持久化 | JSON 文件 + SQLite | 运行时业务数据为 JSON；账号与 Token 为 SQLite（WAL） |
 | 工程 | Git 细粒度分模块提交 | 每次 commit 对应一轮 AI 交互，见第 ⑤ 节 |
@@ -145,6 +146,11 @@ live-commerce-agent/
 │   ├── memory/                        # 会话记忆（checkpointer / store）
 │   ├── voice/                         # 语音输入输出（可选）
 │   └── streamlit_app.py               # 通用 Agent 调试台（可选，不参与直播业务）
+├── frontend/                          # Vue 3 + Vite 工程（Phase 1）
+│   ├── src/                           # 路由、Pinia、登录页、iframe 外壳
+│   ├── app-dist/                      # 生产构建产物（FastAPI 挂载到 /app）
+│   └── vite.config.js                 # base=/app/、开发代理
+├── docs/                              # 技术文档与业务流程图
 ├── .env.example                       # 环境变量模板
 ├── requirements.txt                   # 依赖清单
 ├── pyproject.toml / uv.lock           # 项目元数据与锁定依赖（uv 可选）

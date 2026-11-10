@@ -1,0 +1,21 @@
+{
+  "name": "live-commerce-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "直播电商 AI 运营助手前端 · 框架迁移 Phase 1",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "pinia": "^2.3.1",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "vite": "^6.0.7"
+  }
+}
