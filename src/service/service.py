@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 import json
 import logging
@@ -74,6 +75,24 @@ def verify_bearer(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
 
 
+async def _pending_pay_reminder_loop(dm: Any, interval_seconds: int = 60) -> None:
+    """待付款订单超时催付：后台定时扫描，每笔订单只催一次。
+
+    放在事件循环里做，运营台不开着也能自动催；DataManager 内部用 to_thread
+    调用（其加锁/落盘是同步的），避免阻塞 WS 收发。
+    """
+    while True:
+        try:
+            sent = await asyncio.to_thread(dm.remind_pending_pay, operator="AI")
+            if sent:
+                logger.info("待付款超时催付：已发送 %s 条 AI 私信", len(sent))
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.warning("待付款催付任务执行失败: %s", e)
+        await asyncio.sleep(interval_seconds)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
@@ -118,6 +137,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 # Set store for long-term memory (cross-conversation knowledge)
                 agent.store = store
             # Initialize Live Commerce data
+            reminder_task: asyncio.Task[None] | None = None
             try:
                 from data.live_commerce.data_manager import get_data_manager
                 dm = get_data_manager()
@@ -128,11 +148,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     # 每次启动都刷新弹幕/评价/会话等模拟数据（页面数据才真实）
                     dm.generate_mock_data()
                     logger.info("Live Commerce 数据已刷新")
+                # 待付款超时 AI 催付：后台每分钟扫描一次，单笔只催一次
+                reminder_task = asyncio.create_task(_pending_pay_reminder_loop(dm))
             except Exception as e:
                 logger.error(f"Live Commerce 数据管理器初始化失败: {e}")
-            except Exception as e:
-                logger.error(f"Live Commerce 数据管理器初始化失败: {e}")
-            yield
+            try:
+                yield
+            finally:
+                if reminder_task is not None:
+                    reminder_task.cancel()
+                    try:
+                        await reminder_task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        pass
     except Exception as e:
         logger.error(f"Error during database/store/agents initialization: {e}")
         raise

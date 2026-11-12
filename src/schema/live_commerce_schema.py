@@ -39,6 +39,7 @@ class ProductItem(BaseModel):
     specs: list[str] = Field(default_factory=list, description="商品规格列表，每项形如 '键: 值'")
     imageUrl: str = Field(default="", description="商品主图链接（可空，空则前端用品类 emoji 渐变主图）")
     tags: list[str] = Field(default_factory=list, description="商品标签")
+    tagGroup: str = Field(default="", description="商品标签分组（如「主推爆款」「清仓专区」）")
     # 默认改为 True：观众端只下发已上架商品，而运营台有两个新建商品入口
     # （「添加商品」显式传 isOnSale:false、「商品表单」干脆不带这个键），
     # 落到这个默认值上就等于「新建即对观众隐身」，且页面上没有任何提示。
@@ -162,6 +163,14 @@ class OrderItem(BaseModel):
         default=False,
         description="该单库存是否已锁定/扣减；取消/退款仅回补已扣减的库存，避免旧单重复回补",
     )
+    # ---- 订单溯源 / 阶段归因（迭代新增）----
+    sourceDanmakuId: str = Field(
+        default="", description="下单前该观众最近一条提问弹幕ID，用于「提问→下单」溯源")
+    stage: str = Field(default="", description="下单时所属直播阶段（warmup/flash_sale/...）")
+    sessionId: str = Field(default="", description="下单时所属直播场次ID")
+    refundReasonCategory: str = Field(
+        default="", description="退款原因分类（quality/size/logistics/price/no_need/other）")
+    payRemindTime: str = Field(default="", description="最近一次 AI 私信催付时间（空=未催过）")
 
 
 # 订单状态标签映射（供前端 badge / 后端统计复用）
@@ -281,6 +290,8 @@ class DanmakuItem(BaseModel):
         default="",
         description="观众情绪判定：positive / neutral / negative（纯规则词表，空串=尚未判定）",
     )
+    stage: str = Field(default="", description="所属直播阶段（warmup/flash_sale/...）")
+    isMarked: bool = Field(default=False, description="主播是否将该弹幕标记为重点")
 
 
 # ============================================================
@@ -378,6 +389,97 @@ class ReviewItem(BaseModel):
     timestamp: str = Field(description="发布时间")
     isHandled: bool = Field(default=False, description="是否已处理")
     images: list[str] = Field(default_factory=list, description="买家秀图片（可选）")
+    # ---- 迭代新增：场次绑定 / 后台回复 / 差评预警 ----
+    sessionId: str = Field(default="", description="评价所属直播场次ID（观众评价按下单场次绑定）")
+    replyContent: str = Field(default="", description="主播后台回复内容")
+    replyTime: str = Field(default="", description="主播后台回复时间")
+
+
+# ============================================================
+# 迭代新增：AI 知识库 / 敏感词日志 / 操作日志 / 价格历史 / 观众到场记录
+# ============================================================
+class KnowledgeBaseItem(BaseModel):
+    """AI 问答知识库：主播可维护的「标准问题 → 标准答案」。"""
+    kbId: str = Field(description="知识条目唯一标识")
+    question: str = Field(description="标准问题（或归并后的高频问题）")
+    answer: str = Field(description="标准答案")
+    keywords: list[str] = Field(default_factory=list, description="命中关键词")
+    source: str = Field(default="manual", description="来源：manual/reply_correction/high_freq")
+    hitCount: int = Field(default=0, description="被 AI 命中次数")
+    createTime: str = Field(default="", description="创建时间")
+    updateTime: str = Field(default="", description="更新时间")
+    operator: str = Field(default="host", description="最后修改人")
+
+
+class SensitiveLogItem(BaseModel):
+    """敏感词拦截日志：记录被拦截的弹幕/私信原文与命中词。"""
+    logId: str = Field(description="日志唯一标识")
+    userId: str = Field(default="", description="发送人ID")
+    userName: str = Field(default="", description="发送人昵称")
+    content: str = Field(description="被拦截内容")
+    word: str = Field(default="", description="命中的敏感词")
+    reason: str = Field(default="", description="拦截原因")
+    scene: str = Field(default="danmaku", description="场景：danmaku/private/review")
+    sessionId: str = Field(default="", description="所属直播场次ID")
+    timestamp: str = Field(description="拦截时间")
+
+
+class OperationLogItem(BaseModel):
+    """运营台操作日志：谁在什么时候做了什么。"""
+    logId: str = Field(description="日志唯一标识")
+    operator: str = Field(default="host", description="操作人账号")
+    role: str = Field(default="host", description="操作人角色：host/operator")
+    action: str = Field(description="动作标识，如 batch_ship / save_settings")
+    target: str = Field(default="", description="操作对象（订单号/商品ID/评价ID等）")
+    detail: str = Field(default="", description="操作详情")
+    timestamp: str = Field(description="操作时间")
+
+
+class PriceHistoryItem(BaseModel):
+    """商品/SKU 历史售价记录。"""
+    historyId: str = Field(description="记录唯一标识")
+    productId: str = Field(description="商品ID")
+    productName: str = Field(default="", description="商品名称快照")
+    skuId: str = Field(default="", description="SKU ID")
+    skuSpec: str = Field(default="", description="规格快照")
+    oldPrice: float = Field(default=0, description="变更前售价")
+    newPrice: float = Field(default=0, description="变更后售价")
+    oldOriginalPrice: float = Field(default=0, description="变更前原价")
+    newOriginalPrice: float = Field(default=0, description="变更后原价")
+    reason: str = Field(default="manual_update", description="变更原因")
+    operator: str = Field(default="host", description="操作人")
+    timestamp: str = Field(description="变更时间")
+
+
+class ViewerVisitItem(BaseModel):
+    """观众进场/离场记录：用于观看时长与观众详情页历史。"""
+    visitId: str = Field(description="记录唯一标识")
+    userId: str = Field(description="观众ID")
+    userName: str = Field(default="", description="观众昵称快照")
+    sessionId: str = Field(default="", description="直播场次ID（未开播为空）")
+    enterTime: str = Field(description="进场时间")
+    leaveTime: str = Field(default="", description="离场时间（空=仍在场）")
+    durationSeconds: int = Field(default=0, description="本次观看时长（秒）")
+
+
+# 退款原因分类（前端下拉 + 数据分析汇总共用）
+REFUND_REASON_CATEGORIES = [
+    {"key": "quality", "label": "商品质量问题", "keywords": ["质量", "破损", "坏了", "瑕疵", "假货", "变质"]},
+    {"key": "size", "label": "规格/尺寸不符", "keywords": ["尺寸", "规格", "大小", "不合适", "太小", "太大"]},
+    {"key": "logistics", "label": "物流/发货问题", "keywords": ["物流", "快递", "发货", "太慢", "没收到", "延迟"]},
+    {"key": "price", "label": "价格/优惠问题", "keywords": ["价格", "贵", "优惠", "降价", "差价"]},
+    {"key": "no_need", "label": "不想要了", "keywords": ["不想要", "买错", "多买", "后悔", "不需要"]},
+    {"key": "other", "label": "其他原因", "keywords": []},
+]
+
+
+def classify_refund_reason(text: str) -> str:
+    """把自由文本退款原因归入固定分类（规则匹配，未命中返回 other）。"""
+    raw = str(text or "")
+    for cat in REFUND_REASON_CATEGORIES:
+        if any(k in raw for k in cat["keywords"]):
+            return cat["key"]
+    return "other"
 
 
 # ============================================================

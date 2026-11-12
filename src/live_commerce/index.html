@@ -165,6 +165,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .lc-mini-btn{padding:2px 8px;border-radius:6px;font-size:11px;cursor:pointer;border:1px solid #e2e8f0;background:#fff;color:#475569}
 .lc-mini-btn:hover{border-color:#c7d2fe;color:#2563eb}
 .lc-empty-row{text-align:center;color:#94a3b8;padding:24px;font-size:13px}
+/* 运营角色：隐藏仅主播可执行的高危操作入口（服务端另有权限闸门兜底） */
+.lc-operator-mode .operator-hide{display:none!important}
 </style>
 </head>
 <body>
@@ -221,6 +223,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
       <!-- 当前登录账号：由 /auth/me 结果填入（见 setAcctName）-->
       <div id="acctRow" title="当前登录账号">
         <span class="acct-ico">👤</span><span id="acctName">—</span>
+        <span id="acctRoleBadge" style="margin-left:auto;font-size:10px;border:1px solid currentColor;border-radius:8px;padding:0 5px;flex-shrink:0">主播</span>
       </div>
       <div id="wsStatus"><span class="lc-dot idle"></span>正在连接服务…</div>
       <div style="display:flex;gap:4px;margin-top:8px">
@@ -316,6 +319,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
             <div class="lc-card-title">🎯 直播阶段</div>
             <div class="lc-stage-progress" id="stageControl"></div>
             <div id="stageStrategy" style="margin-top:8px;font-size:11px;color:#94a3b8;font-style:italic"></div>
+            <!-- 阶段联动：快捷弹幕 / AI 话术 / 场控提示 -->
+            <div id="stageQuickPanel" style="margin-top:10px;padding-top:8px;border-top:1px dashed #e2e8f0"></div>
           </div>
           <div class="lc-console-low-grid">
             <div class="lc-card">
@@ -346,6 +351,20 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
               <div style="margin-top:10px">
                 <div class="lc-card-title">🏆 高频问题 TOP10</div>
                 <div id="topQuestions" style="font-size:12px"></div>
+              </div>
+              <div style="margin-top:10px;padding-top:8px;border-top:1px dashed #e2e8f0">
+                <div class="lc-card-title">🎯 当前讲解商品高频问题</div>
+                <div id="curProdQuestions" style="font-size:12px;color:#94a3b8">选择讲解商品后自动关联</div>
+              </div>
+            </div>
+            <!-- 实时消息提醒：新订单 / 新差评 / 库存预警 / 敏感词拦截 -->
+            <div class="lc-card">
+              <div class="lc-card-title" style="justify-content:space-between;align-items:center">
+                <span>🔔 实时消息提醒</span>
+                <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="clearNoticeFeed()">清空</button>
+              </div>
+              <div id="noticeFeed" class="lc-scroll" style="max-height:240px">
+                <div class="lc-empty"><div class="icon">🔔</div>暂无实时提醒</div>
               </div>
             </div>
             <div class="lc-card">
@@ -389,6 +408,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <input class="lc-inp" id="prodSearch" placeholder="🔍 搜索商品名称 / 品类…" style="width:220px" oninput="renderProductsPage()">
           <select class="lc-sel" id="prodCatFilter" style="width:150px" onchange="renderProductsPage()"></select>
+          <select class="lc-sel" id="prodTagFilter" style="width:150px" onchange="renderProductsPage()">
+            <option value="all">全部标签分组</option>
+          </select>
           <select class="lc-sel" id="prodStateFilter" style="width:130px" onchange="renderProductsPage()">
             <option value="all">全部状态</option>
             <option value="on">售卖中</option>
@@ -396,6 +418,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
             <option value="soldout">已售罄</option>
           </select>
         </div>
+        <div id="tagGroupSummary" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;font-size:11px"></div>
       </div>
       <!-- 商品卡片网格 -->
       <div class="lc-prod-grid" id="prodGrid"></div>
@@ -439,6 +462,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
           <div>
             <label style="font-size:12px;color:#64748b">成本价 (¥)</label>
             <input class="lc-inp" id="pfCost" type="number" min="0" step="0.01" style="width:100%;margin-top:4px" placeholder="用于计算单品毛利">
+          </div>
+          <div>
+            <label style="font-size:12px;color:#64748b">商品标签分组</label>
+            <input class="lc-inp" id="pfTagGroup" list="pfTagGroupList" placeholder="如：主推爆款 / 清仓专区" style="width:100%;margin-top:4px">
+            <datalist id="pfTagGroupList"></datalist>
           </div>
           <div>
             <label style="font-size:12px;color:#64748b">商品外链图片URL（可多个，逗号/换行分隔；也可在商品卡点「⬆ 上传图片」本地选图）</label>
@@ -536,8 +564,59 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
         </div>
       </div>
       <div class="lc-card" style="margin-top:16px">
-        <div class="lc-card-title">📊 高频问题排行</div>
+        <div class="lc-card-title" style="justify-content:space-between;align-items:center">
+          <span>📊 高频问题排行 TOP10（含所属直播阶段）</span>
+          <span style="font-size:11px;color:#94a3b8;font-weight:400">阶段取该问题出现次数最多的直播阶段</span>
+        </div>
         <div id="hfqChart" style="height:260px"></div>
+      </div>
+
+      <!-- AI 知识库：主播手动维护标准答案，命中后优先于大模型 -->
+      <div class="lc-grid lc-grid-2" style="margin-top:16px">
+        <div class="lc-card">
+          <div class="lc-card-title" style="justify-content:space-between;align-items:center">
+            <span>📚 AI 知识库 · 标准答案</span>
+            <span style="font-size:11px;color:#94a3b8;font-weight:400">命中即优先回复，修正 AI 回答会自动沉淀</span>
+          </div>
+          <div style="display:flex;gap:6px;margin-bottom:8px">
+            <input class="lc-inp" id="kbSearch" placeholder="搜索问题 / 答案 / 关键词…" style="flex:1" oninput="renderKnowledge()">
+            <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="loadKnowledge()">↻</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
+            <input class="lc-inp" id="kbQuestion" placeholder="标准问题">
+            <input class="lc-inp" id="kbKeywords" placeholder="关键词（逗号分隔）">
+          </div>
+          <textarea class="lc-inp" id="kbAnswer" rows="2" placeholder="标准答案（观众问到时会优先这样回答）" style="resize:vertical"></textarea>
+          <div style="display:flex;justify-content:flex-end;margin-top:6px">
+            <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="saveKnowledge()">💾 保存到知识库</button>
+          </div>
+          <div class="lc-scroll" id="kbList" style="max-height:320px;margin-top:8px">
+            <div class="lc-empty"><div class="icon">📚</div>暂无知识条目</div>
+          </div>
+        </div>
+        <div class="lc-card">
+          <div class="lc-card-title">🚫 敏感词拦截日志</div>
+          <div style="display:flex;gap:6px;margin-bottom:8px">
+            <select class="lc-sel" id="sensitiveSceneFilter" style="width:150px" onchange="loadSensitiveLogs()">
+              <option value="">全部场景</option>
+              <option value="danmaku">弹幕</option>
+              <option value="private">私信</option>
+            </select>
+            <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="loadSensitiveLogs()">↻ 刷新</button>
+          </div>
+          <div class="lc-scroll" id="sensitiveLogList" style="max-height:400px">
+            <div class="lc-empty"><div class="icon">🚫</div>暂无拦截记录</div>
+          </div>
+        </div>
+      </div>
+      <div class="lc-card" style="margin-top:16px">
+        <div class="lc-card-title" style="justify-content:space-between;align-items:center">
+          <span>⭐ 重点标记弹幕</span>
+          <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="loadMarkedDanmaku()">↻ 刷新</button>
+        </div>
+        <div class="lc-scroll" id="markedDmList" style="max-height:260px">
+          <div class="lc-empty"><div class="icon">⭐</div>暂无重点标记</div>
+        </div>
       </div>
       <div class="lc-card" style="margin-top:16px">
         <div class="lc-card-title">🧾 弹幕总结（仅真实观众）</div>
@@ -566,6 +645,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <button class="lc-btn lc-btn-sm" id="ordScopeReal" onclick="setOrdersScope('real')">📄 真实订单</button>
           <button class="lc-btn lc-btn-outline lc-btn-sm" id="ordScopeMock" onclick="setOrdersScope('mock')">🧪 模拟测试订单</button>
+          <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="exportOrders()">⬇ 导出表格</button>
+          <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="remindPendingPay()">🤖 AI催付</button>
           <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="loadAdminOrders()">↻ 刷新</button>
         </div>
       </div>
@@ -578,12 +659,33 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
           <div class="lc-scroll" style="max-height:300px" id="refundReviewList"></div>
         </div>
         <div class="lc-card">
-          <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center">
+          <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
             <span>📄 真实订单</span>
             <span style="font-size:11px;font-weight:400;color:#94a3b8">默认只展示真实注册观众的订单，模拟单已隔离</span>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0" id="adminOrderFilters"></div>
+          <!-- 批量操作条：勾选后启用 -->
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px;padding:8px 10px;background:#f8fafc;border-radius:8px">
+            <span style="font-size:12px;color:#475569">已选 <strong id="ordBatchCount">0</strong> 单</span>
+            <button class="lc-btn lc-btn-success lc-btn-sm" onclick="batchShipOrders()">🚚 批量发货</button>
+            <button class="lc-btn lc-btn-danger lc-btn-sm operator-hide" onclick="batchRefundOrders()">💸 批量退款</button>
+            <select class="lc-sel" id="ordBatchRefundCat" style="width:150px">
+              <option value="">退款原因（可选）</option>
+              <option value="quality">商品质量问题</option>
+              <option value="size">规格/尺寸不符</option>
+              <option value="logistics">物流/发货问题</option>
+              <option value="price">价格/优惠问题</option>
+              <option value="no_need">不想要了</option>
+              <option value="other">其他原因</option>
+            </select>
+            <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="clearOrderSelection()">清空选择</button>
+          </div>
           <div class="lc-scroll" style="max-height:560px"><table class="lc-tbl2" id="adminOrderTable"></table></div>
+        </div>
+        <!-- 退款原因汇总：退款分类 → 数据分析 -->
+        <div class="lc-card" id="refundReasonCard" style="border-left:3px solid #f59e0b">
+          <div class="lc-card-title">📉 退款原因汇总（同步至数据分析）</div>
+          <div id="refundReasonSummary" style="font-size:12px;color:#94a3b8">加载中…</div>
         </div>
       </div>
 
@@ -628,6 +730,68 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
       <div class="lc-grid lc-grid-2">
         <div class="lc-card"><div class="lc-card-title">📈 弹幕趋势统计</div><div id="dmTrendChart" style="height:280px"></div></div>
         <div class="lc-card"><div class="lc-card-title">👥 观众画像分布</div><div id="audienceChart" style="height:280px"></div></div>
+      </div>
+
+      <!-- 直播阶段筛选 + 分阶段对比 -->
+      <div class="lc-card" style="margin-top:16px">
+        <div class="lc-card-title" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <span>⏱ 直播阶段筛选与分阶段对比</span>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select class="lc-sel" id="anStageSession" style="width:260px" onchange="loadStageAnalysis(this.value)">
+              <option value="">本场直播</option>
+            </select>
+            <select class="lc-sel" id="anStageFilter" style="width:130px" onchange="renderStageAnalysis()">
+              <option value="all">全部阶段</option>
+              <option value="warmup">预热</option>
+              <option value="flash_sale">秒杀</option>
+              <option value="deep_dive">深度讲解</option>
+              <option value="interact">互动促单</option>
+              <option value="closing">收尾</option>
+            </select>
+            <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="loadStageAnalysis(document.getElementById('anStageSession').value)">↻ 刷新</button>
+          </div>
+        </div>
+        <div id="stageAnalysisTable" style="margin-top:8px;font-size:12px;color:#94a3b8">加载中…</div>
+        <div class="lc-grid lc-grid-2" style="margin-top:10px">
+          <div id="stageAnalysisChart" style="height:280px"></div>
+          <div id="stageGmvChart" style="height:280px"></div>
+        </div>
+      </div>
+
+      <!-- 电商转化漏斗 -->
+      <div class="lc-card" style="margin-top:16px">
+        <div class="lc-card-title" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <span>🛒 电商转化漏斗</span>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select class="lc-sel" id="anFunnelProd" style="width:220px" onchange="loadConversionFunnel(this.value)">
+              <option value="">全部商品</option>
+            </select>
+            <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="loadConversionFunnel(document.getElementById('anFunnelProd').value)">↻</button>
+          </div>
+        </div>
+        <div id="funnelChart" style="height:320px"></div>
+        <div id="funnelTable" style="font-size:12px;color:#64748b;margin-top:6px"></div>
+      </div>
+
+      <!-- 多商品数据对比 -->
+      <div class="lc-card" style="margin-top:16px">
+        <div class="lc-card-title" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <span>⚖️ 多商品数据对比</span>
+          <div style="display:flex;gap:6px">
+            <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="runProductCompare()">对比选中商品</button>
+            <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="clearProductCompare()">清空</button>
+          </div>
+        </div>
+        <div id="prodComparePicker" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;font-size:12px"></div>
+        <div class="lc-scroll" id="prodCompareResult" style="max-height:360px">
+          <div class="lc-empty"><div class="icon">⚖️</div>勾选 2 个以上商品后点击「对比选中商品」</div>
+        </div>
+      </div>
+
+      <!-- 观众画像：模拟地域 + 自动标签 -->
+      <div class="lc-grid lc-grid-2" style="margin-top:16px">
+        <div class="lc-card"><div class="lc-card-title">🗺 观众地域分布（模拟）</div><div id="audienceRegionChart" style="height:280px"></div></div>
+        <div class="lc-card"><div class="lc-card-title">🏷 观众标签分布（自动打标）</div><div id="audienceTagChart" style="height:280px"></div></div>
       </div>
       <div class="lc-card" style="margin-top:16px">
         <div class="lc-card-title">📋 本场直播数据总览</div>
@@ -687,6 +851,15 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
         <div id="rvSummaryStats">
           <div class="lc-empty"><div class="icon">📊</div>点「生成评价总结」查看真实用户的评价统计</div>
         </div>
+      </div>
+
+      <!-- AI 差评痛点汇总：规则聚合，打开页面即可看 -->
+      <div class="lc-card" style="margin-bottom:16px;border-left:3px solid #ef4444">
+        <div class="lc-card-title" style="justify-content:space-between;align-items:center">
+          <span>🤖 AI 差评痛点汇总</span>
+          <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="loadReviewPainPoints()">↻ 重新分析</button>
+        </div>
+        <div id="reviewPainPoints" style="font-size:12px;color:#94a3b8">加载中…</div>
       </div>
 
       <!-- 原「📝 历史问答记录」卡片已删除：与弹幕页的「AI回复记录」是同一份数据
@@ -749,7 +922,41 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
       </div>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
         <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="refreshInbox()">🔄 刷新</button>
+        <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="loadQuickReplies()">⚡ 话术模板</button>
+        <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="openBatchPrivate()">📤 批量私信</button>
         <span style="font-size:12px;color:#94a3b8">模拟观众（氛围数据）不会出现在这里，观众端也只有本会话可见</span>
+      </div>
+      <!-- 批量私信：勾选真实观众 → 模板/自定义内容 → 群发 -->
+      <div class="lc-card" id="batchPrivateCard" style="display:none;border-left:3px solid #2563eb">
+        <div class="lc-card-title" style="justify-content:space-between;align-items:center">
+          <span>📤 批量私信发送</span>
+          <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="document.getElementById('batchPrivateCard').style.display='none'">✕</button>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px" id="batchPrivateTargets"></div>
+        <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+          <select class="lc-sel" id="batchPrivateTemplate" style="width:260px" onchange="applyBatchPrivateTemplate(this.value)">
+            <option value="">选择快捷话术模板…</option>
+          </select>
+          <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="addQuickReplyTemplate()">＋ 新增模板</button>
+        </div>
+        <textarea class="lc-inp" id="batchPrivateContent" rows="3" placeholder="输入群发内容…" style="resize:vertical"></textarea>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+          <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="toggleAllBatchTargets()">全选 / 全不选</button>
+          <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="sendBatchPrivate()">发送给选中观众</button>
+        </div>
+      </div>
+      <!-- 快捷私信话术模板管理 -->
+      <div class="lc-card" id="quickReplyCard" style="display:none">
+        <div class="lc-card-title" style="justify-content:space-between;align-items:center">
+          <span>⚡ 快捷私信话术模板</span>
+          <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="document.getElementById('quickReplyCard').style.display='none'">✕</button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 2fr auto;gap:6px;margin-bottom:8px">
+          <input class="lc-inp" id="qrTitle" placeholder="模板名称">
+          <input class="lc-inp" id="qrContent" placeholder="话术内容">
+          <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="saveQuickReplyTemplate()">保存模板</button>
+        </div>
+        <div id="quickReplyList" class="lc-scroll" style="max-height:240px"></div>
       </div>
       <div class="lc-grid lc-grid-2">
         <div class="lc-card">
@@ -773,8 +980,22 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
         <div><h2>📋 直播复盘报告</h2><div class="sub">按直播场次生成 · 商品 + 弹幕双维度统计 · 历史报告独立保存</div></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="lc-btn lc-btn-primary" onclick="generateReport()">📊 生成本场报告</button>
+          <button class="lc-btn lc-btn-outline" onclick="exportReportPdf()">📄 导出 PDF</button>
           <button class="lc-btn lc-btn-outline" onclick="loadReportHistory()">↻ 刷新历史</button>
         </div>
+      </div>
+
+      <!-- 两场直播数据对比 -->
+      <div class="lc-card" style="margin-bottom:14px">
+        <div class="lc-card-title" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <span>⚖️ 两场直播数据对比</span>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <select class="lc-sel" id="cmpSessionA" style="width:220px"><option value="">第一场…</option></select>
+            <select class="lc-sel" id="cmpSessionB" style="width:220px"><option value="">第二场…</option></select>
+            <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="compareSessionsNow()">开始对比</button>
+          </div>
+        </div>
+        <div id="sessionCompareResult" style="font-size:12px;color:#94a3b8">选择两场已结束的直播进行 GMV、转化、弹幕、退款、差评对比。</div>
       </div>
 
       <!-- 历史报告：每份报告独立存储，可查看 / 下载 / 重新生成 -->
@@ -987,9 +1208,104 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
           要换成别家（DeepSeek / 通义 / 智谱 / 硅基流动 / Kimi / 本地 Ollama 等），点右上角「➕ 添加端口」。
         </div>
       </div>
+
+      <!-- 多角色权限：主播（全权限）/ 运营（日常运营） -->
+      <div class="lc-card" style="margin-top:16px">
+        <div class="lc-card-title" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <span>👥 多角色权限管理</span>
+          <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="loadAccounts()">↻ 刷新账号</button>
+        </div>
+        <div style="font-size:12px;color:#64748b;line-height:1.7;margin-bottom:8px">
+          主播：开播/停播、退款终审、删除商品、大模型配置、角色管理；
+          运营：商品维护、订单发货、弹幕互动、私信、数据查看（高风险操作由后端拒绝）。
+        </div>
+        <div class="lc-scroll" id="accountList" style="max-height:280px">
+          <div class="lc-empty"><div class="icon">👥</div>点击刷新加载账号</div>
+        </div>
+      </div>
+
+      <!-- 操作日志 -->
+      <div class="lc-card" style="margin-top:16px">
+        <div class="lc-card-title" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <span>📜 操作日志</span>
+          <div style="display:flex;gap:6px;align-items:center">
+            <select class="lc-sel" id="opLogAction" style="width:170px" onchange="loadOperationLogs()">
+              <option value="">全部操作</option>
+              <option value="batch_ship">批量发货</option>
+              <option value="batch_refund">批量退款</option>
+              <option value="export_orders">导出订单</option>
+              <option value="pay_remind">AI催付</option>
+              <option value="mark_danmaku">标记弹幕</option>
+              <option value="correct_ai_reply">修正AI回答</option>
+              <option value="reply_review">回复评价</option>
+              <option value="batch_private_message">批量私信</option>
+              <option value="set_account_role">角色调整</option>
+            </select>
+            <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="loadOperationLogs()">↻ 刷新</button>
+          </div>
+        </div>
+        <div class="lc-scroll" id="operationLogList" style="max-height:360px">
+          <div class="lc-empty"><div class="icon">📜</div>暂无操作日志</div>
+        </div>
+      </div>
     </div>
 
   </div>
+</div>
+
+<!-- 订单溯源弹窗：提问 → AI回复 → 下单 → 支付 -->
+<div class="lc-modal" id="orderTraceModal">
+  <div style="background:#fff;border-radius:14px;width:640px;max-width:94vw;max-height:86vh;overflow:auto;padding:20px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:16px;font-weight:700">🔗 订单溯源链路</div>
+      <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="document.getElementById('orderTraceModal').classList.remove('open')">✕</button>
+    </div>
+    <div id="orderTraceContent"><div class="lc-empty">加载中…</div></div>
+  </div>
+</div>
+
+<!-- 评价后台回复弹窗 -->
+<div class="lc-modal" id="reviewReplyModal">
+  <div style="background:#fff;border-radius:14px;width:520px;max-width:94vw;padding:20px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-size:16px;font-weight:700">💬 后台回复评价</div>
+      <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="document.getElementById('reviewReplyModal').classList.remove('open')">✕</button>
+    </div>
+    <div id="reviewReplyQuote" style="font-size:12px;color:#64748b;background:#f8fafc;border-radius:8px;padding:8px;margin-bottom:8px"></div>
+    <textarea class="lc-inp" id="reviewReplyContent" rows="4" placeholder="输入给观众的回复…" style="resize:vertical"></textarea>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+      <button class="lc-btn lc-btn-outline" onclick="document.getElementById('reviewReplyModal').classList.remove('open')">取消</button>
+      <button class="lc-btn lc-btn-primary" onclick="submitReviewReply()">发送回复</button>
+    </div>
+  </div>
+</div>
+
+<!-- AI 回答修正 → 沉淀标准答案 -->
+<div class="lc-modal" id="correctReplyModal">
+  <div style="background:#fff;border-radius:14px;width:560px;max-width:94vw;padding:20px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:16px;font-weight:700">✏️ 修正 AI 回答</div>
+      <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="document.getElementById('correctReplyModal').classList.remove('open')">✕</button>
+    </div>
+    <div style="font-size:12px;color:#64748b;margin-bottom:4px">观众提问</div>
+    <div id="crQuestion" style="font-size:13px;color:#1e293b;background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:10px"></div>
+    <div style="font-size:12px;color:#64748b;margin-bottom:4px">标准答案（保存后写入 AI 知识库）</div>
+    <textarea id="crAnswer" class="lc-inp" style="width:100%;height:110px;resize:vertical" placeholder="输入主播认可的标准回答…"></textarea>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+      <button class="lc-btn lc-btn-outline" onclick="document.getElementById('correctReplyModal').classList.remove('open')">取消</button>
+      <button class="lc-btn lc-btn-primary" onclick="submitCorrectReply()">保存为标准答案</button>
+    </div>
+  </div>
+</div>
+
+<!-- 差评实时弹窗预警 -->
+<div id="negativeReviewPopup" style="position:fixed;top:20px;right:20px;width:340px;z-index:1200;display:none;background:#fff;border-left:4px solid #ef4444;border-radius:10px;box-shadow:0 12px 40px rgba(15,23,42,.22);padding:14px">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+    <div style="font-size:13px;font-weight:700;color:#b91c1c">⚠️ 收到新差评</div>
+    <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="document.getElementById('negativeReviewPopup').style.display='none'">✕</button>
+  </div>
+  <div id="negativeReviewBody" style="font-size:12px;color:#475569;line-height:1.7;margin:6px 0"></div>
+  <button class="lc-btn lc-btn-danger lc-btn-sm" onclick="document.getElementById('negativeReviewPopup').style.display='none';switchPage('reviews')">去处理 →</button>
 </div>
 
 <script>
@@ -1077,7 +1393,20 @@ var S = {
   hfqSessionId: '',
   host: {hostName:'主播', hostAvatar:''},
   // 大模型接入端口：列表来自服务端（apiKey 只有掩码），editingEndpointId 为空表示新增
-  llmEndpoints: [], llmActiveId: '', llmActiveLabel: '', editingEndpointId: null
+  llmEndpoints: [], llmActiveId: '', llmActiveLabel: '', editingEndpointId: null,
+  // ── 全模块迭代新增状态 ──────────────────────────────────────────
+  accountRole: 'admin', accountName: '',   // admin=主播（全权限）/ user=运营（受限）
+  tagGroups: [],                            // 商品标签分组
+  priceHistory: [], priceHistoryProductId: '',
+  markedDm: [], sensitiveLogs: [], knowledge: [], kbKeyword: '',
+  orderTrace: null, refundReasons: null,
+  batchSelected: {},                         // 订单批量勾选 {orderId:true}
+  stageAnalysis: [], stageSessionId: '',
+  funnel: null, productCompare: [], compareIds: {},
+  audienceProfile: null,
+  reviewsPain: null,
+  unreadSummary: null, batchPrivateSelected: {}, quickReplies: [],
+  sessionCompare: null, opLogs: [], accounts: []
 };
 window.__camStream = null;
 window.__camOn = false;
@@ -1187,21 +1516,37 @@ function switchPage(page) {
   S.curPage = page;
   document.querySelectorAll('.lc-sb-item').forEach(function(el){el.classList.toggle('active',el.dataset.page===page)});
   document.querySelectorAll('.lc-inner').forEach(function(el){el.classList.toggle('active',el.id==='page-'+page)});
-  if (page==='console') { renderAll(); }
-  if (page==='products') renderProductsPage();
-  if (page==='danmaku') { renderDmPage(); renderDanmakuSummary(); renderDanmakuSummaryAI(); }
-  if (page==='analysis') renderAnalysisPage();
-  if (page==='orders') renderOrdersPage();
-  if (page==='reviews') { renderReviewsPage(); loadReviewSummary(); }
+  if (page==='console') { renderAll(); renderNotices(); }
+  if (page==='products') { renderProductsPage(); loadTagGroups(); }
+  if (page==='danmaku') {
+    renderDmPage(); renderDanmakuSummary(); renderDanmakuSummaryAI();
+    loadKnowledge(); loadSensitiveLogs(); loadMarkedDanmaku();
+  }
+  if (page==='analysis') {
+    renderAnalysisPage();
+    populateAnalysisStageSelect();
+    populateFunnelProductSelect();
+    loadStageAnalysis(S.stageSessionId || '');
+    loadConversionFunnel('');
+    loadRefundReasonSummary();
+    renderProductComparePicker();
+    loadAudienceProfile();
+  }
+  if (page==='orders') { renderOrdersPage(); loadRefundReasonSummary(); }
+  if (page==='reviews') { renderReviewsPage(); loadReviewSummary(); loadReviewPainPoints(); }
   if (page==='viewers') renderViewersPage();
-  if (page==='inbox') refreshInbox();
+  if (page==='inbox') { refreshInbox(); loadQuickReplies(); loadUnreadSummary(); }
   if (page==='report') {
     renderReport(S.lastReport);
     loadDmSessions();
     loadReportHistory();
     loadHfq(S.hfqSessionId || '');
+    populateCompareSelects();
   }
-  if (page==='settings') { loadSettings(); loadLlmEndpoints(); }
+  if (page==='settings') {
+    loadSettings(); loadLlmEndpoints();
+    loadOperationLogs(); loadAccounts();
+  }
 }
 
 // ============================================================
@@ -1644,6 +1989,38 @@ function renderStageControl() {
   }).join('');
   var strats={warmup:'预热阶段：侧重介绍商品亮点',flash_sale:'秒杀阶段：强调限时优惠',deep_dive:'深度讲解：详细展示商品细节',interact:'互动促单：引导下单',closing:'收尾总结：汇总本场直播'};
   document.getElementById('stageStrategy').textContent=strats[cur]||'';
+  renderStageQuickPanel(cur);
+}
+// 直播阶段联动：不同阶段给不同的快捷弹幕、AI 话术与场控提示
+var STAGE_QUICK={
+  warmup:{tip:'先暖场破冰，预告福利，拉停留',danmaku:['欢迎新来的宝宝~','今天福利很大，别走开！','马上开讲第一款爆款'],
+    script:'opening',scriptLabel:'开场暖场话术'},
+  flash_sale:{tip:'库存与优惠要反复口播，制造紧迫感',danmaku:['库存不多了！','限时秒杀最后3分钟','优惠券记得领'],
+    script:'promo',scriptLabel:'促销逼单话术'},
+  deep_dive:{tip:'聚焦单品细节，回应规格与品质疑问',danmaku:['我给大家细讲一下材质','有疑问打在公屏','看下实拍细节'],
+    script:'product_intro',scriptLabel:'商品介绍话术'},
+  interact:{tip:'用互动问题促单，及时答疑打消顾虑',danmaku:['想要的扣1','不知道怎么选的问我','今天下单最划算'],
+    script:'interact',scriptLabel:'互动提问话术'},
+  closing:{tip:'收尾总结，预告下一场，做好售后承接',danmaku:['感谢大家陪伴~','没抢到的关注下次','有问题随时私信'],
+    script:'closing',scriptLabel:'收尾下播话术'}
+};
+function renderStageQuickPanel(stage){
+  var el=document.getElementById('stageQuickPanel');
+  if(!el) return;
+  var q=STAGE_QUICK[stage]||STAGE_QUICK.warmup;
+  el.innerHTML=
+    '<div style="font-size:11px;color:#2563eb;margin-bottom:6px">💡 场控提示：'+esc(q.tip)+'</div>'+
+    '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">'+
+      q.danmaku.map(function(t){
+        return '<button class="lc-q-btn" onclick="quickDanmaku(\''+esc(t)+'\')">💬 '+esc(t)+'</button>';
+      }).join('')+
+    '</div>'+
+    '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="genStageScript(\''+q.script+'\')">✨ '+esc(q.scriptLabel)+'</button>';
+}
+function genStageScript(type){
+  var st=document.getElementById('scriptType');
+  if(st) st.value=type;
+  generateScriptNow();
 }
 function renderProductSelect() {
   var sel=document.getElementById('prodSelect');
@@ -1849,8 +2226,10 @@ function starHtml(rating) {
 function prodStateFiltered(p) {
   var st = document.getElementById('prodStateFilter') ? document.getElementById('prodStateFilter').value : 'all';
   var cat = document.getElementById('prodCatFilter') ? document.getElementById('prodCatFilter').value : 'all';
+  var tag = document.getElementById('prodTagFilter') ? document.getElementById('prodTagFilter').value : 'all';
   var kw = document.getElementById('prodSearch') ? (document.getElementById('prodSearch').value||'').toLowerCase() : '';
   if (cat!=='all' && p.category!==cat) return false;
+  if (tag!=='all' && (p.tagGroup||'')!==tag) return false;
   if (st==='on' && !p.isOnSale) return false;
   if (st==='off' && p.isOnSale) return false;
   if (st==='soldout' && p.stock>0) return false;
@@ -1871,6 +2250,17 @@ function renderProductsPage() {
   if (catSel && catSel.options.length !== cats.length+1) {
     catSel.innerHTML = '<option value="all">全部分类</option>'+cats.map(function(c){return '<option value="'+esc(c)+'">'+esc(c)+'</option>';}).join('');
   }
+  // 标签分组下拉：来自后端聚合，保留当前选择
+  var tagSel = document.getElementById('prodTagFilter');
+  if (tagSel) {
+    var cur = tagSel.value || 'all';
+    var groups = (S.tagGroups||[]).map(function(g){return g.group||g.name;});
+    tagSel.innerHTML = '<option value="all">全部标签分组</option>'
+      + groups.map(function(g){return '<option value="'+esc(g)+'">'+esc(g)+'</option>';}).join('');
+    tagSel.value = groups.indexOf(cur)>=0 ? cur : 'all';
+  }
+  if (!S.tagGroups.length) wsSend('get_tag_groups');
+  renderTagGroups();
   // 统计卡
   var onCount=S.products.filter(function(p){return p.isOnSale;}).length;
   var offCount=S.products.filter(function(p){return p.isOnSale===false;}).length;
@@ -1901,7 +2291,7 @@ function renderProductsPage() {
       '<div class="lc-prod-thumb">'+prodImgOrStyle(p)+prodStateBadge(p)+
         (isCur?'<span class="lc-prod-badge" style="right:8px;left:auto;background:#2563eb">🎯 当前讲解</span>':'')+'</div>'+
       '<div class="lc-prod-body">'+
-        '<div class="lc-prod-name">'+esc(p.name)+'</div>'+
+        '<div class="lc-prod-name">'+esc(p.name)+(p.tagGroup?' <span class="lc-tag lc-tag-yellow" style="font-size:10px">'+esc(p.tagGroup)+'</span>':'')+'</div>'+
         '<div class="lc-prod-price">'+fmtPrice(p.price)+'<span class="op">¥'+fmtNum(p.originalPrice||p.price)+'</span></div>'+
         '<div class="lc-prod-meta"><span>'+starHtml(p.rating)+' '+fmtNum(p.rating)+'</span>'+
           '<span>库存 '+fmtNum(p.stock)+'</span></div>'+
@@ -1933,7 +2323,7 @@ function deleteProduct(pid) {
 // 添加/编辑 表单
 function openProductForm(pid) {
   S.editingProductId = pid||null;
-  var f = {name:'',category:'美妆护肤',price:'',originalPrice:'',stock:100,cost:0,skus:'',images:'',points:'',specs:'',description:''};
+  var f = {name:'',category:'美妆护肤',price:'',originalPrice:'',stock:100,cost:0,skus:'',images:'',points:'',specs:'',description:'',tagGroup:''};
   if (pid) {
     var p = S.products.filter(function(x){return x.productId===pid;})[0];
     if (p) f = {name:p.name, category:p.category||'其他', price:p.price, originalPrice:p.originalPrice,
@@ -1944,10 +2334,17 @@ function openProductForm(pid) {
       }).join('\n'),
       images:(p.images||[]).filter(function(u){return u.indexOf('data:image/svg')!==0;}).join('\n'),
       points:(p.sellingPoints||[]).join('\n'),
-      specs:(p.specs||[]).join('\n'), description:p.description||''};
+      specs:(p.specs||[]).join('\n'), description:p.description||'', tagGroup:p.tagGroup||''};
   }
   document.getElementById('productFormTitle').textContent = pid ? '✏️ 编辑商品' : '➕ 添加商品';
   document.getElementById('pfName').value = f.name;
+  document.getElementById('pfTagGroup').value = f.tagGroup||'';
+  // 标签分组候选：来自已用过分组 + 常见预设
+  var groups=(S.tagGroups||[]).map(function(g){return g.group||g.name;});
+  ['主推爆款','清仓专区','新品首发','福利秒杀','回头客专享'].forEach(function(g){if(groups.indexOf(g)<0)groups.push(g);});
+  document.getElementById('pfTagGroupList').innerHTML=groups.map(function(g){
+    return '<option value="'+esc(g)+'">';
+  }).join('');
   document.getElementById('pfCategory').value = f.category;
   document.getElementById('pfPrice').value = f.price;
   document.getElementById('pfOrigPrice').value = f.originalPrice;
@@ -2005,6 +2402,7 @@ function submitProductForm() {
     productId: S.editingProductId || '',
     name: name,
     category: document.getElementById('pfCategory').value,
+    tagGroup: (document.getElementById('pfTagGroup').value||'').trim(),
     price: price,
     originalPrice: orig,
     // 有 SKU 时库存以 SKU 合计为准（后端也会再归一化一次），避免输入框里的旧值和规格库存打架
@@ -2062,6 +2460,7 @@ function openProductDetail(pid) {
       '<div style="flex:1;min-width:220px">'+
         '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+
           '<span class="lc-tag lc-tag-blue">'+esc(p.category||'未分类')+'</span>'+
+          (p.tagGroup?'<span class="lc-tag lc-tag-yellow">🏷 '+esc(p.tagGroup)+'</span>':'')+
           (isCur?'<span class="lc-tag lc-tag-green">🎯 当前讲解中</span>':'')+
           (p.isOnSale?'<span class="lc-tag lc-tag-green">上架中</span>':'<span class="lc-tag" style="background:#f1f5f9;color:#64748b">已下架</span>')+
         '</div>'+
@@ -2084,6 +2483,9 @@ function openProductDetail(pid) {
       '<tr><th>规格</th><th>直播价</th><th>原价</th><th>库存</th><th>成本</th><th>状态</th></tr>'+skuRowsHtml+'</table>':'')+
     '<div id="prodOpsPanel" style="margin-top:16px;border-top:1px solid #f1f5f9;padding-top:12px">'+
       '<div style="color:#94a3b8;font-size:12px;padding:12px 0">经营数据加载中…</div></div>'+
+    '<div id="prodPriceHistory" style="margin-top:16px;border-top:1px solid #f1f5f9;padding-top:12px">'+
+      '<div style="font-size:13px;font-weight:700;margin-bottom:8px">💹 历史售价记录</div>'+
+      '<div style="color:#94a3b8;font-size:12px;padding:8px 0">加载中…</div></div>'+
     '<div style="display:flex;gap:8px;margin-top:14px" onclick="event.stopPropagation()">'+
       '<button class="lc-btn lc-btn-primary lc-btn-sm" onclick="setCurProdFromMgr(\''+p.productId+'\');closeProductDetail()">🎯 设为讲解</button>'+
       '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="openProductForm(\''+p.productId+'\');closeProductDetail()">✏️ 编辑</button>'+
@@ -2103,6 +2505,8 @@ function openProductDetail(pid) {
   wsSend('get_product_ops',{productId:pid});
   wsSend('get_stock_logs',{productId:pid,limit:80});
   wsSend('get_low_stock');
+  S.priceHistory=[]; S.priceHistoryProductId=pid;
+  wsSend('get_price_history',{productId:pid});
   document.getElementById('productDetailModal').classList.add('open');
 }
 function closeProductDetail() { document.getElementById('productDetailModal').classList.remove('open'); }
@@ -2303,10 +2707,39 @@ function renderTopQuestions() {
   var el=document.getElementById('topQuestions');
   if(!list||!list.length){el.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:8px 0">暂无数据</div>';return;}
   el.innerHTML=list.slice(0,10).map(function(q,i){
-    return '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f8fafc;font-size:12px">'+
-      '<span>#'+(i+1)+' '+esc(q.question)+'</span>'+
-      '<span style="font-weight:600;color:#2563eb">'+q.count+'次</span></div>';
+    return '<div style="display:flex;justify-content:space-between;gap:6px;padding:4px 0;border-bottom:1px solid #f8fafc;font-size:12px">'+
+      '<span style="min-width:0">#'+(i+1)+' '+esc(q.question)+
+        (q.stageLabel?' <span style="font-size:10px;color:#7c3aed">['+esc(q.stageLabel)+']</span>':'')+
+        (q.hasKnowledge?' <span style="font-size:10px;color:#059669">📚</span>':'')+'</span>'+
+      '<span style="font-weight:600;color:#2563eb;flex-shrink:0">'+q.count+'次</span></div>';
   }).join('');
+  renderCurProdQuestions();
+}
+// 当前讲解商品的高频问题：按商品名/品类关键词过滤本场问题；无匹配时展示通用 TOP3
+function renderCurProdQuestions(){
+  var el=document.getElementById('curProdQuestions');
+  if(!el) return;
+  var p=S.curProd;
+  if(!p){el.innerHTML='<div style="color:#94a3b8;font-size:12px">请先选择讲解商品</div>';return;}
+  var words=String(p.name||'').split(/[\s,，、/]+/).filter(function(w){return w.length>=2;});
+  if(p.category) words.push(p.category);
+  var all=S.hfq||[];
+  var hits=all.filter(function(q){
+    var text=String(q.question||'');
+    return words.some(function(w){return text.indexOf(w)>=0;});
+  });
+  var list=(hits.length?hits:all).slice(0,5);
+  el.innerHTML='<div style="font-size:11px;color:#2563eb;margin-bottom:4px">「'+esc(p.name)+'」'+(hits.length?'关联问题':'暂无专属问题，展示通用热门问题')+'</div>'+
+    (list.length?list.map(function(q,i){
+      return '<div style="display:flex;justify-content:space-between;gap:6px;padding:3px 0;border-bottom:1px solid #f8fafc;font-size:12px">'+
+        '<span>#'+(i+1)+' '+esc(q.question)+'</span>'+
+        '<button class="lc-mini-btn" onclick="importHfqOne(\''+esc(q.question).replace(/'/g,"\\'")+'\')">用于话术</button></div>';
+    }).join(''):'<div style="color:#94a3b8">暂无问题数据</div>');
+}
+function importHfqOne(question){
+  var out=document.getElementById('scriptOutput');
+  if(out){out.value=(out.value?out.value+'\n':'')+'【高频问题】'+question+'\n【建议回答】';out.scrollTop=out.scrollHeight;}
+  toast('已加入话术编辑框','success');
 }
 // 场控提示：每条都可点击处理。alertId 由后端生成；无 id 时退回数组下标，
 // 数组只追加不删，所以下标是稳定的。
@@ -2427,9 +2860,10 @@ function renderDmHistoryList() {
     }
     // 提问标记：注册用户提的问题是运营最关心的，单独标出来
     var q=d.isQuestion?'<span style="color:#d97706;font-weight:600;margin-right:4px">问</span>':'';
-    return '<div class="lc-dm-item">'+
+    var markBtn='<button class="lc-dm-pin'+(d.isMarked?' on':'')+'" onclick="toggleMarkDanmaku(\''+esc(d.danmakuId||'')+'\','+(!d.isMarked)+')" title="标记为重点弹幕">'+(d.isMarked?'★':'☆')+'</button>';
+    return '<div class="lc-dm-item'+(d.isMarked?' pinned':'')+'">'+
       '<span style="font-weight:600;color:#1e293b;font-size:11px">'+esc(d.userName||'用户')+'</span> '+
-      tg+q+
+      tg+q+markBtn+
       '<span style="color:#475569">'+esc(d.content)+'</span>'+
       '<span style="float:right;color:#cbd5e1;font-size:10px">'+fmtTime(d.timestamp)+'</span>'+
     '</div>';
@@ -2462,7 +2896,11 @@ function renderAiReplyList() {
     return '<div class="lc-dm-item" style="border-left:3px solid #10b981;padding-left:10px;margin-bottom:8px">'+
       '<div style="font-size:13px;color:#1e293b;line-height:1.6">🤖 '+esc(d.replyContent||'')+'</div>'+
       '<div style="font-size:11px;color:#94a3b8;margin-top:5px">针对「'+esc(d.userName||'观众')+'」的提问：'+esc(d.content)+
-        '<span style="float:right;color:#cbd5e1">'+fmtTime(d.replyTime||d.timestamp)+'</span></div></div>';
+        '<span style="float:right;color:#cbd5e1">'+fmtTime(d.replyTime||d.timestamp)+'</span></div>'+
+      '<div style="display:flex;gap:6px;margin-top:4px">'+
+        '<button class="lc-mini-btn" onclick="openCorrectReply(\''+esc(d.danmakuId||'')+'\')" title="手动修正 AI 回答并沉淀为标准答案">✏️ 修正回答</button>'+
+        '<button class="lc-mini-btn" onclick="toggleMarkDanmaku(\''+esc(d.danmakuId||'')+'\','+(!d.isMarked)+')">'+(d.isMarked?'★ 已标记':'☆ 重点标记')+'</button>'+
+      '</div></div>';
   }).join('');
 }
 function renderTopQuestionsChart() {
@@ -2474,9 +2912,13 @@ function renderTopQuestionsChart() {
     var chart=echarts.init(el); window.__hfqChart=chart;
     var top10=list.slice(0,10);
     chart.setOption({
-      tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
       grid:{left:120,right:20,top:20,bottom:30},
       xAxis:{type:'value'},
+      tooltip:{trigger:'axis',formatter:function(ps){
+        var q=top10[ps[0].dataIndex]; if(!q) return '';
+        return esc(q.question)+'<br>次数：'+q.count+'<br>阶段：'+esc(q.stageLabel||'未分阶段')+
+          (q.hasKnowledge?'<br>📚 已入知识库':'');
+      }},
       yAxis:{type:'category',data:top10.map(function(q){return q.question.length>12?q.question.slice(0,12)+'…':q.question}),axisLabel:{fontSize:11}},
       series:[{type:'bar',data:top10.map(function(q){return q.count}),itemStyle:{color:function(p){var c=['#2563eb','#3b82f6','#60a5fa','#93c5fd','#bfdbfe'];return c[p.dataIndex%c.length]}},barMaxWidth:24}]
     });
@@ -2713,10 +3155,10 @@ function renderAdminOrders(){
     el.innerHTML='<tr><td class="lc-empty-row">暂无真实订单'+(S.adminProductFilter?'（该商品暂无订单）':'')+'</td></tr>';
     return;
   }
-  el.innerHTML='<tr><th>单号</th><th>商品</th><th>规格</th><th>买家</th><th>收货信息</th><th>数量</th><th>金额 / 优惠</th><th>状态</th><th>时间</th><th>操作</th></tr>'+
+  el.innerHTML='<tr><th><input type="checkbox" onchange="toggleAllOrders(this.checked)"></th><th>单号</th><th>商品</th><th>规格</th><th>买家</th><th>收货信息</th><th>数量</th><th>金额 / 优惠</th><th>状态</th><th>时间</th><th>操作</th></tr>'+
     list.slice(0,200).map(function(o){
       var acts;
-      if(o.refundStatus==='pending'){
+      if(o.refundStatus==='pending' && S.accountRole==='admin'){
         acts='<button class="lc-mini-btn" style="border-color:#dc2626;color:#dc2626;background:#fef2f2" onclick="reviewRefund(\''+esc(o.orderId)+'\',true)">✅ 同意退款</button> '+
              '<button class="lc-mini-btn" style="border-color:#94a3b8;color:#475569" onclick="reviewRefund(\''+esc(o.orderId)+'\',false)">✖ 拒绝</button>';
       } else {
@@ -2738,7 +3180,9 @@ function renderAdminOrders(){
         (discount>0?'<div style="font-size:10px;color:#d97706">优惠 -¥'+fmtNum(discount)+(o.couponName?(' · '+esc(o.couponName)):'')+'</div>':'')+
         (original>Number(o.totalAmount||0)?'<div style="font-size:10px;color:#94a3b8;text-decoration:line-through">原价 ¥'+fmtNum(original)+'</div>':'');
       return '<tr>'+
-        '<td style="color:#64748b;font-size:11px">'+esc(o.orderNo||o.orderId)+'</td>'+
+        '<td><input type="checkbox" data-oid="'+esc(o.orderId)+'" '+(S.batchSelected[o.orderId]?'checked':'')+' onchange="toggleOrderSelect(\''+esc(o.orderId)+'\',this.checked)"></td>'+
+        '<td style="color:#64748b;font-size:11px">'+esc(o.orderNo||o.orderId)+
+          (o.sourceDanmakuId?'<div style="font-size:10px;color:#7c3aed">💬 有提问溯源</div>':'')+'</td>'+
         '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis">'+esc(lines[0].productName||o.productName||'商品')+more+
           '<div style="font-size:10px;color:#2563eb">'+esc(chLabels)+'</div></td>'+
         '<td>'+specHtml+'</td>'+
@@ -2749,7 +3193,8 @@ function renderAdminOrders(){
         '<td title="'+(o.shipTime?('发货时间 '+fmtTime(o.shipTime)):'')+'">'+orderStatusHtml(o)+
           (o.refundType==='return'&&o.refundStatus!=='none'?'<div style="font-size:10px;color:#b45309">退货退款</div>':'')+'</td>'+
         '<td style="color:#94a3b8;font-size:11px">'+fmtTime(o.createTime)+'</td>'+
-        '<td>'+acts+'</td>'+
+        '<td>'+acts+
+          ' <button class="lc-mini-btn" onclick="openOrderTrace(\''+esc(o.orderId)+'\')" title="查看提问→下单链路">🔗 溯源</button></td>'+
       '</tr>';
     }).join('');
 }
@@ -3006,6 +3451,7 @@ function dmIsSimulated(d){ var k=danmakuKind(d); return k==='virtual'||k==='mock
 function orderActBtns(o){
   var s=o.status, btns=[];
   var real=orderIsReal(o);
+  var canRefund=S.accountRole==='admin';
   function mk(label,st,primary){
     var base='lc-mini-btn';
     var stl=primary?'border-color:#2563eb;color:#2563eb;background:#eff6ff':'';
@@ -3024,10 +3470,10 @@ function orderActBtns(o){
     // 这里隐藏按钮只是体验，WS 消息可以直接构造，所以拦截必须两边都做。
     if(real) btns.push(mk('🚚 发货','shipped',true));
     else btns.push('<span style="color:#cbd5e1;font-size:11px;margin-right:6px" title="模拟订单不能发货">🔒 模拟单不可发货</span>');
-    btns.push(mk('退款','refunded'));
+    if(canRefund) btns.push(mk('退款','refunded'));
   }
-  else if(s==='shipped'){ btns.push(mk('退款','refunded')); }
-  else if(s==='completed'){ btns.push(mk('退款','refunded')); }
+  else if(s==='shipped'){ if(canRefund) btns.push(mk('退款','refunded')); }
+  else if(s==='completed'){ if(canRefund) btns.push(mk('退款','refunded')); }
   // 「私信」不限状态：买过东西的观众，不管单子走到哪一步都可能要联系
   // （用户要的是「下播后与购买用品的用户私信」，不是「只有已付款才能私信」）。
   // 同样只给真实订单 —— 伪造 id 的模拟单没有可对话的账号。点击后跳收件箱
@@ -3235,16 +3681,22 @@ function renderReviewList() {
     var actBtn=r.isHandled
       ? '<span class="lc-tag lc-tag-blue">已处理</span>'
       : '<button class="lc-mini-btn" onclick="markReviewHandled(\''+esc(r.reviewId||'')+'\',this)">✅ 标记已处理</button>';
+    var replyBtn='<button class="lc-mini-btn" onclick="replyReview(\''+esc(r.reviewId||'')+'\')">💬 '+(r.replyContent?'修改回复':'后台回复')+'</button>';
+    var replyHtml=r.replyContent
+      ? '<div style="margin-top:4px;padding:5px 8px;background:#f0f7ff;border-left:2px solid #2563eb;border-radius:4px;font-size:11px;color:#2563eb">主播回复：'+esc(r.replyContent)+' <span style="color:#94a3b8">'+fmtTime(r.replyTime)+'</span></div>'
+      : '';
     return '<div class="lc-dm-item">'+
       '<div style="display:flex;justify-content:space-between">'+
       '<span style="font-weight:600;font-size:12px">'+esc(r.userName||'匿名')+'</span>'+
       '<span style="color:#f59e0b;font-size:12px">'+stars+'</span></div>'+
       '<div style="font-size:12px;color:#475569;margin:2px 0">'+esc(r.content)+'</div>'+
-      '<div style="display:flex;gap:6px;align-items:center;font-size:11px;color:#94a3b8">'+
+      replyHtml+
+      '<div style="display:flex;gap:6px;align-items:center;font-size:11px;color:#94a3b8;flex-wrap:wrap">'+
       (stags[r.sentiment]||'')+
       (r.productName?'<span>'+esc(r.productName)+'</span>':'')+
+      (r.sessionId?'<span class="lc-tag lc-tag-yellow">场次 '+esc(String(r.sessionId).slice(-8))+'</span>':'')+
       '<span>'+fmtTime(r.timestamp)+'</span>'+
-      '<span style="margin-left:auto">'+actBtn+'</span></div></div>';
+      '<span style="margin-left:auto">'+replyBtn+' '+actBtn+'</span></div></div>';
   }).join('');
 }
 function markReviewHandled(reviewId,btn){
@@ -3317,6 +3769,46 @@ function renderReport(data) {
   var highlights = (sm.highlights||[]).map(function(x){return '✅ '+esc(x)+'<br>';}).join('');
   var improvements = (sm.improvements||[]).map(function(x){return '👉 '+esc(x)+'<br>';}).join('');
 
+  // ---- 迭代新增：分阶段对比 / 退款与差评汇总 / AI 运营建议 ----
+  var stages = data.stageComparison || [];
+  var stageRows = stages.length ? stages.map(function(s){
+    return '<tr><td>'+esc((s.icon||'')+' '+(s.label||''))+'</td><td>'+fmtNum(s.danmaku||0)+
+      '</td><td>'+fmtNum(s.questions||0)+'</td><td>'+fmtNum(s.orderCount||0)+
+      '</td><td>'+fmtNum(s.paidCount||0)+'</td><td style="color:#dc2626;font-weight:600">¥'+fmtNum(s.gmv||0)+'</td></tr>';
+  }).join('') : '<tr><td colspan="6" style="text-align:center;color:#94a3b8">本场暂无分阶段数据</td></tr>';
+  var suggestions = data.aiSuggestions || [];
+  var advHtml = suggestions.length ? suggestions.map(function(s,i){
+    return '<div style="padding:6px 0;border-bottom:1px dashed #f1f5f9;font-size:12px;line-height:1.7">'+
+      '<span class="lc-tag lc-tag-blue">建议 '+(i+1)+'</span> '+esc(s)+'</div>';
+  }).join('') : '<div style="color:#94a3b8">暂无 AI 运营建议</div>';
+  var rf = data.refundSummary || {};
+  var refundCats = (rf.categories||[]).map(function(c){
+    return '<span class="lc-tag lc-tag-red">'+esc(c.label)+' '+fmtNum(c.count)+' 笔 · ¥'+fmtNum(c.amount)+
+      (c.ratio!==undefined?(' · '+c.ratio+'%'):'')+'</span>';
+  }).join('');
+  var ns = data.negativeReviewSummary || {};
+  var negPoints = (ns.points||[]).map(function(p){
+    return '<span class="lc-tag lc-tag-yellow">'+esc(p.point)+' ×'+p.count+'</span>';
+  }).join('');
+  var newReportHtml =
+    '<div class="lc-grid lc-grid-2" style="margin-top:14px">'+
+      '<div class="lc-card"><div class="lc-card-title">⏱ 分阶段数据对比</div>'+
+        '<div id="repStageChart" style="height:240px"></div>'+
+        '<div class="lc-scroll" style="max-height:220px;margin-top:8px"><table class="lc-tbl2">'+
+        '<tr><th>阶段</th><th>弹幕</th><th>提问</th><th>下单</th><th>支付</th><th>GMV</th></tr>'+
+        stageRows+'</table></div></div>'+
+      '<div class="lc-card"><div class="lc-card-title">🤖 AI 运营优化建议</div>'+advHtml+'</div>'+
+    '</div>'+
+    '<div class="lc-grid lc-grid-2" style="margin-top:14px">'+
+      '<div class="lc-card"><div class="lc-card-title">↩️ 退款汇总</div>'+
+        '<div style="font-size:12px;color:#475569;margin-bottom:8px">退款 <b style="color:#dc2626">'+fmtNum(rf.count||0)+
+        '</b> 笔 · 金额 <b style="color:#dc2626">¥'+fmtNum(rf.amount||0)+'</b> · 退款率 '+(rf.rate||0)+'%</div>'+
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">'+(refundCats||'<span style="font-size:11px;color:#94a3b8">本场无退款</span>')+'</div></div>'+
+      '<div class="lc-card"><div class="lc-card-title">⭐ 差评汇总</div>'+
+        '<div style="font-size:12px;color:#475569;margin-bottom:8px">差评 <b style="color:#dc2626">'+fmtNum(ns.count||0)+'</b> 条</div>'+
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">'+(negPoints||'<span style="font-size:11px;color:#94a3b8">本场无差评</span>')+'</div></div>'+
+    '</div>';
+
   el.innerHTML =
     '<div class="lc-card" style="margin-bottom:14px">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">'+
@@ -3327,6 +3819,7 @@ function renderReport(data) {
         '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
           '<span class="lc-badge lc-badge-live" style="font-size:16px;padding:4px 18px">'+esc(data.grade||'—')+'</span>'+
           '<button class="lc-btn lc-btn-primary lc-btn-sm" onclick="downloadReport()">⬇ 下载报告</button>'+
+          '<button class="lc-btn lc-btn-outline lc-btn-sm" onclick="exportReportPdf()">🧾 导出 PDF</button>'+
           regenBtn+
         '</div>'+
       '</div>'+
@@ -3354,6 +3847,7 @@ function renderReport(data) {
         '<div style="font-size:12px;line-height:1.9;color:#475569">'+(improvements||'<span style="color:#94a3b8">暂无建议</span>')+'</div>'+
       '</div>'+
     '</div>'+
+    newReportHtml+
     '<div class="lc-grid lc-grid-2" style="margin-top:14px">'+
       '<div class="lc-card"><div class="lc-card-title">🛒 商品明细（本场）</div>'+
         '<div class="lc-scroll" style="max-height:300px"><table class="lc-tbl">'+
@@ -3478,6 +3972,24 @@ function renderReportCharts(data) {
     });
   } else {
     _repChart('repTimelineChart', null, '暂无时间分布数据');
+  }
+
+  // 5) 分阶段对比：弹幕 / 提问 / GMV
+  var stages = data.stageComparison || [];
+  if (stages.length) {
+    _repChart('repStageChart', {
+      tooltip:{trigger:'axis'},
+      legend:{bottom:0,textStyle:{fontSize:10}},
+      grid:{left:40,right:50,top:20,bottom:45},
+      xAxis:{type:'category',data:stages.map(function(s){return s.label||s.stage;}),axisLabel:{fontSize:10,interval:0,rotate:15}},
+      yAxis:[{type:'value',name:'条',axisLabel:{fontSize:10}},
+             {type:'value',name:'¥',axisLabel:{fontSize:10}}],
+      series:[
+        {name:'弹幕',type:'bar',data:stages.map(function(s){return s.danmaku||0;}),barMaxWidth:20,itemStyle:{color:'#2563eb'}},
+        {name:'提问',type:'bar',data:stages.map(function(s){return s.questions||0;}),barMaxWidth:20,itemStyle:{color:'#8b5cf6'}},
+        {name:'GMV',type:'line',yAxisIndex:1,data:stages.map(function(s){return s.gmv||0;}),itemStyle:{color:'#f59e0b'},symbolSize:7}
+      ]
+    });
   }
 }
 
@@ -3679,20 +4191,48 @@ function renderViewerDetail(d) {
   var v = d.viewer || {};
   var orders = d.orders || [];
   var msgs = d.messages || [];
+  var questions = d.questions || [];
+  var visits = d.visits || [];
   var stMap = {pending_pay:'待付款',paid:'已付款',shipped:'已发货',completed:'已完成',refunded:'已退款',canceled:'已取消'};
+  var tags = (v.tags||[]).map(function(t){
+    var color={ '高价值':'lc-tag-red','复购客':'lc-tag-green','只看不买':'lc-tag-yellow','高意向':'lc-tag-blue','深度观看':'lc-tag-blue' }[t]||'';
+    return '<span class="lc-tag '+color+'">'+esc(t)+'</span>';
+  }).join('');
+  function fmtDur(sec){
+    sec=Number(sec||0);
+    if(sec<60)return sec+' 秒';
+    var m=Math.floor(sec/60);
+    return m<60?m+' 分钟':(Math.floor(m/60)+' 小时 '+(m%60)+' 分钟');
+  }
   var html = '<div style="display:flex;gap:10px;align-items:center;margin-bottom:12px">'+
       avatarHtml(v.avatar, v.userName, 44)+
-      '<div><div style="font-weight:600;font-size:15px">'+esc(v.userName||'(未命名)')+'</div>'+
-      '<div style="font-size:11px;color:#94a3b8">'+esc(v.userId)+'</div></div></div>'+
+      '<div style="flex:1"><div style="font-weight:600;font-size:15px">'+esc(v.userName||'(未命名)')+'</div>'+
+      '<div style="font-size:11px;color:#94a3b8">'+esc(v.userId)+' · 模拟地域 '+esc(v.region||'未知')+'</div>'+
+      '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:4px">'+(tags||'<span class="lc-tag">新客</span>')+'</div></div></div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;margin-bottom:12px">'+
       statBox('余额','¥'+(v.balance||0).toFixed(2))+
       statBox('订单数',String(v.orderCount||0))+
       statBox('累计消费','¥'+(v.totalSpend||0).toFixed(0))+
       statBox('状态', v.isOnline ? ('在线'+(v.connections>1?'（'+v.connections+' 连接）':'')) : '离线')+
+      statBox('累计观看', fmtDur(v.watchSeconds))+
+      statBox('进场次数', String(visits.length))+
+      statBox('提问次数', String(questions.length))+
       statBox('注册时间', v.registerTime ? fmtTime(v.registerTime) : '--')+
-      statBox('账号类型', v.hasAccount ? '新账号' : '历史账户（无登录凭据）')+
     '</div>'+
-    '<div class="lc-card-title" style="font-size:13px">📦 订单（'+orders.length+'）</div>'+
+    '<div class="lc-card-title" style="font-size:13px">👀 历史观看记录（'+visits.length+'）</div>'+
+    (visits.length ? visits.slice(0,10).map(function(x){
+      return '<div class="lc-dm-item"><div style="display:flex;justify-content:space-between;font-size:12px">'+
+        '<span>'+esc(fmtTime(x.enterTime))+' → '+(x.leaveTime?esc(fmtTime(x.leaveTime)):'<span style="color:#10b981">仍在场</span>')+'</span>'+
+        '<span style="color:#2563eb;font-weight:600">'+fmtDur(x.durationSeconds)+'</span></div>'+
+        (x.sessionId?'<div style="font-size:10px;color:#94a3b8">场次 '+esc(x.sessionId)+'</div>':'')+'</div>';
+    }).join('') : '<div class="lc-empty"><div class="icon">👀</div>暂无进场记录</div>')+
+    '<div class="lc-card-title" style="font-size:13px;margin-top:14px">❓ 历史提问（'+questions.length+'）</div>'+
+    (questions.length ? questions.slice(0,10).map(function(q){
+      return '<div class="lc-dm-item"><div style="font-size:12px;color:#1e293b">'+esc(q.content)+'</div>'+
+        '<div style="font-size:11px;color:#94a3b8">'+fmtTime(q.timestamp)+' · '+
+        (q.isReplied?'<span style="color:#10b981">已回复</span>':'<span style="color:#f59e0b">未回复</span>')+'</div></div>';
+    }).join('') : '<div class="lc-empty"><div class="icon">❓</div>暂无提问</div>')+
+    '<div class="lc-card-title" style="font-size:13px;margin-top:14px">📦 订单（'+orders.length+'）</div>'+
     (orders.length ? orders.slice().reverse().map(function(o){
       return '<div class="lc-dm-item"><div style="display:flex;justify-content:space-between;font-size:12px">'+
         '<span style="font-weight:600">'+esc(o.productName||o.productId)+' ×'+o.quantity+'</span>'+
@@ -3701,7 +4241,7 @@ function renderViewerDetail(d) {
         (stMap[o.status]||o.status)+' · '+esc(fmtTime(o.createTime))+'</div></div>';
     }).join('') : '<div class="lc-empty"><div class="icon">📦</div>暂无订单</div>')+
     '<div class="lc-card-title" style="font-size:13px;margin-top:14px">✉️ 私信记录（'+msgs.length+'）</div>'+
-    (msgs.length ? msgs.slice(-20).map(function(m){
+    (msgs.length ? msgs.slice(0,20).map(function(m){
       var mine = !m.isFromUser;
       return '<div style="display:flex;'+(mine?'justify-content:flex-end':'')+';margin:4px 0">'+
         '<div style="max-width:80%;padding:6px 10px;border-radius:8px;font-size:12px;'+
@@ -4017,6 +4557,9 @@ on('init_state',function(d){
   // 服务端已把连接降级为观众（token 过期/无效）——必须显式挡住，否则运营台会
   // 静默退化成只读观众端，界面上什么都点不动，极难排查。
   if(d.role && d.role !== 'host'){ showRoleBlocked(); return; }
+  S.accountRole = d.accountRole || 'admin';
+  S.accountName = d.accountName || '';
+  applyAccountRole();
   if(d.liveStatus) Object.assign(S.liveStatus,d.liveStatus);
   if(d.products) S.products=d.products;
   if(d.stats) S.stats=d.stats;
@@ -4461,6 +5004,8 @@ on('get_session_orders_result',function(d){
 on('order_new',function(d){
   // 新订单到达：刷新分析页的商品销量 Top 与商品数据；在控制台就地刷「本场订单」，
   // 主播不用切页就能看到刚成交的那一单。
+  if(d&&d.orderId)pushNotice('order','新订单',(d.userName||'观众')+' 下单 ¥'+fmtNum(d.totalAmount||0)+
+    (d.productName?(' · '+d.productName):''));
   if(S.curPage==='analysis')wsSend('get_order_stats');
   if(S.curPage==='console')loadSessionOrders();
   if(S.curPage==='orders')loadAdminOrders();
@@ -4493,6 +5038,157 @@ on('generate_ai_test_orders_result',function(d){
     if(S.ordersScope!=='mock') setOrdersScope('mock');
     else wsSend('get_orders',{scope:'mock',limit:200});
   }
+});
+
+// ============================================================
+// 全模块迭代：结果处理器
+// ============================================================
+on('batch_ship_result',function(d){
+  if(d&&d.success){
+    toast('批量发货完成：成功 '+d.shipped+' 单'+(d.skipped?('，跳过 '+d.skipped+' 单'):''),'success');
+  } else {
+    toast((d&&d.message)||'批量发货未生效（订单状态不满足）','warn');
+  }
+  S.batchSelected={}; loadAdminOrders(); refreshOrderSelectionUI();
+});
+on('batch_refund_result',function(d){
+  if(d&&d.success){
+    toast('批量退款完成：成功 '+d.refunded+' 单'+(d.skipped?('，跳过 '+d.skipped+' 单'):''),'success');
+  } else {
+    toast((d&&d.message)||'批量退款未生效','warn');
+  }
+  S.batchSelected={}; loadAdminOrders(); refreshOrderSelectionUI(); loadRefundReasonSummary();
+});
+on('export_orders_result',function(d){
+  if(d&&d.success&&d.csv){ downloadCsv(d.filename,d.csv); toast('订单表格已导出','success'); }
+  else toast((d&&d.message)||'导出失败','err');
+});
+on('get_order_trace_result',function(d){ renderOrderTrace(d); });
+on('refund_reason_summary_result',function(d){ renderRefundReasonSummary(d); });
+on('remind_pending_pay_result',function(d){
+  if(d&&d.success){
+    toast(d.count?('已向 '+d.count+' 笔超时未付款订单发送 AI 催付私信'):'当前没有符合条件的超时待付款订单', d.count?'success':'info');
+    loadAdminOrders();
+  } else toast((d&&d.message)||'催付失败','err');
+});
+on('get_tag_groups_result',function(d){
+  S.tagGroups=(d&&d.groups)||[];
+  renderTagGroups();
+  if(S.curPage==='products')renderProductsPage();
+});
+on('get_price_history_result',function(d){
+  if(d&&d.productId&&d.productId!==S.priceHistoryProductId) return;
+  S.priceHistory=(d&&d.history)||[];
+  renderPriceHistory();
+});
+function applyDanmakuMarked(danmakuId,isMarked){
+  for(var i=0;i<S.dmList.length;i++){
+    if(S.dmList[i].danmakuId===danmakuId) S.dmList[i].isMarked=!!isMarked;
+  }
+  loadMarkedDanmaku();
+  if(S.curPage==='danmaku')renderDmPage();
+  else if(S.curPage==='console')renderDmList();
+}
+on('mark_danmaku_result',function(d){
+  if(d&&d.success!==false){
+    var dm=d.danmaku||{};
+    toast(dm.isMarked?'已加入重点标记':'已取消重点标记','success');
+    applyDanmakuMarked(dm.danmakuId,dm.isMarked);
+  } else toast((d&&d.message)||'标记失败','err');
+});
+on('danmaku_marked',function(d){
+  if(!d||!d.danmakuId)return;
+  applyDanmakuMarked(d.danmakuId,d.isMarked);
+});
+on('get_marked_danmaku_result',function(d){ renderMarkedDanmaku((d&&d.items)||[]); });
+on('get_sensitive_logs_result',function(d){ renderSensitiveLogs((d&&d.logs)||[]); });
+on('get_knowledge_result',function(d){ S.knowledge=(d&&d.items)||[]; renderKnowledge(); });
+on('save_knowledge_result',function(d){
+  if(d&&d.success){
+    toast(d.message||'知识库已保存','success');
+    S._kbEditing='';
+    ['kbQuestion','kbKeywords','kbAnswer'].forEach(function(id){
+      var el=document.getElementById(id); if(el)el.value='';
+    });
+    wsSend('get_knowledge',{keyword:''});
+  } else toast((d&&d.message)||'保存失败','err');
+});
+on('delete_knowledge_result',function(d){
+  toast((d&&d.message)||(d&&d.success?'已删除':'删除失败'), d&&d.success?'success':'err');
+  if(d&&d.success) wsSend('get_knowledge',{keyword:''});
+});
+on('correct_reply_result',function(d){
+  if(d&&d.success){
+    toast('已保存为标准答案，AI 后续会优先命中','success');
+    var m=document.getElementById('correctReplyModal'); if(m)m.classList.remove('open');
+    wsSend('get_knowledge',{keyword:''});
+    loadHfq(S.hfqSessionId||'');
+  } else toast((d&&d.message)||'保存失败','err');
+});
+on('get_stage_analysis_result',function(d){ S.stageSessionId=(d&&d.sessionId)||S.stageSessionId; renderStageAnalysis(d); });
+on('get_conversion_funnel_result',function(d){ renderFunnel(d); });
+on('compare_products_result',function(d){ renderProductCompareResult((d&&d.products)||[]); });
+on('get_audience_profile_result',function(d){ renderAudienceProfile(d); });
+on('reply_review_result',function(d){
+  if(d&&d.success){
+    toast(d.message||'回复成功','success');
+    var m=document.getElementById('reviewReplyModal'); if(m)m.classList.remove('open');
+    var r=(S.reviews||[]).filter(function(x){return x.reviewId===(d.review&&d.review.reviewId);})[0];
+    if(r&&d.review){r.replyContent=d.review.replyContent;r.replyTime=d.review.replyTime;}
+    if(S.curPage==='reviews')renderReviewList();
+    loadReviewPainPoints();
+  } else toast((d&&d.message)||'回复失败','err');
+});
+on('review_pain_points_result',function(d){ renderReviewPainPoints(d); });
+on('send_batch_private_result',function(d){
+  if(d&&d.success){
+    toast('批量私信已发送：成功 '+d.sent+' 人'+(d.skipped?('，跳过 '+d.skipped+' 人'):''),'success');
+    S.batchPrivateSelected={};
+    renderBatchPrivateTargets();
+  } else toast((d&&d.message)||'批量私信发送失败','err');
+  wsSend('get_inbox_threads',{});
+});
+on('get_unread_summary_result',function(d){
+  S.unreadSummary=d;
+  var dot=document.getElementById('sbInboxDot');
+  if(dot){
+    if(d&&d.total){dot.style.display='inline-block';dot.textContent=d.total>99?'99+':String(d.total);}
+    else dot.style.display='none';
+  }
+  var totalEl=document.getElementById('ibUnread');
+  if(totalEl)totalEl.textContent=fmtNum((d&&d.total)||0);
+});
+on('compare_sessions_result',function(d){ renderSessionCompare(d); });
+on('get_operation_logs_result',function(d){ renderOperationLogs((d&&d.logs)||[]); });
+on('get_accounts_result',function(d){ renderAccounts(d); });
+on('set_account_role_result',function(d){
+  toast((d&&d.message)||(d&&d.success?'角色已更新':'更新失败'), d&&d.success?'success':'err');
+  if(d&&d.success)loadAccounts();
+});
+on('negative_review_alert',function(d){
+  var r=(d&&d.review)||{};
+  pushNotice('review','收到差评',(r.rating?r.rating+' 星 · ':'')+(d&&d.message||r.content||''));
+  var pop=document.getElementById('negativeReviewPopup');
+  if(pop){
+    document.getElementById('negReviewBody').innerHTML=
+      '<div style="font-size:13px;color:#b91c1c;font-weight:600;margin-bottom:6px">'+
+        esc((r.userName||'观众')+' · '+(r.rating||'')+' 星')+'</div>'+
+      '<div style="font-size:13px;color:#475569;line-height:1.7">'+esc(r.content||'')+'</div>'+
+      (r.productName?'<div style="font-size:11px;color:#94a3b8;margin-top:6px">商品：'+esc(r.productName)+'</div>':'');
+    S._negReviewId=r.reviewId||'';
+    pop.style.display='block';
+    setTimeout(function(){pop.style.display='none';},9000);
+  }
+});
+on('new_alert',function(d){
+  if(!d)return;
+  pushNotice(d.type==='low_stock'?'stock':'sensitive', d.title||'系统提醒', d.message||'');
+});
+on('pay_remind_sent',function(d){
+  if(!d||!d.count)return;
+  pushNotice('order','AI 催付', '已自动向 '+d.count+' 笔超时待付款订单发送私信催付');
+  if(S.curPage==='orders')loadAdminOrders();
+  wsSend('get_inbox_threads',{});
 });
 
 // ============================================================
@@ -4812,6 +5508,645 @@ function wireAvUpload(){
 }
 
 // ============================================================
+// 全模块迭代：订单 / 商品 / 弹幕 / 分析 / 评价 / 观众 / 私信 / 复盘 / 权限
+// ============================================================
+var REFUND_CATS=[['quality','质量问题'],['size','尺码/规格不符'],['logistics','物流问题'],
+                 ['price','价格问题'],['no_need','不想要了'],['other','其他原因']];
+
+// ---------- 商品：标签分组与历史售价 ----------
+function loadTagGroups(){ wsSend('get_tag_groups'); }
+function renderTagGroups(){
+  var el=document.getElementById('tagGroupSummary');
+  if(!el) return;
+  var gs=S.tagGroups||[];
+  el.innerHTML=gs.length?gs.map(function(g){
+    return '<span class="lc-tag lc-tag-blue">'+(g.group||'未分组')+' · '+g.products+' 件</span>';
+  }).join(''):'<span style="color:#94a3b8;font-size:12px">暂无标签分组</span>';
+}
+function renderPriceHistory(){
+  var el=document.getElementById('prodPriceHistory');
+  if(!el) return;
+  var rows=S.priceHistory||[];
+  if(!rows.length){el.innerHTML=
+    '<div style="font-size:13px;font-weight:700;margin-bottom:8px">💹 历史售价记录</div>'+
+    '<div style="color:#94a3b8;font-size:12px;padding:8px 0">暂无调价记录（修改商品价格后自动留痕）</div>';return;}
+  el.innerHTML='<div style="font-size:13px;font-weight:700;margin-bottom:8px">💹 历史售价记录（最近 '+rows.length+' 条）</div>'+
+    '<div class="lc-scroll" style="max-height:220px"><table class="lc-tbl2">'+
+      '<tr><th>时间</th><th>规格</th><th>直播价</th><th>原价</th><th>操作人</th></tr>'+
+      rows.map(function(h){
+        var arrow=Number(h.newPrice)>Number(h.oldPrice)?'↑':(Number(h.newPrice)<Number(h.oldPrice)?'↓':'→');
+        var color=arrow==='↑'?'#dc2626':(arrow==='↓'?'#059669':'#64748b');
+        return '<tr><td style="color:#94a3b8;font-size:11px">'+fmtTime(h.timestamp)+'</td>'+
+          '<td>'+esc(h.skuSpec||'默认规格')+'</td>'+
+          '<td style="color:'+color+';font-weight:600">¥'+fmtNum(h.oldPrice)+' '+arrow+' ¥'+fmtNum(h.newPrice)+'</td>'+
+          '<td style="color:#94a3b8">¥'+fmtNum(h.oldOriginalPrice)+' → ¥'+fmtNum(h.newOriginalPrice)+'</td>'+
+          '<td>'+esc(h.operator||'host')+'</td></tr>';
+      }).join('')+'</table></div>';
+}
+
+// ---------- 订单：批量 / 导出 / 溯源 / 退款汇总 / 催付 ----------
+function refreshOrderSelectionUI(){
+  var n=Object.keys(S.batchSelected).filter(function(k){return S.batchSelected[k];}).length;
+  var el=document.getElementById('ordBatchCount'); if(el) el.textContent=n;
+}
+function toggleOrderSelect(oid,on){
+  if(on) S.batchSelected[oid]=true; else delete S.batchSelected[oid];
+  refreshOrderSelectionUI();
+}
+function toggleAllOrders(on){
+  (S.orders||[]).forEach(function(o){ if(on) S.batchSelected[o.orderId]=true; else delete S.batchSelected[o.orderId]; });
+  renderAdminOrders(); refreshOrderSelectionUI();
+}
+function clearOrderSelection(){ S.batchSelected={}; renderAdminOrders(); refreshOrderSelectionUI(); }
+function selectedOrderIds(){
+  return Object.keys(S.batchSelected).filter(function(k){return S.batchSelected[k];});
+}
+function batchShipOrders(){
+  var ids=selectedOrderIds();
+  if(!ids.length){toast('请先勾选订单','warn');return;}
+  wsSend('batch_ship',{orderIds:ids});
+}
+function batchRefundOrders(){
+  var ids=selectedOrderIds();
+  if(!ids.length){toast('请先勾选订单','warn');return;}
+  if(!confirm('确认对选中的 '+ids.length+' 笔订单批量退款？退款将回补库存并返充观众钱包。')) return;
+  var catEl=document.getElementById('ordBatchRefundCat');
+  var cat=catEl?catEl.value:'';
+  var label='';
+  REFUND_CATS.forEach(function(c){if(c[0]===cat)label=c[1];});
+  wsSend('batch_refund',{orderIds:ids,category:cat,reason:label||'主播批量退款'});
+}
+function exportOrders(){
+  var scope=S.ordersScope==='mock'?'mock':'real';
+  var status=(S.adminOrderFilter&&S.adminOrderFilter!=='all')?S.adminOrderFilter:'';
+  wsSend('export_orders',{scope:scope,status:status});
+}
+function downloadCsv(filename,csv){
+  var blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download=filename||('orders_'+Date.now()+'.csv');
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},500);
+}
+function loadRefundReasonSummary(){ wsSend('get_refund_reason_summary'); }
+function renderRefundReasonSummary(d){
+  var el=document.getElementById('refundReasonSummary');
+  if(!el) return;
+  var cats=(d&&d.categories)||[];
+  if(!cats.length){el.innerHTML='<div style="color:#94a3b8">暂无退款记录</div>';return;}
+  el.innerHTML='<div style="font-size:12px;color:#475569;margin-bottom:8px">退款单 <b>'+fmtNum(d.total||0)+
+    '</b> 笔 · 退款金额 <b style="color:#dc2626">¥'+fmtNum(d.amount||0)+'</b></div>'+
+    cats.map(function(c){
+      var w=Math.max(2,Math.round(c.ratio||0));
+      return '<div style="margin-bottom:6px"><div style="display:flex;justify-content:space-between;font-size:11px;color:#475569">'+
+        '<span>'+esc(c.label)+'</span><span>'+c.count+' 笔 · ¥'+fmtNum(c.amount)+' · '+(c.ratio||0)+'%</span></div>'+
+        '<div style="height:7px;background:#fef2f2;border-radius:4px;overflow:hidden"><div style="height:100%;width:'+w+'%;background:#ef4444;border-radius:4px"></div></div></div>';
+    }).join('');
+}
+function openOrderTrace(orderId){
+  S.orderTrace=null;
+  var modal=document.getElementById('orderTraceModal');
+  document.getElementById('orderTraceContent').innerHTML='<div class="lc-empty">加载中…</div>';
+  modal.classList.add('open');
+  wsSend('get_order_trace',{orderId:orderId});
+}
+function renderOrderTrace(d){
+  var el=document.getElementById('orderTraceContent');
+  if(!el) return;
+  if(!d||!d.success){el.innerHTML='<div class="lc-empty">'+esc((d&&d.message)||'订单不存在')+'</div>';return;}
+  var ICON={question:'❓',reply:'🤖',order:'🛒',pay:'💳',ship:'🚚',refund:'↩️'};
+  var chain=(d.chain||[]).map(function(c){
+    return '<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px dashed #e2e8f0">'+
+      '<div style="font-size:18px;width:26px;text-align:center">'+(ICON[c.type]||'•')+'</div>'+
+      '<div style="flex:1"><div style="font-size:12px;color:#475569;line-height:1.6">'+esc(c.content||'')+'</div>'+
+      '<div style="font-size:10px;color:#94a3b8">'+fmtTime(c.time)+'</div></div></div>';
+  }).join('');
+  var qs=(d.userQuestions||[]).map(function(q){
+    return '<div style="font-size:11px;color:#475569;padding:3px 0">· '+esc(q.content)+' <span style="color:#94a3b8">'+fmtTime(q.timestamp)+'</span></div>';
+  }).join('');
+  el.innerHTML='<div style="font-size:12px;color:#64748b;margin-bottom:8px">订单 <b>'+esc((d.order&&(d.order.orderNo||d.order.orderId))||'')+
+    '</b> · 买家 '+esc((d.order&&d.order.userName)||'-')+' · 加购/点击互动 '+fmtNum(d.guestInteractions||0)+' 次</div>'+
+    (chain||'<div class="lc-empty">该订单无可追溯的互动记录</div>')+
+    '<div style="margin-top:12px"><div style="font-size:12px;font-weight:700;margin-bottom:4px">该观众下单前提问</div>'+
+    (qs||'<div style="font-size:11px;color:#94a3b8">无</div>')+'</div>';
+}
+function remindPendingPay(){
+  toast('正在扫描超时待付款订单…','info');
+  wsSend('remind_pending_pay',{});
+}
+
+// ---------- 弹幕：知识库 / 重点标记 / 敏感词日志 ----------
+function loadKnowledge(){ wsSend('get_knowledge',{keyword:''}); }
+function renderKnowledge(){
+  var el=document.getElementById('kbList');
+  if(!el) return;
+  var kw=(document.getElementById('kbSearch')?document.getElementById('kbSearch').value:'').toLowerCase();
+  var list=(S.knowledge||[]).filter(function(k){
+    return !kw || (k.question||'').toLowerCase().indexOf(kw)>=0 ||
+      (k.answer||'').toLowerCase().indexOf(kw)>=0 ||
+      (k.keywords||[]).some(function(x){return String(x).toLowerCase().indexOf(kw)>=0;});
+  });
+  if(!list.length){el.innerHTML='<div class="lc-empty"><div class="icon">📚</div>暂无知识条目</div>';return;}
+  el.innerHTML=list.map(function(k){
+    return '<div class="lc-dm-item">'+
+      '<div style="display:flex;justify-content:space-between;gap:6px">'+
+        '<span style="font-weight:600;font-size:12px">'+esc(k.question)+'</span>'+
+        '<span style="font-size:10px;color:#94a3b8;flex-shrink:0">命中 '+fmtNum(k.hitCount||0)+' 次</span></div>'+
+      '<div style="font-size:12px;color:#475569;margin:3px 0">'+esc(k.answer)+'</div>'+
+      '<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;font-size:10px;color:#94a3b8">'+
+        (k.keywords||[]).map(function(x){return '<span class="lc-tag lc-tag-blue">'+esc(x)+'</span>';}).join('')+
+        '<span style="margin-left:auto">'+
+          '<button class="lc-mini-btn" onclick="editKnowledge(\''+esc(k.kbId)+'\')">编辑</button> '+
+          '<button class="lc-mini-btn" onclick="deleteKnowledge(\''+esc(k.kbId)+'\')">删除</button>'+
+        '</span></div></div>';
+  }).join('');
+}
+function editKnowledge(kbId){
+  var k=(S.knowledge||[]).filter(function(x){return x.kbId===kbId;})[0];
+  if(!k) return;
+  S._kbEditing=kbId;
+  document.getElementById('kbQuestion').value=k.question||'';
+  document.getElementById('kbKeywords').value=(k.keywords||[]).join(',');
+  document.getElementById('kbAnswer').value=k.answer||'';
+  toast('已载入知识条目，修改后保存即可覆盖','info');
+}
+function saveKnowledge(){
+  var q=(document.getElementById('kbQuestion').value||'').trim();
+  var a=(document.getElementById('kbAnswer').value||'').trim();
+  if(!q||!a){toast('问题和答案不能为空','err');return;}
+  var kws=(document.getElementById('kbKeywords').value||'').split(/[,，]/).map(function(x){return x.trim();}).filter(Boolean);
+  wsSend('save_knowledge',{kbId:S._kbEditing||'',question:q,answer:a,keywords:kws});
+}
+function deleteKnowledge(kbId){
+  if(!confirm('确认删除这条标准答案？')) return;
+  wsSend('delete_knowledge',{kbId:kbId});
+}
+function toggleMarkDanmaku(danmakuId,marked){
+  wsSend('mark_danmaku',{danmakuId:danmakuId,marked:!!marked});
+}
+function loadMarkedDanmaku(){ wsSend('get_marked_danmaku',{}); }
+function renderMarkedDanmaku(items){
+  var el=document.getElementById('markedDmList');
+  if(!el) return;
+  if(!items||!items.length){el.innerHTML='<div class="lc-empty"><div class="icon">⭐</div>暂无重点标记</div>';return;}
+  el.innerHTML=items.map(function(d){
+    return '<div class="lc-dm-item pinned">'+
+      '<span style="font-weight:600;font-size:11px">'+esc(d.userName||'观众')+'</span> '+
+      '<span style="color:#475569">'+esc(d.content)+'</span>'+
+      '<span style="float:right;font-size:10px;color:#94a3b8">'+fmtTime(d.timestamp)+
+      ' <button class="lc-mini-btn" onclick="toggleMarkDanmaku(\''+esc(d.danmakuId)+'\',false)">取消</button></span></div>';
+  }).join('');
+}
+function loadSensitiveLogs(){
+  var sel=document.getElementById('sensitiveSceneFilter');
+  wsSend('get_sensitive_logs',{scene:sel?sel.value:'',limit:100});
+}
+function renderSensitiveLogs(logs){
+  var el=document.getElementById('sensitiveLogList');
+  if(!el) return;
+  if(!logs||!logs.length){el.innerHTML='<div class="lc-empty"><div class="icon">🚫</div>暂无拦截记录</div>';return;}
+  el.innerHTML=logs.map(function(x){
+    return '<div class="lc-dm-item">'+
+      '<div style="display:flex;justify-content:space-between;gap:6px">'+
+        '<span style="font-size:11px;font-weight:600;color:#b91c1c">🚫 '+esc(x.word||'敏感内容')+'</span>'+
+        '<span style="font-size:10px;color:#94a3b8">'+fmtTime(x.timestamp)+'</span></div>'+
+      '<div style="font-size:11px;color:#475569;margin:2px 0">'+esc(x.content)+'</div>'+
+      '<div style="font-size:10px;color:#94a3b8">'+esc(x.userName||x.userId||'观众')+' · '+
+        (x.scene==='private'?'私信':'弹幕')+' · '+esc(x.reason||'')+'</div></div>';
+  }).join('');
+}
+
+// ---------- 数据分析：阶段 / 漏斗 / 商品对比 / 画像 ----------
+function populateAnalysisStageSelect(){
+  var sel=document.getElementById('anStageSession');
+  if(!sel) return;
+  var keep=sel.value||S.stageSessionId||'';
+  sel.innerHTML='<option value="">本场直播</option>'+(S.sessions||[]).map(function(s){
+    return '<option value="'+esc(s.sessionId)+'">'+esc(s.title||s.sessionId)+'</option>';
+  }).join('');
+  sel.value=keep;
+}
+function populateFunnelProductSelect(){
+  var sel=document.getElementById('anFunnelProd');
+  if(!sel) return;
+  var keep=sel.value;
+  sel.innerHTML='<option value="">全部商品</option>'+(S.products||[]).map(function(p){
+    return '<option value="'+esc(p.productId)+'">'+esc(p.name)+'</option>';
+  }).join('');
+  if(keep)sel.value=keep;
+}
+function loadStageAnalysis(sessionId){
+  S.stageSessionId=sessionId||'';
+  wsSend('get_stage_analysis',{sessionId:S.stageSessionId});
+}
+function renderStageAnalysis(d){
+  if(d&&d.stages)S.stageAnalysis=d.stages;
+  var all=S.stageAnalysis||[];
+  var sel=document.getElementById('anStageFilter');
+  var stage=(sel&&sel.value)||'all';
+  var rows=stage==='all'?all:all.filter(function(s){return s.stage===stage;});
+  var t=document.getElementById('stageAnalysisTable');
+  if(t){
+    t.innerHTML=rows.length?'<table class="lc-tbl2"><tr><th>阶段</th><th>弹幕</th><th>提问</th><th>互动观众</th><th>下单</th><th>支付</th><th>GMV</th></tr>'+
+      rows.map(function(s){
+        return '<tr><td>'+esc(s.icon||'')+' '+esc(s.label)+'</td><td>'+fmtNum(s.danmaku)+'</td>'+
+          '<td>'+fmtNum(s.questions)+'</td><td>'+fmtNum(s.uniqueViewers)+'</td>'+
+          '<td>'+fmtNum(s.orderCount)+'</td><td>'+fmtNum(s.paidCount)+'</td>'+
+          '<td style="color:#dc2626;font-weight:600">¥'+fmtNum(s.gmv)+'</td></tr>';
+      }).join('')+'</table>':'<div style="color:#94a3b8">暂无阶段数据</div>';
+  }
+  try{
+    var c1=document.getElementById('stageAnalysisChart');
+    if(c1){
+      if(window.__stageChart)window.__stageChart.dispose();
+      var ch=echarts.init(c1);window.__stageChart=ch;
+      ch.setOption({tooltip:{trigger:'axis'},legend:{bottom:0,textStyle:{fontSize:11}},
+        grid:{left:40,right:20,top:20,bottom:40},
+        xAxis:{type:'category',data:rows.map(function(s){return s.label;}),axisLabel:{fontSize:10,interval:0,rotate:15}},
+        yAxis:{type:'value'},
+        series:[{name:'弹幕',type:'bar',data:rows.map(function(s){return s.danmaku}),itemStyle:{color:'#2563eb'}},
+                {name:'支付单',type:'bar',data:rows.map(function(s){return s.paidCount}),itemStyle:{color:'#10b981'}}]});
+    }
+    var c2=document.getElementById('stageGmvChart');
+    if(c2){
+      if(window.__stageGmvChart)window.__stageGmvChart.dispose();
+      var ch2=echarts.init(c2);window.__stageGmvChart=ch2;
+      ch2.setOption({tooltip:{trigger:'axis'},grid:{left:50,right:20,top:20,bottom:40},
+        xAxis:{type:'category',data:rows.map(function(s){return s.label;}),axisLabel:{fontSize:10,interval:0,rotate:15}},
+        yAxis:{type:'value',name:'GMV'},
+        series:[{name:'GMV',type:'line',smooth:true,areaStyle:{opacity:.15},data:rows.map(function(s){return s.gmv}),itemStyle:{color:'#f59e0b'}}]});
+    }
+  }catch(e){}
+}
+function loadConversionFunnel(productId){
+  wsSend('get_conversion_funnel',{productId:productId||''});
+}
+function renderFunnel(d){
+  S.funnel=d;
+  var steps=(d&&d.steps)||[];
+  try{
+    var el=document.getElementById('funnelChart');
+    if(el){
+      if(window.__funnelChart)window.__funnelChart.dispose();
+      var ch=echarts.init(el);window.__funnelChart=ch;
+      ch.setOption({tooltip:{trigger:'item',formatter:'{b}<br>人数：{c}<br>转化率：{d}%'},
+        series:[{type:'funnel',left:'8%',right:'8%',top:10,bottom:10,minSize:'20%',
+          label:{formatter:'{b} {c}人'},itemStyle:{borderWidth:1},
+          data:steps.map(function(s,i){return {name:s.label,value:s.count,itemStyle:{color:['#2563eb','#3b82f6','#60a5fa','#7c3aed','#10b981','#059669'][i%6]}};})}]});
+    }
+  }catch(e){}
+  var t=document.getElementById('funnelTable');
+  if(t) t.innerHTML=steps.map(function(s){return '<span style="display:inline-block;margin-right:16px">'+esc(s.label)+
+    ' <b>'+fmtNum(s.count)+'</b> 人'+(s.rate!==undefined?'（'+s.rate+'%）':'')+'</span>';}).join('');
+}
+function renderProductComparePicker(){
+  var el=document.getElementById('prodComparePicker');
+  if(!el) return;
+  el.innerHTML=(S.products||[]).map(function(p){
+    return '<label style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border:1px solid #e2e8f0;border-radius:12px;cursor:pointer">'+
+      '<input type="checkbox" '+(S.compareIds[p.productId]?'checked':'')+' onchange="toggleCompareProduct(\''+esc(p.productId)+'\',this.checked)">'+esc(p.name)+'</label>';
+  }).join('')||'<span style="color:#94a3b8">暂无商品</span>';
+}
+function toggleCompareProduct(pid,on){
+  if(on)S.compareIds[pid]=true; else delete S.compareIds[pid];
+}
+function clearProductCompare(){ S.compareIds={}; S.productCompare=[]; renderProductComparePicker(); renderProductCompareResult(); }
+function runProductCompare(){
+  var ids=Object.keys(S.compareIds);
+  if(ids.length<2){toast('请至少勾选 2 个商品','warn');return;}
+  wsSend('compare_products',{productIds:ids});
+}
+function renderProductCompareResult(rows){
+  if(rows) S.productCompare=rows;
+  var el=document.getElementById('prodCompareResult');
+  if(!el) return;
+  rows=S.productCompare||[];
+  if(!rows.length){el.innerHTML='<div class="lc-empty"><div class="icon">⚖️</div>勾选 2 个以上商品后点击「对比选中商品」</div>';return;}
+  el.innerHTML='<table class="lc-tbl2"><tr><th>商品</th><th>销量</th><th>GMV</th><th>点击</th><th>加购人数</th><th>退款</th><th>评分</th><th>库存</th></tr>'+
+    rows.map(function(r){
+      return '<tr><td style="font-weight:600">'+esc(r.name)+'</td><td>'+fmtNum(r.qty)+'</td>'+
+        '<td style="color:#dc2626;font-weight:600">¥'+fmtNum(r.gmv)+'</td><td>'+fmtNum(r.clicks)+'</td>'+
+        '<td>'+fmtNum(r.cartUsers)+'</td><td>'+fmtNum(r.refundCount)+'</td>'+
+        '<td>'+((r.avgRating||r.rating)?(r.avgRating||r.rating)+' 分':'—')+'</td><td>'+fmtNum(r.stock)+'</td></tr>';
+    }).join('')+'</table>';
+}
+function loadAudienceProfile(){ wsSend('get_audience_profile'); }
+function renderAudienceProfile(d){
+  S.audienceProfile=d;
+  try{
+    var r=document.getElementById('audienceRegionChart');
+    if(r){
+      if(window.__regionChart)window.__regionChart.dispose();
+      var ch=echarts.init(r);window.__regionChart=ch;
+      ch.setOption({tooltip:{trigger:'item'},legend:{type:'scroll',bottom:0,textStyle:{fontSize:10}},
+        series:[{type:'pie',radius:['38%','66%'],center:['50%','44%'],
+          label:{fontSize:10,formatter:'{b} {d}%'},
+          data:(d.regions||[]).map(function(x){return {name:x.region,value:x.count};})}]});
+    }
+    var t=document.getElementById('audienceTagChart');
+    if(t){
+      if(window.__tagChart)window.__tagChart.dispose();
+      var ch2=echarts.init(t);window.__tagChart=ch2;
+      var tags=(d.tags||[]);
+      ch2.setOption({tooltip:{trigger:'axis'},grid:{left:80,right:20,top:10,bottom:20},
+        xAxis:{type:'value'},yAxis:{type:'category',data:tags.map(function(x){return x.tag;}),axisLabel:{fontSize:11}},
+        series:[{type:'bar',data:tags.map(function(x){return x.count;}),itemStyle:{color:'#7c3aed'},barMaxWidth:20}]});
+    }
+  }catch(e){}
+}
+
+// ---------- 评价：差评痛点 / 后台回复 / 差评弹窗 ----------
+function loadReviewPainPoints(){ wsSend('get_review_pain_points'); }
+function renderReviewPainPoints(d){
+  S.reviewsPain=d;
+  var el=document.getElementById('reviewPainPoints');
+  if(!el) return;
+  var points=(d&&(d.painPoints||d.rows))||[];
+  if(!points.length){
+    el.innerHTML='<div style="color:#059669">✅ '+((d&&d.summary&&d.summary[0])||'暂无差评，整体评价体验良好。')+'</div>';return;
+  }
+  el.innerHTML='<div style="font-size:12px;color:#475569;line-height:1.7;margin-bottom:8px">'+
+    (d.summary||[]).map(function(s){return esc(s);}).join('<br>')+'</div>'+
+    points.map(function(r){
+      return '<div style="padding:8px;border:1px solid #fee2e2;border-radius:8px;margin-bottom:6px;background:#fffafa">'+
+        '<div style="display:flex;justify-content:space-between;font-size:12px;font-weight:600;color:#b91c1c">'+
+          '<span>'+esc(r.point)+' ×'+r.count+'</span>'+
+          (r.topProduct?'<span style="font-weight:400;color:#94a3b8">主要商品：'+esc(r.topProduct)+'</span>':'')+'</div>'+
+        '<div style="font-size:11px;color:#64748b;margin:3px 0">'+(r.examples||[]).map(function(e){return '「'+esc(e)+'」';}).join(' ')+'</div>'+
+        '<div style="font-size:11px;color:#2563eb">💡 '+esc(r.suggestion||'')+'</div></div>';
+    }).join('');
+}
+function openCorrectReply(danmakuId){
+  var d=(S.dmList||[]).filter(function(x){return x.danmakuId===danmakuId;})[0];
+  if(!d){toast('未找到该弹幕','err');return;}
+  S._correctDmId=danmakuId;
+  document.getElementById('crQuestion').textContent=d.content||'';
+  var ta=document.getElementById('crAnswer');
+  ta.value=d.replyContent||'';
+  document.getElementById('correctReplyModal').classList.add('open');
+  ta.focus();
+}
+function submitCorrectReply(){
+  var ans=(document.getElementById('crAnswer').value||'').trim();
+  if(!S._correctDmId){toast('未选择弹幕','err');return;}
+  if(!ans){toast('标准答案不能为空','err');return;}
+  wsSend('correct_reply',{danmakuId:S._correctDmId,answer:ans});
+}
+function replyReview(reviewId){
+  var r=(S.reviews||[]).filter(function(x){return x.reviewId===reviewId;})[0];
+  if(!r)return;
+  S._replyReviewId=reviewId;
+  document.getElementById('reviewReplyQuote').innerHTML='<b>'+esc(r.userName||'匿名')+'</b>：'+esc(r.content)+
+    (r.productName?' <span style="color:#94a3b8">· '+esc(r.productName)+'</span>':'');
+  document.getElementById('reviewReplyContent').value=r.replyContent||'';
+  document.getElementById('reviewReplyModal').classList.add('open');
+}
+function submitReviewReply(){
+  var content=(document.getElementById('reviewReplyContent').value||'').trim();
+  if(!S._replyReviewId){toast('未选择评价','err');return;}
+  if(!content){toast('回复内容不能为空','err');return;}
+  wsSend('reply_review',{reviewId:S._replyReviewId,content:content});
+}
+
+// ---------- 私信：快捷话术 / 批量发送 / 未读汇总 ----------
+function loadQuickReplies(){ wsSend('get_quick_replies'); }
+function renderQuickReplies(list){
+  S.quickReplies=list||[];
+  var sel=document.getElementById('batchPrivateTemplate');
+  if(sel){
+    var cur=sel.value;
+    sel.innerHTML='<option value="">选择快捷话术模板…</option>'+S.quickReplies.map(function(q){
+      return '<option value="'+esc(q.quickReplyId)+'">'+esc(q.content.slice(0,30))+'</option>';
+    }).join('');
+    sel.value=cur;
+  }
+  var box=document.getElementById('quickReplyList');
+  if(box){
+    box.innerHTML=S.quickReplies.length?S.quickReplies.map(function(q){
+      return '<div class="lc-dm-item" style="display:flex;justify-content:space-between;gap:6px">'+
+        '<span style="font-size:12px;color:#475569">'+esc(q.content)+'</span>'+
+        '<button class="lc-mini-btn" onclick="wsSend(\'delete_quick_reply\',{quickReplyId:\''+esc(q.quickReplyId)+'\'})">删除</button></div>';
+    }).join(''):'<div style="color:#94a3b8;font-size:12px;padding:8px">暂无模板</div>';
+  }
+}
+on('add_quick_reply_result',function(d){
+  if(d&&d.success){toast('快捷话术模板已保存','success');loadQuickReplies();}
+  else toast('模板保存失败','err');
+});
+on('delete_quick_reply_result',function(d){
+  if(d&&d.success){toast('模板已删除','success');loadQuickReplies();}
+  else toast('删除失败','err');
+});
+function saveQuickReplyTemplate(){
+  var title=(document.getElementById('qrTitle').value||'').trim();
+  var content=(document.getElementById('qrContent').value||'').trim();
+  if(!content){toast('话术内容不能为空','err');return;}
+  wsSend('add_quick_reply',{quickReply:{quickReplyId:'qr_'+Date.now(),content:content,category:title||'general'}});
+  document.getElementById('qrTitle').value='';document.getElementById('qrContent').value='';
+}
+function addQuickReplyTemplate(){
+  var box=document.getElementById('quickReplyCard');
+  if(box) box.style.display='';
+  loadQuickReplies();
+}
+function applyBatchPrivateTemplate(id){
+  var q=(S.quickReplies||[]).filter(function(x){return x.quickReplyId===id;})[0];
+  if(q) document.getElementById('batchPrivateContent').value=q.content;
+}
+function openBatchPrivate(){
+  var card=document.getElementById('batchPrivateCard');
+  card.style.display='';
+  loadQuickReplies();
+  wsSend('get_viewers');
+  setTimeout(renderBatchPrivateTargets,300);
+}
+function renderBatchPrivateTargets(){
+  var el=document.getElementById('batchPrivateTargets');
+  if(!el) return;
+  var list=(S.viewersAll||[]).filter(function(v){return v.seenLive!==false;}).slice(0,80);
+  el.innerHTML=list.length?list.map(function(v){
+    return '<label style="font-size:11px;display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border:1px solid #e2e8f0;border-radius:12px;cursor:pointer">'+
+      '<input type="checkbox" '+(S.batchPrivateSelected[v.userId]?'checked':'')+' onchange="toggleBatchPrivateTarget(\''+esc(v.userId)+'\',this.checked)">'+
+      esc(v.userName||v.userId)+'</label>';
+  }).join(''):'<span style="color:#94a3b8">暂无可选观众</span>';
+}
+function toggleBatchPrivateTarget(uid,on){
+  if(on)S.batchPrivateSelected[uid]=true; else delete S.batchPrivateSelected[uid];
+}
+function toggleAllBatchTargets(){
+  var list=(S.viewersAll||[]).slice(0,80);
+  var allOn=list.length&&list.every(function(v){return S.batchPrivateSelected[v.userId];});
+  S.batchPrivateSelected={};
+  if(!allOn) list.forEach(function(v){S.batchPrivateSelected[v.userId]=true;});
+  renderBatchPrivateTargets();
+}
+function sendBatchPrivate(){
+  var ids=Object.keys(S.batchPrivateSelected);
+  var content=(document.getElementById('batchPrivateContent').value||'').trim();
+  if(!ids.length){toast('请先勾选观众','warn');return;}
+  if(!content){toast('群发内容不能为空','err');return;}
+  wsSend('send_batch_private',{userIds:ids,content:content});
+}
+function loadUnreadSummary(){ wsSend('get_unread_summary'); }
+
+// ---------- 复盘：场次对比 / PDF 导出 ----------
+function populateCompareSelects(){
+  var list=S.sessions||[];
+  ['cmpSessionA','cmpSessionB'].forEach(function(id){
+    var sel=document.getElementById(id);
+    if(!sel) return;
+    var keep=sel.value;
+    sel.innerHTML='<option value="">'+(id==='cmpSessionA'?'第一场…':'第二场…')+'</option>'+
+      list.map(function(s){
+        return '<option value="'+esc(s.sessionId)+'">'+esc(s.title||s.sessionId)+'</option>';
+      }).join('');
+    if(keep) sel.value=keep;
+  });
+}
+function compareSessionsNow(){
+  var a=document.getElementById('cmpSessionA'), b=document.getElementById('cmpSessionB');
+  if(!a||!b||!a.value||!b.value){toast('请选择两场直播','warn');return;}
+  if(a.value===b.value){toast('请选择不同的两场','warn');return;}
+  wsSend('compare_sessions',{sessionIds:[a.value,b.value]});
+}
+function renderSessionCompare(d){
+  S.sessionCompare=d;
+  var el=document.getElementById('sessionCompareResult');
+  if(!el) return;
+  var rows=(d&&d.sessions)||[];
+  if(!rows.length){el.innerHTML='<div style="color:#94a3b8">暂无对比数据</div>';return;}
+  var metrics=[['gmv','GMV（元）'],['paidCount','支付单'],['orderCount','下单数'],['buyerCount','买家数'],
+               ['conversionRate','转化率（%）'],['realDanmaku','真实弹幕'],['questionCount','提问数'],
+               ['replyRate','回复率（%）'],['refundCount','退款单'],['refundAmount','退款金额'],
+               ['negativeReviews','差评数']];
+  el.innerHTML='<table class="lc-tbl2"><tr><th>指标</th>'+rows.map(function(r){
+      return '<th>'+esc((r.title||r.sessionId||'').slice(0,18))+'</th>';
+    }).join('')+'</tr>'+
+    metrics.map(function(m){
+      return '<tr><td style="color:#64748b">'+m[1]+'</td>'+rows.map(function(r){
+        return '<td style="font-weight:600">'+fmtNum(r[m[0]]||0)+'</td>';
+      }).join('')+'</tr>';
+    }).join('')+'</table>'+
+    rows[0].stageComparison&&rows[0].stageComparison.length?
+      '<div style="margin-top:10px;font-size:12px;font-weight:600">分阶段对比</div>'+
+      '<div id="compareStageChart" style="height:260px"></div>':'';
+  renderCompareStageChart(rows);
+}
+function renderCompareStageChart(rows){
+  var el=document.getElementById('compareStageChart');
+  if(!el) return;
+  try{
+    var stages=rows[0].stageComparison||[];
+    if(window.__cmpStageChart)window.__cmpStageChart.dispose();
+    var ch=echarts.init(el);window.__cmpStageChart=ch;
+    ch.setOption({tooltip:{trigger:'axis'},legend:{bottom:0,textStyle:{fontSize:10}},
+      grid:{left:45,right:20,top:20,bottom:40},
+      xAxis:{type:'category',data:stages.map(function(s){return s.label||s.stage;}),axisLabel:{fontSize:10,interval:0,rotate:15}},
+      yAxis:{type:'value',name:'GMV'},
+      series:rows.map(function(r,i){
+        return {name:(r.title||r.sessionId||('场次'+(i+1))).slice(0,12),type:'bar',barMaxWidth:24,
+          data:(r.stageComparison||[]).map(function(s){return s.gmv||0;}),
+          itemStyle:{color:i===0?'#2563eb':'#f59e0b'}};
+      })});
+  }catch(e){}
+}
+function exportReportPdf(){
+  if(!S.lastReport){toast('请先生成或打开一份复盘报告','warn');return;}
+  var content=document.getElementById('reportContent');
+  if(!content){toast('报告内容不存在','err');return;}
+  var w=window.open('','_blank');
+  if(!w){toast('浏览器拦截了弹窗，请允许后重试','err');return;}
+  w.document.write('<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">'+
+    '<title>直播复盘报告</title><style>'+
+    'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1e293b;padding:24px;line-height:1.6}'+
+    '.lc-card{border:1px solid #e2e8f0;border-radius:8px;padding:14px;margin-bottom:14px;break-inside:avoid}'+
+    '.lc-card-title{font-size:14px;font-weight:700;border-bottom:1px solid #f1f5f9;padding-bottom:6px;margin-bottom:10px}'+
+    '.lc-grid{display:grid;gap:12px}.lc-grid-2{grid-template-columns:1fr 1fr}.lc-grid-3{grid-template-columns:1fr 1fr 1fr}.lc-grid-4{grid-template-columns:1fr 1fr 1fr 1fr}'+
+    '.lc-stat{text-align:center}.lc-stat .nv{font-size:20px;font-weight:700}.lc-stat .lb{font-size:11px;color:#64748b}'+
+    '.lc-tbl,.lc-tbl2{width:100%;border-collapse:collapse;font-size:12px}.lc-tbl th,.lc-tbl td,.lc-tbl2 th,.lc-tbl2 td{border:1px solid #e2e8f0;padding:6px 8px;text-align:left}'+
+    '.lc-empty{color:#94a3b8;padding:20px;text-align:center}.lc-tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;background:#f1f5f9}'+
+    'button{display:none!important}@media print{body{padding:0}.lc-card{box-shadow:none}}'+
+    '</style></head><body><h2 style="margin-bottom:4px">📋 直播复盘报告</h2>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:16px">导出时间：'+new Date().toLocaleString()+'</div>'+
+    content.innerHTML+'</body></html>');
+  w.document.close();
+  w.focus();
+  setTimeout(function(){try{w.print();}catch(e){}},600);
+}
+
+// ---------- 系统设置：操作日志 / 账号角色 ----------
+function loadOperationLogs(){
+  var sel=document.getElementById('opLogAction');
+  wsSend('get_operation_logs',{limit:300,action:sel?sel.value:''});
+}
+function renderOperationLogs(logs){
+  S.opLogs=logs||[];
+  var el=document.getElementById('operationLogList');
+  if(!el) return;
+  if(!S.opLogs.length){el.innerHTML='<div class="lc-empty"><div class="icon">📜</div>暂无操作日志</div>';return;}
+  var ACT={batch_ship:'批量发货',batch_refund:'批量退款',export_orders:'导出订单',pay_remind:'AI催付',
+    mark_danmaku:'标记弹幕',correct_ai_reply:'修正AI回答',reply_review:'回复评价',
+    batch_private_message:'批量私信',set_account_role:'角色调整'};
+  el.innerHTML='<table class="lc-tbl2"><tr><th>时间</th><th>操作人</th><th>角色</th><th>操作</th><th>对象</th><th>详情</th></tr>'+
+    S.opLogs.map(function(x){
+      return '<tr><td style="color:#94a3b8;font-size:11px">'+fmtTime(x.timestamp)+'</td>'+
+        '<td>'+esc(x.operator||'host')+'</td>'+
+        '<td>'+(x.role==='user'?'运营':'主播')+'</td>'+
+        '<td><span class="lc-tag lc-tag-blue">'+esc(ACT[x.action]||x.action)+'</span></td>'+
+        '<td style="font-size:11px;color:#64748b">'+esc(String(x.target||'').slice(0,30))+'</td>'+
+        '<td style="font-size:11px">'+esc(x.detail||'')+'</td></tr>';
+    }).join('')+'</table>';
+}
+function loadAccounts(){ wsSend('get_accounts',{page:1}); }
+function renderAccounts(d){
+  S.accounts=(d&&d.users)||[];
+  var el=document.getElementById('accountList');
+  if(!el) return;
+  if(!S.accounts.length){el.innerHTML='<div class="lc-empty">暂无账号</div>';return;}
+  el.innerHTML='<table class="lc-tbl2"><tr><th>账号</th><th>邮箱</th><th>角色</th><th>状态</th><th>操作</th></tr>'+
+    S.accounts.map(function(u){
+      var isAdmin=u.role==='admin';
+      return '<tr><td style="font-weight:600">'+esc(u.username)+(u.username===S.accountName?' <span class="lc-tag lc-tag-green">当前</span>':'')+'</td>'+
+        '<td style="color:#64748b;font-size:11px">'+esc(u.email||'—')+'</td>'+
+        '<td>'+(isAdmin?'<span class="lc-tag lc-tag-blue">主播</span>':'<span class="lc-tag lc-tag-yellow">运营</span>')+'</td>'+
+        '<td>'+(u.is_active?'<span class="lc-tag lc-tag-green">启用</span>':'<span class="lc-tag">停用</span>')+'</td>'+
+        '<td>'+(S.accountRole!=='admin'?'<span style="color:#94a3b8;font-size:11px">仅主播可调整</span>':
+          (isAdmin
+            ? '<button class="lc-mini-btn" onclick="setAccountRole('+u.id+',\'user\')">设为运营</button>'
+            : '<button class="lc-mini-btn" onclick="setAccountRole('+u.id+',\'admin\')">设为主播</button>'))+
+        '</td></tr>';
+    }).join('')+'</table>';
+}
+function setAccountRole(userId,role){
+  if(!confirm('确认将该账号角色调整为「'+(role==='admin'?'主播':'运营')+'」？')) return;
+  wsSend('set_account_role',{userId:userId,role:role});
+}
+
+// ---------- 控制台：实时消息提醒卡片 ----------
+function pushNotice(type,title,message){
+  S.notices=S.notices||[];
+  S.notices.unshift({type:type,title:title,message:message,time:new Date().toISOString()});
+  if(S.notices.length>50)S.notices=S.notices.slice(0,50);
+  renderNotices();
+}
+function clearNoticeFeed(){ S.notices=[]; renderNotices(); }
+function renderNotices(){
+  var el=document.getElementById('noticeFeed');
+  if(!el) return;
+  var list=S.notices||[];
+  if(!list.length){el.innerHTML='<div class="lc-empty"><div class="icon">🔔</div>暂无实时提醒</div>';return;}
+  var STYLE={order:['#eff6ff','#2563eb','🛒'],review:['#fef2f2','#dc2626','⭐'],
+             stock:['#fffbeb','#d97706','⚠️'],sensitive:['#fef2f2','#b91c1c','🚫']};
+  el.innerHTML=list.map(function(n){
+    var s=STYLE[n.type]||STYLE.order;
+    return '<div style="padding:6px 8px;border-radius:6px;margin-bottom:5px;background:'+s[0]+';border-left:3px solid '+s[1]+'">'+
+      '<div style="font-size:12px;font-weight:600;color:'+s[1]+'">'+s[2]+' '+esc(n.title)+'</div>'+
+      '<div style="font-size:11px;color:#475569">'+esc(n.message)+'</div>'+
+      '<div style="font-size:10px;color:#94a3b8">'+fmtTime(n.time)+'</div></div>';
+  }).join('');
+}
+
+// ============================================================
 // Render All (initial)
 // ============================================================
 function renderAll() {
@@ -4931,6 +6266,23 @@ function roleBlockedRelogin() {
 function setAcctName(name) {
   var el = document.getElementById('acctName');
   if (el) el.textContent = name || '未识别账号';
+}
+
+// 运营角色：主播(admin) 全量；运营(user) 隐藏/禁用开停播、退款审核、删商品等高风险入口。
+function applyAccountRole() {
+  var op = S.accountRole === 'user';
+  var badge = document.getElementById('acctRoleBadge');
+  if (badge) {
+    badge.textContent = op ? '运营' : '主播';
+    badge.style.color = op ? '#d97706' : '#2563eb';
+  }
+  document.body.classList.toggle('lc-operator-mode', op);
+  // 只隐藏运营不该看到的按钮（后端仍会二次校验，前端只是不给误导性入口）
+  ['btnStartLive','btnEndLive','btnEmg'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(el) el.style.display = op ? 'none' : '';
+  });
+  var emg=document.getElementById('btnEmg'); if(emg) emg.style.display=op?'none':'';
 }
 
 function doLogout() {

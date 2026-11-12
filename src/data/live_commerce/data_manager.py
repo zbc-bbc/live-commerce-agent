@@ -3,6 +3,8 @@
 管理所有数据存储、业务逻辑、AI生成、实时分析等功能
 """
 
+import csv
+import io
 import json
 import os
 import random
@@ -15,11 +17,12 @@ from typing import Any, Optional
 
 from schema.live_commerce_schema import (
     COUPON_RULES, LIVE_STAGES, ORDER_CHANNELS, ORDER_CHANNEL_LABELS, ORDER_STATUS_LABELS,
-    STAGE_STRATEGIES, AddressItem, BlacklistItem, CartLineItem, DanmakuItem,
-    LiveCommerceSettings, LiveSessionState, LiveStatsData, OrderItem, OrderLineItem,
-    PresetPhraseItem, PrivateMessageItem, ProductItem, QuickReplyItem, ReviewItem,
-    SkuItem, SmartAlert, StockLogItem, UserSessionItem, ViewerAccount,
-    VirtualDanmakuSettings, WSMessage, best_coupon,
+    REFUND_REASON_CATEGORIES, STAGE_STRATEGIES, AddressItem, BlacklistItem, CartLineItem,
+    DanmakuItem, KnowledgeBaseItem, LiveCommerceSettings, LiveSessionState, LiveStatsData,
+    OperationLogItem, OrderItem, OrderLineItem, PresetPhraseItem, PriceHistoryItem,
+    PrivateMessageItem, ProductItem, QuickReplyItem, ReviewItem, SensitiveLogItem, SkuItem,
+    SmartAlert, StockLogItem, UserSessionItem, ViewerAccount, ViewerVisitItem,
+    VirtualDanmakuSettings, WSMessage, best_coupon, classify_refund_reason,
 )
 
 # ============================================================
@@ -46,6 +49,18 @@ CART_EVENTS_FILE = os.path.join(DATA_DIR, "cart_events_data.json")
 STOCK_LOGS_MAX = 2000
 CART_EVENTS_MAX = 5000
 ORDER_PAY_TIMEOUT_MINUTES = 30
+# ── 全模块迭代新增的独立数据文件 ──
+KNOWLEDGE_FILE = os.path.join(DATA_DIR, "knowledge_base.json")
+SENSITIVE_LOGS_FILE = os.path.join(DATA_DIR, "sensitive_logs.json")
+OPERATION_LOGS_FILE = os.path.join(DATA_DIR, "operation_logs.json")
+PRICE_HISTORY_FILE = os.path.join(DATA_DIR, "price_history.json")
+VIEWER_VISITS_FILE = os.path.join(DATA_DIR, "viewer_visits.json")
+KNOWLEDGE_MAX = 500
+SENSITIVE_LOGS_MAX = 1000
+OPERATION_LOGS_MAX = 2000
+PRICE_HISTORY_MAX = 2000
+VIEWER_VISITS_MAX = 5000
+STAGE_LABELS = {s["key"]: s["label"] for s in LIVE_STAGES}
 # 场控提示历史。原先是纯内存，重启服务就清空；落盘后跨重启仍在，
 # 但开播（start_live）会主动清空——提示属于「本场」的东西。
 ALERTS_FILE = os.path.join(DATA_DIR, "alerts_data.json")
@@ -470,6 +485,22 @@ class LiveCommerceDataManager:
         self.sensitive_words: list[str] = list(BUILTIN_SENSITIVE_WORDS)
         # 违规弹幕历史
         self.violation_log: list[dict] = []
+        # ── 全模块迭代新增的独立集合 ──
+        # AI 问答知识库（主播维护的标准问答，AI 回复优先命中）
+        self.knowledge_base: list[KnowledgeBaseItem] = []
+        # 敏感词拦截日志 / 运营台操作日志 / 商品历史售价 / 观众进场离场记录
+        self.sensitive_logs: list[SensitiveLogItem] = []
+        self.operation_logs: list[OperationLogItem] = []
+        self.price_history: list[PriceHistoryItem] = []
+        self.viewer_visits: list[ViewerVisitItem] = []
+        # 观众当前在线连接的进场时间（断开时结算为一条 ViewerVisitItem）
+        self._viewer_enter_at: dict[str, str] = {}
+        # 观众当前未结算的进场记录：userId -> visitId
+        self._viewer_open_visit: dict[str, str] = {}
+        # 已发过超时催付私信的订单（避免反复打扰）
+        self._pay_reminded_orders: set[str] = set()
+        # 高频问题 → 各直播阶段的出现次数（TOP10 每行标记所属阶段）
+        self.high_freq_stages: dict[str, dict[str, int]] = {}
         # ── 在线人数：真实在线观众数 + 可配置模拟热度基数 ──
         # 对外数字只由这两项相加得出（见 _refresh_online_locked），不再有随机游走，
         # 因此数字随真实观众进出确定性变化。基数在 _load_all() 后按设置重读。
@@ -596,6 +627,11 @@ class LiveCommerceDataManager:
         self._load_stock_logs()
         self._load_cart_events()
         self._load_alerts()
+        self._load_knowledge()
+        self._load_sensitive_logs()
+        self._load_operation_logs()
+        self._load_price_history()
+        self._load_viewer_visits()
         self._normalize_viewer_ids()
         # 必须排在 _normalize_viewer_ids 之后：归一化会重指 userId，
         # 先审计的话会看到一批「未知前缀」的旧 id 而误报。
@@ -677,6 +713,77 @@ class LiveCommerceDataManager:
         if sku_id:
             return next((s for s in product.skus if s.skuId == sku_id), None)
         return self._default_sku(product)
+
+    # ---- 商品/规格历史售价 ----
+    def _record_price_changes_locked(self, product: ProductItem,
+                                     old_prices: dict[str, tuple[float, float]],
+                                     reason: str = "manual_update",
+                                     operator: str = "host") -> None:
+        """锁内比对 SKU 售价，发生变化就追加一条历史记录。
+
+        old_prices 为空表示新建商品：为每个 SKU 记一条初始售价（oldPrice=0），
+        这样商品详情页的「历史售价」从第一天起就有基线。
+        """
+        now = datetime.now().isoformat()
+        changed = False
+        for sku in product.skus:
+            before = old_prices.get(sku.skuId)
+            old_price = float(before[0]) if before else 0.0
+            old_original = float(before[1]) if before else 0.0
+            if before is not None and (old_price == sku.price
+                                       and old_original == sku.originalPrice):
+                continue
+            self.price_history.append(PriceHistoryItem(
+                historyId=f"price_{int(time.time() * 1000)}_{len(self.price_history) + 1}",
+                productId=product.productId,
+                productName=product.name,
+                skuId=sku.skuId,
+                skuSpec=sku.spec,
+                oldPrice=round(old_price, 2),
+                newPrice=round(float(sku.price or 0), 2),
+                oldOriginalPrice=round(old_original, 2),
+                newOriginalPrice=round(float(sku.originalPrice or 0), 2),
+                reason=reason,
+                operator=operator,
+                timestamp=now,
+            ))
+            changed = True
+        if changed:
+            if len(self.price_history) > PRICE_HISTORY_MAX:
+                self.price_history = self.price_history[-PRICE_HISTORY_MAX:]
+            self._save_price_history()
+
+    def get_price_history(self, product_id: str = "", limit: int = 200) -> list[dict]:
+        """历史售价记录（时间倒序），可按商品过滤。"""
+        with self._lock:
+            rows = [x for x in self.price_history
+                    if not product_id or x.productId == product_id]
+            rows.sort(key=lambda x: x.timestamp, reverse=True)
+            return [x.model_dump() for x in rows[:max(1, int(limit or 200))]]
+
+    def get_tag_groups(self) -> list[dict]:
+        """商品标签分组汇总：组名 → 标签 → 商品数。
+
+        tagGroup 为空的历史商品归入「未分组」，标签取自商品 tags。
+        前端据此渲染分组筛选与标签管理面板。
+        """
+        groups: dict[str, dict] = {}
+        with self._lock:
+            for p in self.products.values():
+                group_name = (p.tagGroup or "").strip() or "未分组"
+                g = groups.setdefault(group_name, {
+                    "group": group_name, "products": 0, "tags": {}, "productIds": []})
+                g["products"] += 1
+                g["productIds"].append(p.productId)
+                for tag in p.tags or []:
+                    g["tags"][tag] = g["tags"].get(tag, 0) + 1
+            rows = []
+            for g in groups.values():
+                tags = [{"tag": k, "count": v}
+                        for k, v in sorted(g.pop("tags").items(), key=lambda kv: -kv[1])]
+                rows.append({**g, "tags": tags})
+            rows.sort(key=lambda r: (-r["products"], r["group"]))
+            return rows
 
     # ---- SKU 库存联动 / 流水 ----
     def _append_stock_log_locked(self, product: ProductItem, sku: Optional[SkuItem],
@@ -1089,6 +1196,61 @@ class LiveCommerceDataManager:
     def _save_alerts(self):
         self._save_json(ALERTS_FILE, [a.model_dump() for a in self.alerts[-ALERT_HISTORY_MAX:]])
 
+    # ---- 全模块迭代：知识库 / 敏感词日志 / 操作日志 / 价格历史 / 观众到场 ----
+    @staticmethod
+    def _load_models(path: str, model, limit: int = 0) -> list:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            rows = [model(**x) for x in data if isinstance(x, dict)]
+            return rows[-limit:] if limit else rows
+        except Exception as e:  # noqa: BLE001
+            print(f"[LiveCommerce] 加载 {os.path.basename(path)} 失败: {e}")
+            return []
+
+    def _load_knowledge(self):
+        self.knowledge_base = self._load_models(KNOWLEDGE_FILE, KnowledgeBaseItem, KNOWLEDGE_MAX)
+
+    def _save_knowledge(self):
+        self._save_json(KNOWLEDGE_FILE,
+                        [x.model_dump() for x in self.knowledge_base[-KNOWLEDGE_MAX:]])
+
+    def _load_sensitive_logs(self):
+        self.sensitive_logs = self._load_models(
+            SENSITIVE_LOGS_FILE, SensitiveLogItem, SENSITIVE_LOGS_MAX)
+
+    def _save_sensitive_logs(self):
+        self._save_json(
+            SENSITIVE_LOGS_FILE,
+            [x.model_dump() for x in self.sensitive_logs[-SENSITIVE_LOGS_MAX:]])
+
+    def _load_operation_logs(self):
+        self.operation_logs = self._load_models(
+            OPERATION_LOGS_FILE, OperationLogItem, OPERATION_LOGS_MAX)
+
+    def _save_operation_logs(self):
+        self._save_json(
+            OPERATION_LOGS_FILE,
+            [x.model_dump() for x in self.operation_logs[-OPERATION_LOGS_MAX:]])
+
+    def _load_price_history(self):
+        self.price_history = self._load_models(
+            PRICE_HISTORY_FILE, PriceHistoryItem, PRICE_HISTORY_MAX)
+
+    def _save_price_history(self):
+        self._save_json(
+            PRICE_HISTORY_FILE,
+            [x.model_dump() for x in self.price_history[-PRICE_HISTORY_MAX:]])
+
+    def _load_viewer_visits(self):
+        self.viewer_visits = self._load_models(
+            VIEWER_VISITS_FILE, ViewerVisitItem, VIEWER_VISITS_MAX)
+
+    def _save_viewer_visits(self):
+        self._save_json(
+            VIEWER_VISITS_FILE,
+            [x.model_dump() for x in self.viewer_visits[-VIEWER_VISITS_MAX:]])
+
     def _load_orders(self):
         data = self._load_json(ORDERS_FILE, [])
         self.orders = {o["orderId"]: OrderItem(**o) for o in data}
@@ -1381,6 +1543,9 @@ class LiveCommerceDataManager:
             sid = self._ensure_live_session_id_locked()
             if not danmaku.sessionId:
                 danmaku.sessionId = sid
+            # 记录弹幕发生时的直播阶段（高频问题 TOP10 按阶段归属）
+            if not danmaku.stage:
+                danmaku.stage = self.live_state.currentStage or ""
             if danmaku.sessionId == sid:
                 self.current_session_danmaku.append(danmaku)
 
@@ -1553,6 +1718,7 @@ class LiveCommerceDataManager:
             if not product.addedTime:
                 product.addedTime = datetime.now().isoformat()
             self.products[product.productId] = product
+            self._record_price_changes_locked(product, {})
             self._save_products()
         self._broadcast("product_updated", {
             "productId": product.productId,
@@ -1567,6 +1733,7 @@ class LiveCommerceDataManager:
                 return None
             p = self.products[product_id]
             old_sku_stock = {s.skuId: s.stock for s in p.skus}
+            old_sku_prices = {s.skuId: (s.price, s.originalPrice) for s in p.skus}
             # 用「完整字段 + 更新字典」重新校验，而不是 setattr 直接塞值：
             # 前端传来的 skus 是 dict 列表，setattr 会绕过 Pydantic 校验，
             # 后续访问 sku.stock 就会炸。
@@ -1600,6 +1767,7 @@ class LiveCommerceDataManager:
                         updated, sku, sku.stock - before, before, sku.stock,
                         reason="manual_update", operator="host",
                     )
+            self._record_price_changes_locked(updated, old_sku_prices)
             self._save_products()
             p = updated
             payload = {"productId": product_id, "isOnSale": p.isOnSale}
@@ -1939,14 +2107,177 @@ class LiveCommerceDataManager:
             }
 
     # ============================================================
+    # 数据分析：阶段筛选 / 转化漏斗 / 多商品对比
+    # ============================================================
+    def get_stage_analysis(self, session_id: str = "") -> list[dict]:
+        """按直播阶段汇总本场互动与成交（分析页阶段筛选 / 复盘分阶段对比）。"""
+        sid = session_id or self.live_state.sessionId or ""
+        with self._lock:
+            items = [d for d in self.current_session_danmaku
+                     if not sid or d.sessionId == sid]
+            orders = [o for o in self._session_orders_locked(real_only=True)
+                      if not sid or o.sessionId == sid]
+            paid_statuses = ("paid", "shipped", "completed")
+            rows = []
+            for stage in LIVE_STAGES:
+                key = stage["key"]
+                stage_dm = [d for d in items if d.stage == key]
+                stage_orders = [o for o in orders if o.stage == key]
+                paid = [o for o in stage_orders if o.status in paid_statuses]
+                rows.append({
+                    "stage": key,
+                    "label": stage["label"],
+                    "icon": stage["icon"],
+                    "danmaku": len(stage_dm),
+                    "realDanmaku": sum(1 for d in stage_dm if is_real_user_id(d.userId)),
+                    "questions": sum(1 for d in stage_dm if d.isQuestion),
+                    "uniqueViewers": len({d.userId for d in stage_dm
+                                          if is_real_user_id(d.userId)}),
+                    "positive": sum(1 for d in stage_dm
+                                    if (d.sentiment or classify_sentiment(d.content))
+                                    == "positive"),
+                    "negative": sum(1 for d in stage_dm
+                                    if (d.sentiment or classify_sentiment(d.content))
+                                    == "negative"),
+                    "orderCount": len(stage_orders),
+                    "paidCount": len(paid),
+                    "qty": sum(o.quantity for o in paid),
+                    "gmv": round(sum(o.totalAmount for o in paid), 2),
+                })
+            # 未标注阶段的历史弹幕/订单单独一行，避免数字对不上
+            other_dm = [d for d in items if d.stage not in STAGE_LABELS]
+            other_orders = [o for o in orders if o.stage not in STAGE_LABELS]
+            if other_dm or other_orders:
+                paid = [o for o in other_orders if o.status in paid_statuses]
+                rows.append({
+                    "stage": "unassigned", "label": "未分阶段", "icon": "❓",
+                    "danmaku": len(other_dm),
+                    "realDanmaku": sum(1 for d in other_dm if is_real_user_id(d.userId)),
+                    "questions": sum(1 for d in other_dm if d.isQuestion),
+                    "uniqueViewers": len({d.userId for d in other_dm
+                                          if is_real_user_id(d.userId)}),
+                    "positive": 0, "negative": 0,
+                    "orderCount": len(other_orders), "paidCount": len(paid),
+                    "qty": sum(o.quantity for o in paid),
+                    "gmv": round(sum(o.totalAmount for o in paid), 2),
+                })
+            return rows
+
+    def get_conversion_funnel(self, product_id: str = "") -> dict:
+        """电商转化漏斗：观看 → 商品点击 → 加购 → 下单 → 支付 → 完成。"""
+        with self._lock:
+            start = self.live_state.startTime or ""
+            orders = self._session_orders_locked(real_only=True)
+            if product_id:
+                orders = [o for o in orders if self._product_has_order(o, product_id)]
+            paid_statuses = ("paid", "shipped", "completed")
+            viewers = set(self._session_real_users)
+            if not viewers:
+                viewers = {d.userId for d in self.current_session_danmaku
+                           if is_real_user_id(d.userId)}
+            if product_id:
+                viewers = {o.userId for o in orders} | viewers
+                clickers = {uid for uid in self._click_viewers}
+            else:
+                clickers = set(self._click_viewers)
+            cart_users = {
+                str(e.get("userId") or "")
+                for e in self.cart_events
+                if e.get("userId") and (not product_id or e.get("productId") == product_id)
+                and (not start or str(e.get("timestamp") or "") >= start)
+            }
+            order_users = {o.userId for o in orders if o.userId}
+            paid_users = {o.userId for o in orders
+                          if o.userId and o.status in paid_statuses}
+            completed_users = {o.userId for o in orders
+                               if o.userId and o.status == "completed"}
+            steps = [
+                {"key": "view", "label": "观看直播", "count": len(viewers)},
+                {"key": "click", "label": "点击商品", "count": len(clickers)},
+                {"key": "cart", "label": "加入购物车", "count": len(cart_users)},
+                {"key": "order", "label": "提交订单", "count": len(order_users)},
+                {"key": "pay", "label": "完成支付", "count": len(paid_users)},
+                {"key": "complete", "label": "确认收货", "count": len(completed_users)},
+            ]
+            for idx, step in enumerate(steps):
+                if idx == 0:
+                    step["rate"] = 100.0 if step["count"] else 0.0
+                else:
+                    prev = steps[idx - 1]["count"]
+                    step["rate"] = round(step["count"] / prev * 100, 1) if prev else 0.0
+            return {"productId": product_id or "", "steps": steps,
+                    "sessionId": self.live_state.sessionId or ""}
+
+    def compare_products(self, product_ids: list[str]) -> list[dict]:
+        """多商品数据对比：销量/GMV/点击/退款/评分/加购/库存。"""
+        ids = [str(x) for x in (product_ids or []) if str(x)]
+        with self._lock:
+            orders = [o for o in self.orders.values()
+                      if order_is_real(o) and o.status in ("paid", "shipped", "completed")]
+            refunded = {o.orderId for o in self.orders.values()
+                        if order_is_real(o) and o.status == "refunded"}
+            rows = []
+            for pid in ids:
+                p = self.products.get(pid)
+                if p is None:
+                    continue
+                qty = 0
+                gmv = 0.0
+                order_count = 0
+                refund_count = 0
+                for o in orders:
+                    for line in self._order_lines(o):
+                        if line.productId != pid:
+                            continue
+                        qty += line.quantity
+                        gmv = round(gmv + line.totalAmount, 2)
+                        order_count += 1
+                refund_count = sum(
+                    1 for o in self.orders.values()
+                    if o.orderId in refunded and self._product_has_order(o, pid))
+                clicks = int(self._product_clicks.get(pid, 0))
+                cart_users = len({str(e.get("userId") or "") for e in self.cart_events
+                                  if e.get("productId") == pid and e.get("userId")})
+                reviews = [r for r in self.reviews if r.productId == pid]
+                rows.append({
+                    "productId": pid,
+                    "name": p.name,
+                    "price": p.price,
+                    "stock": p.stock,
+                    "soldCount": p.soldCount,
+                    "qty": qty,
+                    "gmv": gmv,
+                    "orderCount": order_count,
+                    "refundCount": refund_count,
+                    "refundRate": round(refund_count / order_count * 100, 1)
+                    if order_count else 0.0,
+                    "clicks": clicks,
+                    "cartUsers": cart_users,
+                    "clickToOrderRate": round(order_count / clicks * 100, 1)
+                    if clicks else 0.0,
+                    "avgRating": round(sum(r.rating for r in reviews) / len(reviews), 1)
+                    if reviews else p.rating,
+                    "reviewCount": len(reviews),
+                })
+            return rows
+
+    # ============================================================
     # 弹幕管理
     # ============================================================
     def add_danmaku(self, danmaku: DanmakuItem) -> DanmakuItem:
-        """添加弹幕。
+        """添加弹幕（含敏感词拦截）。
 
         totalDanmaku 只统计**真实观众**的弹幕（判据是 userId 前缀，不是 isVirtual ——
         模拟弹幕的 isVirtual 是 False，旧写法把它们全算进了真实口径）。
+        命中敏感词时：标记 isViolation、写拦截日志、只推给运营台，不再公开广播。
         """
+        blocked = False
+        reason = ""
+        if not danmaku.isViolation and danmaku.content:
+            blocked, reason = self.check_sensitive(danmaku.content)
+            if blocked:
+                danmaku.isViolation = True
+                danmaku.violationReason = reason
         with self._lock:
             # 绑定场次 + 判定情绪：直播中的每条弹幕都归入当前 sessionId，
             # 并进入本场全程缓冲（直播结束时整场固化）。
@@ -1959,8 +2290,41 @@ class LiveCommerceDataManager:
             # 只有会被写进盘的那部分才触发落盘：虚拟弹幕每秒都可能生成，不能让它带写。
             if is_persistable_user_id(danmaku.userId):
                 self._save_danmaku()
+        if blocked:
+            self.log_sensitive_blocked(
+                danmaku.content, reason, danmaku.userId, danmaku.userName, "danmaku")
+            self._broadcast("danmaku_blocked", danmaku.model_dump(), host_only=True)
+        else:
             self._broadcast("new_danmaku", danmaku.model_dump())
-            return danmaku
+        return danmaku
+
+    def mark_danmaku(self, danmaku_id: str, marked: bool = True,
+                     operator: str = "host") -> dict:
+        """主播标记/取消标记重点弹幕（复盘与场控时快速定位）。"""
+        with self._lock:
+            item = next((d for d in self.danmaku_list
+                         if d.danmakuId == danmaku_id), None)
+            if item is None:
+                return {"success": False, "message": "弹幕不存在"}
+            item.isMarked = bool(marked)
+            self._save_danmaku()
+        self.log_operation("mark_danmaku", danmaku_id,
+                           ("标记" if marked else "取消标记") + f"弹幕：{item.content[:40]}",
+                           operator=operator)
+        self._broadcast("danmaku_marked", {
+            "danmakuId": danmaku_id,
+            "isMarked": item.isMarked,
+            "danmaku": item.model_dump(),
+        })
+        return {"success": True, "danmaku": item.model_dump()}
+
+    def get_marked_danmaku(self, session_id: str = "", limit: int = 100) -> list[dict]:
+        with self._lock:
+            rows = [d for d in self.danmaku_list if d.isMarked]
+            if session_id:
+                rows = [d for d in rows if d.sessionId == session_id]
+            rows.sort(key=lambda d: d.timestamp, reverse=True)
+            return [d.model_dump() for d in rows[:max(1, int(limit or 100))]]
 
     def get_danmaku_list(self, count: int = 200) -> list[DanmakuItem]:
         """获取最近N条弹幕"""
@@ -2099,6 +2463,58 @@ class LiveCommerceDataManager:
                 "isFromUser": msg.isFromUser,
             }, to_user=uid)
             return msg
+
+    def send_batch_private(self, user_ids: list[str], content: str,
+                           operator: str = "host") -> dict:
+        """批量私信：只发给真实注册观众，逐人入库并定向推送。
+
+        群发内容也会过敏感词检查 —— 运营端误粘贴违规文案时，宁可不发也不群发。
+        """
+        content = (content or "").strip()
+        if not content:
+            return {"success": False, "sent": 0, "skipped": len(user_ids or []),
+                    "message": "私信内容不能为空"}
+        is_violation, reason = self.check_sensitive(content)
+        if is_violation:
+            self.log_sensitive_blocked(content, reason, "host", operator, "private")
+            return {"success": False, "sent": 0, "skipped": len(user_ids or []),
+                    "message": "内容包含敏感词，已拦截"}
+        sent, skipped = 0, 0
+        now = datetime.now()
+        for uid in dict.fromkeys(user_ids or []):
+            uid = str(uid)
+            if not uid or not is_real_user_id(uid) or uid not in self.viewers:
+                skipped += 1
+                continue
+            acc = self.viewers[uid]
+            self.add_private_message(PrivateMessageItem(
+                messageId=f"batch_{int(now.timestamp()*1000)}_{sent}",
+                userId=uid,
+                userName=acc.userName or "观众",
+                avatar=acc.avatar or "",
+                content=content,
+                timestamp=now.isoformat(),
+                isFromUser=False,
+                replyType="manual",
+            ))
+            sent += 1
+        self.log_operation("batch_private_message", f"{sent}人",
+                           f"批量私信：{content[:80]}", operator=operator)
+        return {"success": sent > 0, "sent": sent, "skipped": skipped,
+                "message": f"已发送给 {sent} 位观众"}
+
+    def get_unread_summary(self) -> dict:
+        """私信未读汇总：总数 + 有未读的会话列表（用于导航红点）。"""
+        with self._lock:
+            threads = []
+            total = 0
+            for uid, s in self.user_sessions.items():
+                if s.unreadCount > 0:
+                    total += s.unreadCount
+                    threads.append({"userId": uid, "userName": s.userName,
+                                    "unread": s.unreadCount})
+            threads.sort(key=lambda x: -x["unread"])
+            return {"total": total, "threads": threads}
 
     def get_user_messages(self, user_id: str) -> list[PrivateMessageItem]:
         """获取某个用户的私信消息"""
@@ -2299,11 +2715,107 @@ class LiveCommerceDataManager:
     # ============================================================
     def add_review(self, review: ReviewItem) -> ReviewItem:
         with self._lock:
+            if not review.sessionId:
+                # 观众主动评价按订单所属场次绑定；其余（模拟/弹幕评价）挂当前场次
+                order = self.orders.get(review.orderId) if review.orderId else None
+                review.sessionId = ((order.sessionId if order else "")
+                                    or self.live_state.sessionId or "")
             self.reviews.append(review)
             self._review_counter += 1
             self._save_reviews()
-            self._broadcast("new_review", review.model_dump())
-            return review
+        self._broadcast("new_review", review.model_dump())
+        # 差评实时预警：只推运营台，前端弹窗 + 声音提示
+        if review.sentiment == "negative":
+            self._broadcast("negative_review_alert", {
+                "review": review.model_dump(),
+                "message": f"收到差评 {review.rating} 星：{review.content[:40]}",
+            }, host_only=True)
+        return review
+
+    def reply_review(self, review_id: str, content: str,
+                     operator: str = "host") -> tuple[Optional[ReviewItem], str]:
+        """主播后台回复评价（观众端可看到）。"""
+        content = (content or "").strip()
+        if not content:
+            return None, "回复内容不能为空"
+        content = content[:500]
+        with self._lock:
+            review = next((r for r in self.reviews if r.reviewId == review_id), None)
+            if review is None:
+                return None, "评价不存在"
+            review.replyContent = content
+            review.replyTime = datetime.now().isoformat()
+            review.isHandled = True
+            self._save_reviews()
+        self.log_operation("reply_review", review_id,
+                           f"回复评价：{content[:60]}", operator=operator)
+        self._broadcast("review_updated", review.model_dump())
+        return review, ""
+
+    def get_review_pain_points(self) -> dict:
+        """AI 差评痛点汇总（规则聚合：关键词 → 痛点 → 建议）。
+
+        逐条差评提取 _NEGATIVE_WORDS 命中词与商品信息，归并为痛点条目；
+        不依赖外部 LLM，保证后台一打开就能看到结果。
+        """
+        with self._lock:
+            negatives = [r for r in self.reviews if r.sentiment == "negative"
+                         or int(r.rating or 5) <= 2]
+            groups: dict[str, dict] = {}
+            for r in negatives:
+                hits = [w for w in _NEGATIVE_WORDS if w in (r.content or "")]
+                if r.tags:
+                    hits += [t for t in r.tags if t not in hits]
+                if not hits:
+                    hits = ["综合体验不佳"]
+                for hit in hits[:3]:
+                    g = groups.setdefault(hit, {
+                        "point": hit, "count": 0, "examples": [],
+                        "products": {}, "suggestion": "",
+                    })
+                    g["count"] += 1
+                    if len(g["examples"]) < 3:
+                        g["examples"].append((r.content or "")[:80])
+                    if r.productName:
+                        g["products"][r.productName] = (
+                            g["products"].get(r.productName, 0) + 1)
+            suggestions = {
+                "质量": "加强出库质检，并在直播中主动展示质检报告与实拍细节",
+                "物流": "与快递方确认时效，直播间明确发货时间预期",
+                "价格": "讲解时说明优惠构成与保价规则，避免价格预期落差",
+                "尺寸": "增加尺码/规格对照表，主播口播时强调选规格方法",
+                "包装": "优化易碎品包装，发货前增加外观检查环节",
+                "客服": "安排场控及时响应私信，缩短售后响应时长",
+                "色差": "直播灯光下补充自然光实拍图，减少色差预期",
+            }
+            rows = []
+            for g in sorted(groups.values(), key=lambda x: -x["count"]):
+                top_product = (max(g["products"].items(), key=lambda kv: kv[1])[0]
+                               if g["products"] else "")
+                suggestion = next(
+                    (v for k, v in suggestions.items() if k in g["point"]),
+                    "针对该痛点补充标准答疑话术，并在下一场直播中主动回应")
+                rows.append({
+                    "point": g["point"], "count": g["count"],
+                    "examples": g["examples"], "topProduct": top_product,
+                    "suggestion": suggestion,
+                })
+            total = len(negatives)
+            summary = []
+            if rows:
+                summary.append(
+                    f"共 {total} 条差评，最集中的痛点是「{rows[0]['point']}」"
+                    f"（{rows[0]['count']} 条，占差评 {rows[0]['count'] / total * 100:.0f}%）。")
+                for row in rows[:3]:
+                    summary.append(f"· {row['point']}：{row['suggestion']}")
+            else:
+                summary.append("暂无差评，整体评价体验良好。")
+            return {
+                "totalNegative": total,
+                "painPoints": rows,
+                "summary": summary,
+                "suggestions": [r["suggestion"] for r in rows[:5]],
+            }
 
     def get_reviews(self, sentiment: str = "", product_id: str = "", keyword: str = "", source: str = "") -> list[ReviewItem]:
         """获取评价（支持筛选）"""
@@ -2394,6 +2906,7 @@ class LiveCommerceDataManager:
                 productName=product.name,
                 source="user",
                 orderId=order_id,
+                sessionId=order.sessionId or "",
                 timestamp=datetime.now().isoformat(),
                 isHandled=False,
                 images=[],
@@ -2730,6 +3243,7 @@ class LiveCommerceDataManager:
             order.refundStatus = "pending"
             order.refundReason = reason
             order.refundType = refund_type
+            order.refundReasonCategory = classify_refund_reason(reason)
             order.refundApplyTime = datetime.now().isoformat()
             order.refundRejectReason = ""
             self._save_orders()
@@ -2760,6 +3274,246 @@ class LiveCommerceDataManager:
             self._broadcast_order("order_updated", order)
             self._broadcast_product_sales(order.productId)
             return order, ""
+
+    # ============================================================
+    # 订单批量操作 / 导出 / 溯源 / 退款原因 / 超时催付
+    # ============================================================
+    def _find_trace_danmaku_locked(self, user_id: str, minutes: int = 30) -> str:
+        """锁内找该观众下单前最近的提问弹幕（用于「提问→下单」溯源）。
+
+        只看本场、只看问句、只认本人；超出 minutes 分钟的不算 —— 半小时前随口
+        问一句、半小时后买别的商品，不该被硬串成转化链路。
+        """
+        if not user_id:
+            return ""
+        now = datetime.now()
+        for d in reversed(self.current_session_danmaku):
+            if d.userId != user_id or not d.isQuestion:
+                continue
+            t = _parse_dt(d.timestamp)
+            if t is None:
+                continue
+            if (now - t).total_seconds() <= minutes * 60:
+                return d.danmakuId
+            break
+        return ""
+
+    def get_order_trace(self, order_id: str) -> dict:
+        """订单溯源：该观众提问 → AI/主播回复 → 加购/点击 → 下单 → 支付链路。"""
+        with self._lock:
+            order = self.orders.get(order_id)
+            if order is None:
+                return {"success": False, "message": "订单不存在"}
+            question = None
+            if order.sourceDanmakuId:
+                question = next((d for d in self.danmaku_list
+                                 if d.danmakuId == order.sourceDanmakuId), None)
+            # 该观众在本场内、下单之前的全部提问（倒序），便于主播看完整上下文
+            user_questions = [
+                d for d in self.current_session_danmaku
+                if order.userId and d.userId == order.userId and d.isQuestion
+                and d.timestamp <= order.createTime
+            ][-10:]
+            clicks = sum(1 for e in self.cart_events
+                         if order.userId and e.get("userId") == order.userId
+                         and e.get("timestamp", "") <= order.createTime)
+            order_data = order.model_dump()
+        chain = []
+        if question is not None:
+            chain.append({
+                "type": "question", "time": question.timestamp,
+                "content": question.content, "danmakuId": question.danmakuId,
+            })
+            if question.replyContent:
+                chain.append({
+                    "type": "reply", "time": question.replyTime,
+                    "content": question.replyContent,
+                })
+        chain.append({
+            "type": "order", "time": order.createTime,
+            "content": f"下单 {order.orderNo or order.orderId}，实付 ¥{order.totalAmount:.2f}",
+        })
+        if order.payTime:
+            chain.append({
+                "type": "pay", "time": order.payTime,
+                "content": f"支付成功 ¥{order.totalAmount:.2f}",
+            })
+        if order.shipTime:
+            chain.append({"type": "ship", "time": order.shipTime, "content": "已发货"})
+        if order.status == "refunded":
+            chain.append({
+                "type": "refund", "time": order.refundReviewTime or order.refundApplyTime,
+                "content": f"已退款（原因：{order.refundReason or order.refundReasonCategory or '未填写'}）",
+            })
+        return {
+            "success": True,
+            "order": order_data,
+            "question": question.model_dump() if question else None,
+            "userQuestions": [d.model_dump() for d in user_questions],
+            "guestInteractions": clicks,
+            "chain": chain,
+        }
+
+    def batch_ship(self, order_ids: list[str], operator: str = "host") -> dict:
+        """批量发货：逐单走 update_order_status 的合法流转与库存/广播逻辑。"""
+        success, skipped, messages = 0, 0, []
+        for oid in dict.fromkeys(order_ids or []):
+            order = self.update_order_status(str(oid), "shipped")
+            if order is None:
+                skipped += 1
+                messages.append(f"{oid}: 当前状态不允许发货")
+            else:
+                success += 1
+        self.log_operation("batch_ship", ",".join(map(str, order_ids or [])),
+                           f"批量发货 成功{success} 跳过{skipped}", operator=operator)
+        return {"success": success > 0, "shipped": success, "skipped": skipped,
+                "messages": messages}
+
+    def batch_refund(self, order_ids: list[str], reason: str = "",
+                     category: str = "", operator: str = "host") -> dict:
+        """批量退款：逐单执行退款并记录原因分类（汇总进数据分析）。"""
+        reason = (reason or "主播批量退款").strip()[:200]
+        cat = category or classify_refund_reason(reason)
+        success, skipped, messages = 0, 0, []
+        for oid in dict.fromkeys(order_ids or []):
+            with self._lock:
+                order = self.orders.get(str(oid))
+                if order is not None:
+                    order.refundReason = reason
+                    order.refundReasonCategory = cat
+            result = self.update_order_status(str(oid), "refunded")
+            if result is None:
+                skipped += 1
+                messages.append(f"{oid}: 当前状态不允许退款")
+            else:
+                success += 1
+        self.log_operation("batch_refund", ",".join(map(str, order_ids or [])),
+                           f"批量退款 成功{success} 跳过{skipped} 原因：{reason}",
+                           operator=operator)
+        return {"success": success > 0, "refunded": success, "skipped": skipped,
+                "messages": messages, "category": cat}
+
+    def export_orders_csv(self, scope: str = "real", status: str = "") -> str:
+        """导出订单为 CSV 文本（UTF-8 BOM，Excel 直接打开不乱码）。"""
+        orders = self.get_orders(status=status, limit=100000, scope=scope)
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([
+            "订单号", "下单时间", "买家", "商品", "规格", "数量", "实付金额",
+            "订单状态", "退款状态", "退款原因", "退款分类", "直播阶段",
+            "收货人", "手机号", "收货地址", "支付时间", "发货时间",
+        ])
+        cat_labels = {c["key"]: c["label"] for c in REFUND_REASON_CATEGORIES}
+        for o in orders:
+            writer.writerow([
+                o.orderNo or o.orderId,
+                o.createTime,
+                o.userName,
+                o.productName,
+                o.skuSpec,
+                o.quantity,
+                f"{o.totalAmount:.2f}",
+                ORDER_STATUS_LABELS.get(o.status, o.status),
+                o.refundStatus,
+                o.refundReason,
+                cat_labels.get(o.refundReasonCategory, o.refundReasonCategory),
+                STAGE_LABELS.get(o.stage, o.stage or "-"),
+                o.receiverName,
+                o.receiverPhone,
+                o.receiverAddress,
+                o.payTime,
+                o.shipTime,
+            ])
+        return "\ufeff" + buf.getvalue()
+
+    def get_refund_reason_summary(self) -> dict:
+        """退款原因汇总（数据分析用）：分类计数、金额、占比与最近原因列表。"""
+        labels = {c["key"]: c["label"] for c in REFUND_REASON_CATEGORIES}
+        with self._lock:
+            refunded = [o for o in self.orders.values()
+                        if o.status == "refunded" or o.refundStatus in ("approved", "pending")]
+            total = len(refunded)
+            groups: dict[str, dict] = {}
+            recent = []
+            for o in refunded:
+                cat = o.refundReasonCategory or classify_refund_reason(o.refundReason)
+                g = groups.setdefault(cat, {
+                    "category": cat, "label": labels.get(cat, "其他原因"),
+                    "count": 0, "amount": 0.0,
+                })
+                g["count"] += 1
+                g["amount"] = round(g["amount"] + float(o.totalAmount or 0), 2)
+                if o.refundReason:
+                    recent.append({
+                        "orderNo": o.orderNo or o.orderId,
+                        "reason": o.refundReason,
+                        "category": g["label"],
+                        "amount": o.totalAmount,
+                        "time": o.refundApplyTime or o.refundReviewTime,
+                    })
+            rows = sorted(groups.values(), key=lambda x: -x["count"])
+            for row in rows:
+                row["ratio"] = round(row["count"] / total * 100, 1) if total else 0.0
+            recent.sort(key=lambda x: x["time"] or "", reverse=True)
+            return {"total": total,
+                    "amount": round(sum(x["amount"] for x in rows), 2),
+                    "categories": rows,
+                    "recent": recent[:30]}
+
+    def remind_pending_pay(self, timeout_minutes: int = ORDER_PAY_TIMEOUT_MINUTES,
+                           operator: str = "AI") -> list[dict]:
+        """待付款订单超时 AI 私信催付。
+
+        只催真实注册观众、只催一次（payRemindTime 为空且不在已催集合里），
+        催付消息作为主播侧 AI 私信写入会话，并推送 order_updated 让运营台可见。
+        """
+        now = datetime.now()
+        targets = []
+        with self._lock:
+            for o in self.orders.values():
+                if (o.status != "pending_pay" or o.refundStatus != "none"
+                        or not o.userId or not order_is_real(o)):
+                    continue
+                if o.payRemindTime or o.orderId in self._pay_reminded_orders:
+                    continue
+                created = _parse_dt(o.createTime)
+                if created is None:
+                    continue
+                if (now - created).total_seconds() < timeout_minutes * 60:
+                    continue
+                o.payRemindTime = now.isoformat()
+                self._pay_reminded_orders.add(o.orderId)
+                targets.append(o.model_dump())
+            if targets:
+                self._save_orders()
+        for order_data in targets:
+            user_id = order_data.get("userId") or ""
+            acc = self.get_viewer(user_id)
+            content = (
+                f"亲爱的{acc.userName if acc else '观众'}，您有一笔待付款订单"
+                f"「{order_data.get('productName') or '商品'}」（¥{order_data.get('totalAmount', 0):.2f}）"
+                f"已超时 {timeout_minutes} 分钟未支付，库存为您保留中，"
+                f"点击「我的订单」即可继续付款，有疑问随时私信我~"
+            )
+            self.add_private_message(PrivateMessageItem(
+                messageId=f"payremind_{int(time.time()*1000)}_{order_data.get('orderId','')[-6:]}",
+                userId=user_id,
+                userName=(acc.userName if acc else "观众"),
+                avatar=(acc.avatar if acc else ""),
+                content=content,
+                timestamp=datetime.now().isoformat(),
+                isFromUser=False,
+                replyType="ai",
+            ))
+            self.log_operation("pay_remind", order_data.get("orderId", ""),
+                               f"超时{timeout_minutes}分钟，AI私信催付", operator=operator)
+        if targets:
+            self._broadcast("pay_remind_sent", {
+                "count": len(targets),
+                "orders": [{"orderId": o.get("orderId"), "orderNo": o.get("orderNo"),
+                            "userId": o.get("userId")} for o in targets],
+            }, host_only=True)
+        return targets
 
     # ============================================================
     # 观众账户（钱包）
@@ -2855,9 +3609,17 @@ class LiveCommerceDataManager:
                 order_count[o.userId] = order_count.get(o.userId, 0) + 1
                 if o.status in ("paid", "shipped", "completed"):
                     spend[o.userId] = spend.get(o.userId, 0.0) + o.totalAmount
+            question_count: dict[str, int] = {}
+            for d in self.danmaku_list:
+                if d.userId and d.isQuestion:
+                    question_count[d.userId] = question_count.get(d.userId, 0) + 1
+            visit_seconds: dict[str, int] = {}
+            for v in self.viewer_visits:
+                visit_seconds[v.userId] = (visit_seconds.get(v.userId, 0)
+                                           + int(v.durationSeconds or 0))
             rows = []
             for uid, acc in self.viewers.items():
-                rows.append({
+                row = {
                     "userId": uid,
                     "userName": acc.userName,
                     "avatar": acc.avatar or "",
@@ -2866,9 +3628,167 @@ class LiveCommerceDataManager:
                     "orderCount": order_count.get(uid, 0),
                     "totalSpend": round(spend.get(uid, 0.0), 2),
                     "isLegacy": not uid.startswith("v_"),
-                })
+                    "questionCount": question_count.get(uid, 0),
+                    "watchSeconds": visit_seconds.get(uid, 0),
+                }
+                row["tags"] = self._compute_viewer_tags_locked(
+                    uid, row["orderCount"], row["totalSpend"],
+                    row["questionCount"], row["watchSeconds"])
+                rows.append(row)
             rows.sort(key=lambda r: r["registerTime"] or "", reverse=True)
             return rows
+
+    # ============================================================
+    # 观众自动标签 / 进场离场 / 详情历史
+    # ============================================================
+    @staticmethod
+    def _compute_viewer_tags_locked(user_id: str, order_count: int, spend: float,
+                                    question_count: int, watch_seconds: int) -> list[str]:
+        """自动给观众打标签（规则透明可解释，前端展示同一套文案）。"""
+        tags: list[str] = []
+        if spend >= 500:
+            tags.append("高价值")
+        if order_count >= 3:
+            tags.append("复购客")
+        elif order_count == 0 and (question_count > 0 or watch_seconds >= 60):
+            tags.append("只看不买")
+        if question_count >= 3:
+            tags.append("高意向")
+        if watch_seconds >= 600:
+            tags.append("深度观看")
+        if not tags:
+            tags.append("新客")
+        return tags
+
+    def note_viewer_enter(self, user_id: str, user_name: str = "") -> None:
+        """观众连接建立：开始计时并生成一条未结算的到场记录。"""
+        if not user_id:
+            return
+        with self._lock:
+            now = datetime.now().isoformat()
+            self._viewer_enter_at[user_id] = now
+            if user_id in self._viewer_open_visit:
+                return  # 同一账号多标签页：只记一次进场
+            visit = ViewerVisitItem(
+                visitId=f"visit_{int(time.time() * 1000)}_{len(self.viewer_visits) + 1}",
+                userId=user_id,
+                userName=user_name or "",
+                sessionId=self.live_state.sessionId or "",
+                enterTime=now,
+            )
+            self.viewer_visits.append(visit)
+            if len(self.viewer_visits) > VIEWER_VISITS_MAX:
+                self.viewer_visits = self.viewer_visits[-VIEWER_VISITS_MAX:]
+            self._viewer_open_visit[user_id] = visit.visitId
+            self._save_viewer_visits()
+
+    def note_viewer_leave(self, user_id: str) -> None:
+        """观众全部连接断开：结算观看时长。"""
+        if not user_id:
+            return
+        with self._lock:
+            visit_id = self._viewer_open_visit.pop(user_id, "")
+            self._viewer_enter_at.pop(user_id, None)
+            if not visit_id:
+                return
+            visit = next((v for v in self.viewer_visits if v.visitId == visit_id), None)
+            if visit is None:
+                return
+            now = datetime.now()
+            visit.leaveTime = now.isoformat()
+            enter = _parse_dt(visit.enterTime)
+            visit.durationSeconds = (max(0, int((now - enter).total_seconds()))
+                                     if enter else 0)
+            self._save_viewer_visits()
+
+    def get_viewer_visits(self, user_id: str, limit: int = 50) -> list[dict]:
+        with self._lock:
+            rows = [v for v in self.viewer_visits if v.userId == user_id]
+            rows.sort(key=lambda v: v.enterTime, reverse=True)
+            return [v.model_dump() for v in rows[:max(1, int(limit or 50))]]
+
+    def get_viewer_detail(self, user_id: str) -> Optional[dict]:
+        """观众详情：观看/下单/提问/私信历史 + 自动标签 + 累计时长。"""
+        with self._lock:
+            acc = self.viewers.get(user_id)
+            if acc is None:
+                return None
+            orders = [o for o in self.orders.values()
+                      if o.userId == user_id and order_is_real(o)]
+            orders.sort(key=lambda o: o.createTime, reverse=True)
+            questions = [d for d in self.danmaku_list
+                         if d.userId == user_id and d.isQuestion]
+            questions.sort(key=lambda d: d.timestamp, reverse=True)
+            messages = list(self.private_messages.get(user_id, []))
+            messages.sort(key=lambda m: m.timestamp, reverse=True)
+            visits = self.get_viewer_visits(user_id, 50)
+            spend = round(sum(o.totalAmount for o in orders
+                              if o.status in ("paid", "shipped", "completed")), 2)
+            watch = sum(int(v.get("durationSeconds") or 0) for v in visits)
+            tags = self._compute_viewer_tags_locked(
+                user_id, len(orders), spend, len(questions), watch)
+            return {
+                "viewer": {
+                    "userId": user_id, "userName": acc.userName,
+                    "avatar": acc.avatar or "", "balance": acc.balance,
+                    "registerTime": acc.registerTime,
+                    "orderCount": len(orders), "totalSpend": spend,
+                    "questionCount": len(questions),
+                    "watchSeconds": watch,
+                    "watchMinutes": round(watch / 60, 1),
+                    "tags": tags,
+                    "region": self._simulated_region(user_id),
+                },
+                "visits": visits,
+                "orders": [o.model_dump() for o in orders[:50]],
+                "questions": [d.model_dump() for d in questions[:50]],
+                "messages": [m.model_dump() for m in messages[:50]],
+            }
+
+    @staticmethod
+    def _simulated_region(user_id: str) -> str:
+        """按 userId 稳定映射到模拟地域（同一观众永远同一地区，便于演示画像）。"""
+        regions = ["广东", "浙江", "江苏", "上海", "北京", "四川", "山东",
+                   "河南", "湖北", "福建", "湖南", "陕西", "重庆", "安徽"]
+        if not user_id:
+            return "未知"
+        return regions[sum(ord(c) for c in user_id) % len(regions)]
+
+    def get_audience_profile(self) -> dict:
+        """观众画像：模拟地域分布 + 自动标签分布（分析页饼图）。"""
+        with self._lock:
+            viewers = list(self.viewers.items())
+            orders_by_user: dict[str, list[OrderItem]] = {}
+            for o in self.orders.values():
+                if order_is_real(o):
+                    orders_by_user.setdefault(o.userId, []).append(o)
+            question_count: dict[str, int] = {}
+            for d in self.danmaku_list:
+                if d.userId and d.isQuestion:
+                    question_count[d.userId] = question_count.get(d.userId, 0) + 1
+            visit_seconds: dict[str, int] = {}
+            for v in self.viewer_visits:
+                visit_seconds[v.userId] = (visit_seconds.get(v.userId, 0)
+                                           + int(v.durationSeconds or 0))
+            regions: dict[str, int] = {}
+            tag_counts: dict[str, int] = {}
+            for uid, acc in viewers:
+                region = self._simulated_region(uid)
+                regions[region] = regions.get(region, 0) + 1
+                user_orders = orders_by_user.get(uid, [])
+                spend = sum(o.totalAmount for o in user_orders
+                            if o.status in ("paid", "shipped", "completed"))
+                for tag in self._compute_viewer_tags_locked(
+                        uid, len(user_orders), spend,
+                        question_count.get(uid, 0), visit_seconds.get(uid, 0)):
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+            return {
+                "totalViewers": len(viewers),
+                "regions": [{"region": k, "count": v}
+                            for k, v in sorted(regions.items(), key=lambda kv: -kv[1])],
+                "tags": [{"tag": k, "count": v}
+                         for k, v in sorted(tag_counts.items(), key=lambda kv: -kv[1])],
+            }
 
     # ============================================================
     # 观众收货地址（多条保存 + 默认地址 + 下单自选）
@@ -3168,6 +4088,9 @@ class LiveCommerceDataManager:
                 receiverPhone=address.phone if address else "",
                 receiverAddress=full_address,
                 stockDeducted=True,
+                stage=self.live_state.currentStage or "",
+                sessionId=self.live_state.sessionId or "",
+                sourceDanmakuId=self._find_trace_danmaku_locked(user_id),
             )
             # 锁库存：校验已经在 _build_order_lines_locked 完成，这里逐行扣减并写流水。
             for line in order_lines:
@@ -3767,6 +4690,203 @@ class LiveCommerceDataManager:
         return False, ""
 
     # ============================================================
+    # 操作日志 / 敏感词拦截日志
+    # ============================================================
+    def log_operation(self, action: str, target: str = "", detail: str = "",
+                      operator: str = "host", role: str = "host") -> None:
+        """记录一条运营台操作日志（所有写操作都应调用，便于审计）。"""
+        with self._lock:
+            self.operation_logs.append(OperationLogItem(
+                logId=f"opl_{int(time.time() * 1000)}_{len(self.operation_logs) + 1}",
+                operator=operator or "host",
+                role=role or "host",
+                action=action or "",
+                target=str(target or "")[:120],
+                detail=str(detail or "")[:500],
+                timestamp=datetime.now().isoformat(),
+            ))
+            if len(self.operation_logs) > OPERATION_LOGS_MAX:
+                self.operation_logs = self.operation_logs[-OPERATION_LOGS_MAX:]
+            self._save_operation_logs()
+
+    def get_operation_logs(self, limit: int = 200, action: str = "") -> list[dict]:
+        with self._lock:
+            rows = [x for x in self.operation_logs if not action or x.action == action]
+            rows.sort(key=lambda x: x.timestamp, reverse=True)
+            return [x.model_dump() for x in rows[:max(1, int(limit or 200))]]
+
+    def log_sensitive_blocked(self, content: str, reason: str, user_id: str = "",
+                              user_name: str = "", scene: str = "danmaku") -> SensitiveLogItem:
+        """记录一条敏感词拦截日志并通知运营台。"""
+        word = ""
+        if "：" in (reason or ""):
+            word = reason.split("：", 1)[-1].strip()
+        elif ":" in (reason or ""):
+            word = reason.split(":", 1)[-1].strip()
+        with self._lock:
+            item = SensitiveLogItem(
+                logId=f"sl_{int(time.time() * 1000)}_{len(self.sensitive_logs) + 1}",
+                userId=user_id or "",
+                userName=user_name or "",
+                content=(content or "")[:500],
+                word=word,
+                reason=reason or "",
+                scene=scene,
+                sessionId=self.live_state.sessionId or "",
+                timestamp=datetime.now().isoformat(),
+            )
+            self.sensitive_logs.append(item)
+            if len(self.sensitive_logs) > SENSITIVE_LOGS_MAX:
+                self.sensitive_logs = self.sensitive_logs[-SENSITIVE_LOGS_MAX:]
+            self._save_sensitive_logs()
+        self._broadcast("sensitive_blocked", item.model_dump(), host_only=True)
+        return item
+
+    def get_sensitive_logs(self, limit: int = 100, scene: str = "") -> list[dict]:
+        with self._lock:
+            rows = [x for x in self.sensitive_logs if not scene or x.scene == scene]
+            rows.sort(key=lambda x: x.timestamp, reverse=True)
+            return [x.model_dump() for x in rows[:max(1, int(limit or 100))]]
+
+    # ============================================================
+    # AI 问答知识库
+    # ============================================================
+    def add_knowledge(self, question: str, answer: str, keywords: list[str] | None = None,
+                      source: str = "manual", operator: str = "host",
+                      kb_id: str = "") -> Optional[KnowledgeBaseItem]:
+        """新增/更新一条知识库问答。
+
+        kb_id 非空且存在 → 更新；否则按 question 归并（同问题覆盖答案），
+        最后再新建。相同问题不重复堆积，避免 AI 命中时二义。
+        """
+        question = (question or "").strip()[:200]
+        answer = (answer or "").strip()[:2000]
+        if not question or not answer:
+            return None
+        now = datetime.now().isoformat()
+        with self._lock:
+            item = None
+            if kb_id:
+                item = next((k for k in self.knowledge_base if k.kbId == kb_id), None)
+            if item is None:
+                item = next((k for k in self.knowledge_base
+                             if k.question == question), None)
+            if item is None:
+                item = KnowledgeBaseItem(
+                    kbId=f"kb_{int(time.time() * 1000)}_{len(self.knowledge_base) + 1}",
+                    question=question,
+                    answer=answer,
+                    createTime=now,
+                )
+                self.knowledge_base.append(item)
+            item.question = question
+            item.answer = answer
+            item.keywords = [str(k).strip() for k in (keywords or []) if str(k).strip()][:20]
+            item.source = source or item.source or "manual"
+            item.updateTime = now
+            item.operator = operator or "host"
+            if len(self.knowledge_base) > KNOWLEDGE_MAX:
+                self.knowledge_base = self.knowledge_base[-KNOWLEDGE_MAX:]
+            self._save_knowledge()
+            self._broadcast("knowledge_updated", item.model_dump(), host_only=True)
+            return item
+
+    def update_knowledge(self, kb_id: str, data: dict,
+                         operator: str = "host") -> Optional[KnowledgeBaseItem]:
+        with self._lock:
+            item = next((k for k in self.knowledge_base if k.kbId == kb_id), None)
+            if item is None:
+                return None
+            result = self.add_knowledge(
+                data.get("question", item.question),
+                data.get("answer", item.answer),
+                data.get("keywords", item.keywords),
+                data.get("source", item.source),
+                operator,
+                kb_id=kb_id,
+            )
+            # add_knowledge 按问题归并时可能把问题改掉，保持 id 稳定即可
+            return result
+
+    def delete_knowledge(self, kb_id: str) -> bool:
+        with self._lock:
+            before = len(self.knowledge_base)
+            self.knowledge_base = [k for k in self.knowledge_base if k.kbId != kb_id]
+            if len(self.knowledge_base) == before:
+                return False
+            self._save_knowledge()
+            self._broadcast("knowledge_updated", {"kbId": kb_id, "deleted": True},
+                            host_only=True)
+            return True
+
+    def get_knowledge(self, keyword: str = "") -> list[dict]:
+        with self._lock:
+            kw = (keyword or "").strip().lower()
+            rows = [k for k in self.knowledge_base
+                    if not kw or kw in k.question.lower()
+                    or kw in k.answer.lower()
+                    or any(kw in x.lower() for x in k.keywords)]
+            rows.sort(key=lambda x: (-x.hitCount, x.question))
+            return [k.model_dump() for k in rows]
+
+    def find_knowledge_answer(self, content: str) -> Optional[str]:
+        """按关键词/问题文本匹配知识库，命中则累加 hitCount 并返回标准答案。
+
+        匹配顺序：关键词命中 > 问题文本包含 > 双向子串。宁可不命中（回退 AI），
+        也不要用一个泛化关键词给出错误的标准答案。
+        """
+        text = (content or "").strip()
+        if not text:
+            return None
+        with self._lock:
+            best = None
+            for k in self.knowledge_base:
+                if any(kw and kw.lower() in text.lower() for kw in k.keywords):
+                    best = k
+                    break
+                key = _question_key(k.question)
+                if key and (key in text or _question_key(text) in k.question):
+                    best = k
+                    break
+            if best is None:
+                return None
+            best.hitCount += 1
+            best.updateTime = datetime.now().isoformat()
+            self._save_knowledge()
+            return best.answer
+
+    def save_reply_correction(self, danmaku_id: str, corrected_answer: str,
+                              operator: str = "host") -> dict:
+        """主播手动修正某条 AI 回答并沉淀为标准答案。
+
+        做三件事：① 更新原弹幕的 replyContent；② 取原问题写入知识库；
+        ③ 记录操作日志。之后相同问题会被知识库优先命中。
+        """
+        corrected_answer = (corrected_answer or "").strip()
+        if not corrected_answer:
+            return {"success": False, "message": "标准答案不能为空"}
+        with self._lock:
+            danmaku = next((d for d in self.danmaku_list
+                            if d.danmakuId == danmaku_id), None)
+            if danmaku is None:
+                return {"success": False, "message": "弹幕不存在"}
+            danmaku.replyContent = corrected_answer[:2000]
+            danmaku.isReplied = True
+            danmaku.replyTime = datetime.now().isoformat()
+            self._save_danmaku()
+            question = danmaku.content
+        item = self.add_knowledge(question, corrected_answer,
+                                  source="reply_correction", operator=operator)
+        self.log_operation("correct_ai_reply", danmaku_id,
+                           f"问题「{question[:40]}」已沉淀为标准答案",
+                           operator=operator)
+        if item is None:
+            return {"success": False, "message": "标准答案保存失败"}
+        self._broadcast("danmaku_updated", danmaku.model_dump(), host_only=True)
+        return {"success": True, "knowledge": item.model_dump(),
+                "danmaku": danmaku.model_dump()}
+
+    # ============================================================
     # 直播状态管理
     # ============================================================
     def start_live(self) -> dict:
@@ -4344,11 +5464,28 @@ class LiveCommerceDataManager:
                     if p.isEnabled and any(kw.lower() in question.lower() for kw in p.keywords):
                         has_preset = True
                         break
+                stages = self.high_freq_stages.get(question, {})
+                # 问题归属阶段 = 出现次数最多的阶段（并列时按 LIVE_STAGES 顺序）
+                stage_order = {s["key"]: i for i, s in enumerate(LIVE_STAGES)}
+                stage_key = ""
+                if stages:
+                    stage_key = max(
+                        stages.items(),
+                        key=lambda kv: (kv[1], -stage_order.get(kv[0], 99)),
+                    )[0]
                 results.append({
                     "question": question,
                     "count": count,
                     "hasPreset": has_preset,
                     "isReal": is_real,
+                    "stage": stage_key,
+                    "stageLabel": STAGE_LABELS.get(stage_key, "未分阶段"),
+                    "stageCounts": stages,
+                    "hasKnowledge": any(
+                        k.question == question or
+                        (k.keywords and any(kw.lower() in question.lower()
+                                            for kw in k.keywords))
+                        for k in self.knowledge_base),
                 })
             return results
 
@@ -4457,8 +5594,8 @@ class LiveCommerceDataManager:
             },
         }
 
-    def record_question(self, content: str, is_real: bool = False):
-        """记录一个问题到高频统计。
+    def record_question(self, content: str, is_real: bool = False, stage: str = ""):
+        """记录一个问题到高频统计（并按直播阶段归集）。
 
         **is_real 必须由调用方显式给出。** auto_reply_danmaku 同时服务「虚拟弹幕
         生成器」和「真实观众弹幕兜底」两条路径，内部无从分辨——这正是旧实现里
@@ -4470,6 +5607,9 @@ class LiveCommerceDataManager:
             key = content[:30]
             if is_real:
                 self.high_freq_questions[key] = self.high_freq_questions.get(key, 0) + 1
+                if stage:
+                    stages = self.high_freq_stages.setdefault(key, {})
+                    stages[stage] = stages.get(stage, 0) + 1
             else:
                 self.virtual_freq_questions[key] = self.virtual_freq_questions.get(key, 0) + 1
 
@@ -4489,10 +5629,17 @@ class LiveCommerceDataManager:
         if is_violation:
             return ""
 
-        # 记录到高频统计
-        self.record_question(content, is_real=is_real)
+        # 记录到高频统计（带上当前直播阶段）
+        self.record_question(content, is_real=is_real,
+                             stage=self.live_state.currentStage or "")
 
-        # 先匹配预设话术
+        # 知识库标准答案优先（主播手工维护/修正过的答案）
+        kb_answer = self.find_knowledge_answer(content)
+        if kb_answer:
+            self.reply_danmaku(danmaku_id, kb_answer)
+            return kb_answer
+
+        # 再匹配预设话术
         preset = self.find_matching_preset(content)
         if preset:
             self.reply_danmaku(danmaku_id, preset.answer)
@@ -5022,9 +6169,114 @@ class LiveCommerceDataManager:
             "suggestion": "补充通用答疑话术，覆盖更多长尾问题",
         }]
 
+        # ---- 迭代新增：分阶段对比 / 退款汇总 / 差评痛点 / AI 运营建议 ----
+        stage_comparison = []
+        for stage in LIVE_STAGES:
+            key = stage["key"]
+            stag_dm = [d for d in real_dm if d.stage == key]
+            stag_orders = [o for o in real_orders if o.stage == key]
+            stag_paid = [o for o in stag_orders if o.status in paid_statuses]
+            stage_comparison.append({
+                "stage": key, "label": stage["label"], "icon": stage["icon"],
+                "danmaku": len(stag_dm),
+                "questions": sum(1 for d in stag_dm if d.isQuestion),
+                "positive": sum(1 for d in stag_dm
+                                if (d.sentiment or classify_sentiment(d.content))
+                                == "positive"),
+                "negative": sum(1 for d in stag_dm
+                                if (d.sentiment or classify_sentiment(d.content))
+                                == "negative"),
+                "orderCount": len(stag_orders),
+                "paidCount": len(stag_paid),
+                "qty": sum(o.quantity for o in stag_paid),
+                "gmv": round(sum(o.totalAmount for o in stag_paid), 2),
+            })
+
+        refund_orders = [o for o in real_orders
+                         if o.status == "refunded"
+                         or o.refundStatus in ("approved", "pending")]
+        refund_groups: dict[str, dict] = {}
+        for o in refund_orders:
+            cat = o.refundReasonCategory or classify_refund_reason(o.refundReason)
+            label = next((c["label"] for c in REFUND_REASON_CATEGORIES
+                          if c["key"] == cat), "其他原因")
+            g = refund_groups.setdefault(cat, {
+                "category": cat, "label": label, "count": 0, "amount": 0.0})
+            g["count"] += 1
+            g["amount"] = round(g["amount"] + float(o.totalAmount or 0), 2)
+        refund_categories = sorted(refund_groups.values(), key=lambda x: -x["count"])
+        for row in refund_categories:
+            row["ratio"] = (round(row["count"] / len(refund_orders) * 100, 1)
+                            if refund_orders else 0.0)
+        refund_summary = {
+            "count": len(refund_orders),
+            "amount": round(sum(o.totalAmount for o in refund_orders), 2),
+            "rate": round(len(refund_orders) / len(real_orders) * 100, 1)
+            if real_orders else 0.0,
+            "categories": refund_categories,
+            "reasons": [
+                {"orderNo": o.orderNo or o.orderId,
+                 "reason": o.refundReason or "未填写",
+                 "category": next((c["label"] for c in REFUND_REASON_CATEGORIES
+                                   if c["key"] == (o.refundReasonCategory
+                                                   or classify_refund_reason(o.refundReason))),
+                                  "其他原因"),
+                 "amount": o.totalAmount}
+                for o in refund_orders[:20]
+            ],
+        }
+
+        negative_reviews = [r for r in real_reviews
+                            if r.sentiment == "negative" or int(r.rating or 5) <= 2]
+        pain_points: dict[str, int] = {}
+        for r in negative_reviews:
+            hits = [w for w in _NEGATIVE_WORDS if w in (r.content or "")]
+            hits = (r.tags or []) + hits
+            if not hits:
+                hits = ["综合体验不佳"]
+            for hit in hits[:3]:
+                pain_points[hit] = pain_points.get(hit, 0) + 1
+        negative_summary = {
+            "count": len(negative_reviews),
+            "points": [{"point": k, "count": v} for k, v in
+                       sorted(pain_points.items(), key=lambda kv: -kv[1])[:8]],
+            "examples": [{"content": r.content[:80], "rating": r.rating,
+                          "productName": r.productName}
+                         for r in negative_reviews[:5]],
+        }
+
+        # AI 运营建议：规则推导 + 本场数据，输出可直接执行的行动项
+        ai_suggestions: list[str] = []
+        if refund_categories:
+            top_refund = refund_categories[0]
+            ai_suggestions.append(
+                f"退款集中在「{top_refund['label']}」（{top_refund['count']} 单），"
+                f"建议下一场开播前针对该问题准备标准答疑并优化详情页说明。")
+        if negative_summary["points"]:
+            top_pain = negative_summary["points"][0]
+            ai_suggestions.append(
+                f"差评最集中的痛点是「{top_pain['point']}」，"
+                f"建议安排质检复核并在直播中主动展示改进措施。")
+        stage_with_gmv = max(stage_comparison, key=lambda x: x["gmv"])
+        if stage_with_gmv["gmv"] > 0:
+            ai_suggestions.append(
+                f"成交高峰出现在「{stage_with_gmv['label']}」（GMV ¥{stage_with_gmv['gmv']}），"
+                f"建议把主推商品与核心话术集中安排在该阶段。")
+        stage_with_questions = max(stage_comparison, key=lambda x: x["questions"])
+        if stage_with_questions["questions"] > 0:
+            ai_suggestions.append(
+                f"提问最集中的阶段是「{stage_with_questions['label']}」"
+                f"（{stage_with_questions['questions']} 个问题），建议提前在该阶段配置场控与快捷话术。")
+        if unanswered:
+            ai_suggestions.append(
+                f"仍有 {unanswered} 个提问未回复，建议将高频问题沉淀进 AI 知识库，"
+                f"让下次直播自动命中标准答案。")
+        if not ai_suggestions:
+            ai_suggestions.append("本场数据平稳，建议保持现有节奏并继续积累知识库问答。")
+
         report = {
-            # schemaVersion 3：复盘按直播场次隔离，商品 / 弹幕双维度，报告独立存储。
-            "schemaVersion": 3,
+            # schemaVersion 4：新增分阶段对比、退款/差评汇总、AI 运营建议。
+            "schemaVersion": 4,
             "reportId": self._new_report_id(sid),
             "sessionId": sid,
             "sessionTitle": session_title,
@@ -5058,6 +6310,11 @@ class LiveCommerceDataManager:
                 "improvements": improvements[:5],
                 "conclusion": conclusion,
             },
+            # ---- 迭代新增：分阶段对比 / 退款汇总 / 差评痛点 / AI 建议 ----
+            "stageComparison": stage_comparison,
+            "refundSummary": refund_summary,
+            "negativeReviewSummary": negative_summary,
+            "aiSuggestions": ai_suggestions,
             # ---- 新：商品维度 / 弹幕维度（图表直接消费这两个对象）----
             "productDimension": {
                 "sessionId": sid,
@@ -5410,6 +6667,43 @@ class LiveCommerceDataManager:
             out.append(row)
         out.sort(key=lambda r: str(r.get("generateTime", "")), reverse=True)
         return out
+
+    def compare_sessions(self, session_ids: list[str]) -> dict:
+        """两场（或多场）直播数据对比：复用报告数据集，不落盘。"""
+        rows = []
+        for sid in dict.fromkeys(str(x) for x in (session_ids or []) if str(x)):
+            try:
+                report = self.generate_report(save=False, session_id=sid)
+            except Exception as e:  # noqa: BLE001
+                rows.append({"sessionId": sid, "error": str(e)})
+                continue
+            if report.get("success") is False:
+                rows.append({"sessionId": sid,
+                             "error": report.get("message") or "报告生成失败"})
+                continue
+            pd = report.get("productDimension") or {}
+            dd = report.get("danmakuDimension") or {}
+            rs = report.get("refundSummary") or {}
+            ns = report.get("negativeReviewSummary") or {}
+            rows.append({
+                "sessionId": sid,
+                "title": report.get("sessionTitle"),
+                "startTime": (report.get("scope") or {}).get("startTime"),
+                "duration": report.get("liveDuration"),
+                "gmv": pd.get("gmv", 0),
+                "paidCount": pd.get("paidCount", 0),
+                "orderCount": pd.get("orderCount", 0),
+                "buyerCount": pd.get("buyerCount", 0),
+                "conversionRate": pd.get("conversionRate", 0),
+                "realDanmaku": dd.get("real", 0),
+                "questionCount": dd.get("questionCount", 0),
+                "replyRate": dd.get("replyRate", 0),
+                "refundCount": rs.get("count", 0),
+                "refundAmount": rs.get("amount", 0),
+                "negativeReviews": ns.get("count", 0),
+                "stageComparison": report.get("stageComparison") or [],
+            })
+        return {"sessions": rows}
 
     def get_report(self, report_id: str) -> Optional[dict]:
         """按 ID 读取一份历史报告（路径白名单校验，防路径穿越）。"""
