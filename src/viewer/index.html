@@ -310,6 +310,8 @@ button{font-family:inherit;cursor:pointer;border:none;background:none}
 .oc-refund{margin-top:6px;font-size:11px;color:#b45309;background:#fffbeb;border-radius:8px;padding:6px 9px;line-height:1.6}
 .oc-refund.ok{color:#047857;background:#ecfdf5}
 .oc-refund.err{color:#b91c1c;background:#fef2f2}
+.oc-review{margin-top:6px;font-size:11px;color:#1d4ed8;background:#eff6ff;border-radius:8px;padding:7px 10px;line-height:1.7}
+.oc-review .stars{color:#f59e0b;letter-spacing:1px}
 
 /* ===== 购物车 ===== */
 .cart-badge{position:absolute;top:-3px;right:-3px;font-size:9px;color:#fff;font-weight:700;background:#ef4444;border:1px solid #fff;border-radius:8px;padding:0 4px;font-style:normal;min-width:14px;text-align:center}
@@ -489,7 +491,7 @@ var S = {
   bought: [],            // 本观众在本会话已买下的商品 orderNo 列表（local）
   // ---- 购物闭环：账户 / 订单 / 摄像头 / 评价 ----
   acc: {userId:'', userName:'', avatar:'', balance:0},   // 后端钱包账户（余额）
-  myOrders: [],          // 我的订单（来自后端 get_user_orders）
+  myOrders: [],          // 我的订单（来自后端 viewer_login / get_user_orders，已附带 myReview）
   myOrdersLoaded: false,
   addresses: [],         // 收货地址簿（来自 viewer_login_result / get_addresses）
   addrSel: '',           // 下单时选中的地址ID
@@ -497,7 +499,7 @@ var S = {
   addrAfterSave: null,   // 保存地址成功后要继续执行的动作（如「继续下单」）
   refundOrderId: '',     // 正在申请退款的订单ID
   refundType: 'refund',  // 售后类型：refund=仅退款 / return=退货退款
-  meTab: 'all',          // 我的-订单 tab：all/pending_pay/paid/shipped/completed/after_sale
+  meTab: 'all',          // 我的-订单 tab：all/pending_pay/paid/shipped/completed/reviewed
   sheetMode: 'none',     // none/product/cart/gift/checkout/me/review/ok/profile —— 决定事件是否重绘当前弹层
   cam: null,             // {src, ts} 摄像头最近一帧
   reviewed: {},          // 已评价的 orderId -> 1（本地防重复展示）
@@ -1640,8 +1642,10 @@ function onSetDefaultAddressResult(d){
 function meTabHtml(){
   var list=S.myOrders||[];
   function cnt(st){ return list.filter(function(o){return o.status===st && o.refundStatus!=='pending'}).length; }
-  var afterSale=list.filter(function(o){return o.refundStatus==='pending'||o.refundStatus==='approved'||o.refundStatus==='rejected'||o.status==='refunded'}).length;
-  var tabs=[['all','全部',list.length],['pending_pay','待付款',cnt('pending_pay')],['paid','待发货',cnt('paid')],['shipped','待收货',cnt('shipped')],['completed','已完成',cnt('completed')],['after_sale','售后',afterSale]];
+  function isReviewed(o){ return !!(o.myReview || S.reviewed[o.orderId]); }
+  var pendingReview=list.filter(function(o){return o.status==='completed' && o.refundStatus!=='pending' && !isReviewed(o)}).length;
+  var reviewed=list.filter(isReviewed).length;
+  var tabs=[['all','全部',list.length],['pending_pay','待付款',cnt('pending_pay')],['paid','待发货',cnt('paid')],['shipped','待收货',cnt('shipped')],['completed','待评价',pendingReview],['reviewed','已评价',reviewed]];
   var html='<div class="tabbar">';
   tabs.forEach(function(tb){
     html+='<button class="tab'+(S.meTab===tb[0]?' on':'')+'" onclick="setMeTab(\''+tb[0]+'\')">'+tb[1]+(tb[2]>0?'<span class="cnt">'+tb[2]+'</span>':'')+'</button>';
@@ -1650,14 +1654,15 @@ function meTabHtml(){
 }
 function meOrdersByTab(){
   var t=S.meTab, list=S.myOrders||[];
-  if(t==='after_sale') return list.filter(function(o){return o.refundStatus==='pending'||o.refundStatus==='approved'||o.refundStatus==='rejected'||o.status==='refunded'});
+  function isReviewed(o){ return !!(o.myReview || S.reviewed[o.orderId]); }
+  if(t==='reviewed') return list.filter(isReviewed);
   if(t==='pending_pay') return list.filter(function(o){return o.status==='pending_pay'});
   if(t==='paid') return list.filter(function(o){return o.status==='paid' && o.refundStatus!=='pending'});
   if(t==='shipped') return list.filter(function(o){return o.status==='shipped' && o.refundStatus!=='pending'});
-  if(t==='completed') return list.filter(function(o){return o.status==='completed' && o.refundStatus!=='pending'});
+  if(t==='completed') return list.filter(function(o){return o.status==='completed' && o.refundStatus!=='pending' && !isReviewed(o)});
   return list;
 }
-function oStLabel(s){ return ({pending_pay:'待付款',paid:'待发货',shipped:'待收货',completed:'已完成',refunded:'已退款',canceled:'已取消',refund_pending:'售后审核中'})[s]||s; }
+function oStLabel(s){ return ({pending_pay:'待付款',paid:'待发货',shipped:'待收货',completed:'待评价',refunded:'已退款',canceled:'已取消',refund_pending:'售后审核中'})[s]||s; }
 function oStColor(s){ return ({pending_pay:'#d97706',paid:'#2563eb',shipped:'#4f46e5',completed:'#059669',refunded:'#dc2626',canceled:'#94a3b8',refund_pending:'#dc2626'})[s]||'#64748b'; }
 function oEffStatus(o){ return (o && o.refundStatus==='pending') ? 'refund_pending' : (o?o.status:''); }
 function oShipTxt(o){
@@ -1684,28 +1689,47 @@ function orderLineImg(l){
   var img=(l&&l.productImage)||'';
   return '<div class="oc-limg">'+(img?'<img src="'+esc(assetUrl(img))+'" onerror="this.parentNode.textContent=\'📦\'">':'📦')+'</div>';
 }
+function returnDetailHtml(o){
+  if(!o || o.refundType!=='return' || (!o.returnAddress && !o.returnMethod)) return '';
+  return '<div style="margin-top:5px;padding-top:5px;border-top:1px dashed rgba(0,0,0,.08);line-height:1.7">'+
+    '<div>📦 寄件方式：'+esc(o.returnMethod||'未填写')+'</div>'+
+    '<div>📍 寄件地址：'+esc(o.returnAddress||'未填写')+'</div></div>';
+}
 function refundBlock(o){
   if(o.refundStatus==='pending'){
     return '<div class="oc-refund">📮 '+(o.refundType==='return'?'退货退款':'仅退款')+'申请审核中'+
-      (o.refundReason?('：'+esc(o.refundReason)):'')+'</div>';
+      (o.refundReason?('：'+esc(o.refundReason)):'')+returnDetailHtml(o)+'</div>';
   }
   if(o.refundStatus==='approved' || o.status==='refunded'){
-    return '<div class="oc-refund ok">✅ 退款已完成'+(o.refundType==='return'?'（退货退款）':'（仅退款）')+'</div>';
+    return '<div class="oc-refund ok">✅ 退款已完成'+(o.refundType==='return'?'（退货退款）':'（仅退款）')+returnDetailHtml(o)+'</div>';
   }
   if(o.refundStatus==='rejected'){
-    return '<div class="oc-refund err">⚠️ 售后未通过'+(o.refundRejectReason?('：'+esc(o.refundRejectReason)):'')+'</div>';
+    return '<div class="oc-refund err">⚠️ 售后未通过'+(o.refundRejectReason?('：'+esc(o.refundRejectReason)):'')+returnDetailHtml(o)+'</div>';
   }
   return '';
 }
+function reviewBlock(o){
+  var r=o&&o.myReview;
+  if(!r) return '';
+  var n=Math.max(0,Math.min(5,Number(r.rating)||0));
+  var stars='★★★★★'.slice(0,n)+'☆☆☆☆☆'.slice(0,5-n);
+  var reply=r.replyContent
+    ? '<div style="margin-top:4px;padding-top:4px;border-top:1px dashed rgba(0,0,0,.08);color:#047857">主播回复：'+esc(r.replyContent)+'</div>'
+    : '';
+  return '<div class="oc-review">'+
+    '<div style="font-weight:600;color:#1d4ed8">✅ 已评价 <span class="stars">'+stars+'</span></div>'+
+    '<div style="margin-top:3px;color:#334155">'+esc(r.content||'')+'</div>'+reply+'</div>';
+}
 function orderCard(o){
   var act='';
+  var reviewed=!!(o.myReview || S.reviewed[o.orderId]);
   var canRefund=(o.status==='paid'||o.status==='shipped'||o.status==='completed')&&o.refundStatus!=='pending'&&o.refundStatus!=='approved'&&o.status!=='refunded';
   if(o.refundStatus==='pending'){
     act='<span style="font-size:11px;color:#dc2626">售后审核中，等待主播处理</span>';
   } else {
     if(o.status==='pending_pay'){ act='<button class="b-red" onclick="goPay(\''+esc(o.orderId)+'\')">立即支付</button><button class="b-ghost" onclick="cancelMy(\''+esc(o.orderId)+'\')">取消订单</button>'; }
     else if(o.status==='shipped'){ act='<button class="b-blue" onclick="confirmMy(\''+esc(o.orderId)+'\')">确认收货</button>'; }
-    else if(o.status==='completed' && !S.reviewed[o.orderId]){ act='<button class="b-blue" onclick="reviewOrder(\''+esc(o.orderId)+'\')">去评价</button>'; }
+    else if(o.status==='completed' && !reviewed){ act='<button class="b-blue" onclick="reviewOrder(\''+esc(o.orderId)+'\')">去评价</button>'; }
     if(canRefund){ act+='<button class="b-ghost" onclick="openRefund(\''+esc(o.orderId)+'\')">申请售后</button>'; }
   }
   var lines=orderLines(o);
@@ -1735,13 +1759,16 @@ function orderCard(o){
     ? '<div class="oc-addr">📍 '+esc(o.receiverName||'')+
       (o.receiverPhone?(' · '+esc(o.receiverPhone)):'')+(o.receiverAddress?('<br>'+esc(o.receiverAddress)):'')+'</div>'
     : '';
+  var st=oEffStatus(o), stLabel=oStLabel(st), stColor=oStColor(st);
+  if(o.status==='completed' && reviewed){ stLabel='已评价'; stColor='#059669'; }
   return '<div class="oc">'+
     '<div class="oc-hd">'+
       '<span class="oc-no">单号 '+esc(o.orderNo||o.orderId)+' · '+orderQty(o)+' 件</span>'+
-      '<span class="oc-status" style="color:'+oStColor(oEffStatus(o))+'">'+oStLabel(oEffStatus(o))+'</span>'+
+      '<span class="oc-status" style="color:'+stColor+'">'+stLabel+'</span>'+
     '</div>'+
     linesHtml+
     refundBlock(o)+
+    reviewBlock(o)+
     addr+
     sumHtml+
     '<div class="oc-meta">下单 '+fmtDT(o.createTime)+(oShipTxt(o)?'<br>'+oShipTxt(o):'')+'</div>'+
@@ -1752,7 +1779,7 @@ function meListHtml(){
   if(!S.myOrdersLoaded) return '<div class="oc-empty">订单加载中…</div>';
   var list=meOrdersByTab();
   if(!list.length){
-    var tips={all:'还没有订单，去直播间逛逛吧 🛒',pending_pay:'暂无待付款订单',paid:'暂无待发货订单',shipped:'暂无待收货订单',completed:'暂无已完成订单',after_sale:'暂无售后订单'};
+    var tips={all:'还没有订单，去直播间逛逛吧 🛒',pending_pay:'暂无待付款订单',paid:'暂无待发货订单',shipped:'暂无待收货订单',completed:'暂无待评价订单',reviewed:'暂无已评价订单'};
     return '<div class="oc-empty">'+(tips[S.meTab]||'暂无订单')+'</div>';
   }
   return list.slice(0,60).map(orderCard).join('')+
@@ -2410,6 +2437,8 @@ function pickRefundType(t){
     var on=btns[i].getAttribute('data-type')===S.refundType;
     btns[i].classList.toggle('on', on);
   }
+  var box=$('rfReturnBox');
+  if(box) box.style.display=(S.refundType==='return')?'block':'none';
 }
 function openRefund(orderId){
   var o=findMyOrder(orderId);
@@ -2426,6 +2455,9 @@ function openRefund(orderId){
       (l.skuSpec?'<div class="oc-spec">规格：'+esc(l.skuSpec)+'</div>':'')+
       '<div class="oc-lmeta">×'+l.quantity+'</div></div></div>';
   }).join('');
+  // 寄件地址默认带出订单收货人/电话/地址，观众可改成实际寄出地址
+  var defaultReturnAddr=[o.receiverName,o.receiverPhone,o.receiverAddress]
+    .filter(function(x){return !!x;}).join(' ');
   $('sheet').innerHTML=
     '<div class="hd"><b>申请售后</b><button class="x" onclick="closeRefund()">✕</button></div>'+
     linesHtml+
@@ -2434,6 +2466,16 @@ function openRefund(orderId){
     '<div class="refund-types">'+
       refundTypeBtn('refund','仅退款','未收到货 / 不想要了，只退钱')+
       refundTypeBtn('return','退货退款','已收到货，需要寄回商品')+
+    '</div>'+
+    '<div id="rfReturnBox" style="display:'+(S.refundType==='return'?'block':'none')+';background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px;margin:8px 0 4px">'+
+      '<div class="pe-lbl" style="margin-top:0">寄件地址</div>'+
+      '<textarea class="rev-ta" id="rfReturnAddr" maxlength="200" style="min-height:52px" placeholder="请填写寄件地址（含联系人、电话）">'+esc(defaultReturnAddr)+'</textarea>'+
+      '<div class="pe-lbl">寄件方式</div>'+
+      '<select id="rfReturnMethod" style="width:100%;border:1px solid #e2e8f0;border-radius:10px;padding:9px 10px;font-size:13px;background:#fff;color:#0f172a">'+
+        '<option value="上门取件">上门取件（快递员上门）</option>'+
+        '<option value="驿站自寄">驿站 / 快递柜自寄</option>'+
+        '<option value="自行寄回">自行联系快递寄回</option>'+
+      '</select>'+
     '</div>'+
     '<div class="pe-lbl">售后原因</div>'+
     '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+
@@ -2461,9 +2503,17 @@ function submitRefund(){
   if(!o){ toast('订单不存在或已变化','err'); closeRefund(); return; }
   var reason=((($('rfReason')||{}).value)||'').trim();
   if(!reason){ toast('请填写售后原因','err'); return; }
+  var returnAddress='', returnMethod='';
+  if((S.refundType||'refund')==='return'){
+    returnAddress=((($('rfReturnAddr')||{}).value)||'').trim();
+    returnMethod=((($('rfReturnMethod')||{}).value)||'').trim();
+    if(!returnAddress){ toast('请填写退货寄件地址','err'); return; }
+    if(!returnMethod){ toast('请选择退货寄件方式','err'); return; }
+  }
   var btn=$('rfBtn'); if(btn){ btn.disabled=true; btn.textContent='提交中…'; }
   wsSend('request_refund',{orderId:o.orderId, reason:reason.slice(0,100),
-    refundType:S.refundType||'refund'});
+    refundType:S.refundType||'refund',
+    returnAddress:returnAddress.slice(0,200), returnMethod:returnMethod});
 }
 function onRequestRefundResult(d){
   var btn=$('rfBtn'); if(btn){ btn.disabled=false; btn.textContent='提交售后申请'; }
@@ -2472,7 +2522,7 @@ function onRequestRefundResult(d){
   S.refundOrderId='';
   closeSheet();
   toast(d.message||'售后申请已提交，等待主播审核','ok');
-  openMe('after_sale');
+  openMe('all');
 }
 
 // ============================================================
@@ -2542,11 +2592,22 @@ function submitReview(o){
 }
 function onReviewResult(d){
   if(d.success){
-    var o=S.reviewCtx; if(o && o.orderId) S.reviewed[o.orderId]=1;
+    var o=S.reviewCtx;
+    if(o && o.orderId){
+      S.reviewed[o.orderId]=1;
+      if(d.review){
+        o.myReview={
+          reviewId:d.review.reviewId, rating:d.review.rating, content:d.review.content,
+          timestamp:d.review.timestamp, replyContent:d.review.replyContent||'',
+          replyTime:d.review.replyTime||''
+        };
+        upsertMyOrder(o);
+      }
+    }
     S.sheetMode='none'; closeSheet();
     toast('评价成功，感谢分享！','ok');
     fetchProducts();
-    openMe('completed');
+    openMe('reviewed');
   } else {
     toast(d.message||'评价失败','err');
     var btn=$('rvBtn'); if(btn){ btn.disabled=false; btn.textContent='提交评价'; }

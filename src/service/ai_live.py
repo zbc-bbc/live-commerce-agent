@@ -36,16 +36,60 @@ _ANCHOR_PERSONA = (
 _SCRIPT_PROMPT_HINTS = {t["key"]: t["prompt_hint"] for t in LIVE_SCRIPT_TYPES}
 
 
-def _build_product_context(product: ProductItem | None) -> str:
-    """把商品对象压缩成 LLM 可读的上下文文本。"""
+def _product_brief(product: ProductItem) -> str:
+    """挂载商品列表里的单行摘要：名称、价格、一个卖点。"""
+    point = ""
+    if product.sellingPoints:
+        point = product.sellingPoints[0]
+    elif product.tags:
+        point = "、".join(product.tags[:2])
+    elif product.description:
+        point = product.description[:24]
+    brief = f"{product.name}｜¥{product.price:.0f}（日常价 ¥{product.originalPrice:.0f}）"
+    return brief + (f"｜{point}" if point else "")
+
+
+def _build_product_context(
+    product: ProductItem | None,
+    mounted_products: list[ProductItem] | None = None,
+) -> str:
+    """把「已挂载商品 + 当前重点商品」压缩成 LLM 可读的上下文。
+
+    只允许模型看到直播间真正挂载的商品，避免它编造未上架的商品和价格。
+    """
+    if mounted_products is None:
+        # 调用方没提供挂载清单（如弹幕回复）：沿用旧的单商品上下文
+        if product is None:
+            return "（当前没有正在讲解的具体商品，可讲直播间的整体氛围与福利预告）"
+        mounted: list[ProductItem] = []
+    else:
+        mounted = mounted_products
+
+    lines: list[str] = []
+    if mounted:
+        lines.append("当前直播间已挂载商品（话术只能提及以下商品，不得提及其他商品）：")
+        shown = mounted[:12]
+        for i, p in enumerate(shown, 1):
+            mark = "（本次重点）" if product is not None and p.productId == product.productId else ""
+            lines.append(f"{i}. {_product_brief(p)}{mark}")
+        if len(mounted) > len(shown):
+            lines.append(f"……另有 {len(mounted) - len(shown)} 件已挂载商品未展开。")
+    elif mounted_products is not None:
+        lines.append("当前直播间没有挂载任何商品：不要提及具体商品、价格或库存，只做暖场/互动。")
+
     if product is None:
-        return "（当前没有正在讲解的具体商品，可讲直播间的整体氛围与福利预告）"
-    lines = [
-        f"商品名称：{product.name}",
+        if mounted:
+            lines.append("")
+            lines.append("本次不指定单一商品，请围绕上面已挂载的商品做整体表达。")
+        return "\n".join(lines)
+
+    lines.extend([
+        "",
+        f"本次重点讲解商品：{product.name}",
         f"品类：{product.category or '未分类'}",
         f"价格：¥{product.price:.2f}（原价 ¥{product.originalPrice:.2f}）",
         f"库存：{product.stock} 件 | 累计销量：{product.soldCount} 件 | 评分：{product.rating}",
-    ]
+    ])
     if product.sellingPoints:
         lines.append("核心卖点：" + "；".join(product.sellingPoints))
     elif product.tags:
@@ -83,15 +127,26 @@ async def generate_script(
     product: ProductItem | None,
     script_type: str,
     current_stage: str = "",
+    mounted_products: list[ProductItem] | None = None,
 ) -> str | None:
-    """生成主播口播话术。失败返回 None，由调用方兜底。"""
+    """生成主播口播话术。失败返回 None，由调用方兜底。
+
+    话术必须与直播间**实际挂载的商品**一致：提示词里只给出已挂载商品，
+    并明确禁止提及未挂载商品、虚构价格或库存。
+    """
     hint = _SCRIPT_PROMPT_HINTS.get(script_type, _SCRIPT_PROMPT_HINTS.get("product_intro", ""))
     stage_line = f"当前直播阶段：{current_stage or '未指定'}"
-    system = _ANCHOR_PERSONA + " 本次你的任务是：写一段" + hint + "。"
+    system = (
+        _ANCHOR_PERSONA
+        + " 本次你的任务是：写一段" + hint + "。"
+        " 你只能围绕提供的「已挂载商品」写，绝对不要提到未挂载、未上架的商品，"
+        "也不要编造未给出的价格、库存或优惠。"
+    )
     user = (
-        f"请根据下面的商品信息，写一段可以直接照着念的带货口播话术（{stage_line}）：\n\n"
-        + _build_product_context(product)
-        + "\n\n要求：口语化、有感染力、自然穿插引导（关注/点赞/下单），不要罗列编号。"
+        f"请根据下面的直播间商品信息，写一段可以直接照着念的带货口播话术（{stage_line}）：\n\n"
+        + _build_product_context(product, mounted_products)
+        + "\n\n硬性要求：只能提及上面列出的已挂载商品及其真实信息；"
+        "口语化、有感染力、自然穿插引导（关注/点赞/下单），不要罗列编号。"
     )
     return await _llm_chat(system, user)
 

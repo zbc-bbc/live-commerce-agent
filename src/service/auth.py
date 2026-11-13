@@ -183,8 +183,7 @@ def _verify_jwt(token: str) -> Optional[dict[str, Any]]:
 def create_host_token(user: dict[str, Any]) -> str:
     """签发主播（运营台）JWT，有效期 7 天。
 
-    载荷里同时保留 ``role="host"`` 与 ``account_role``（auth.db 的 admin/user），
-    前者是前端/WS 用于角色隔离的稳定角色，后者仅描述运营台内部权限。
+    载荷只用 ``role`` / ``scope`` 区分主播与观众；运营台内部不再区分主播/运营角色。
     """
     now = time.time()
     return _create_jwt({
@@ -192,7 +191,6 @@ def create_host_token(user: dict[str, Any]) -> str:
         "user_id": user["id"],          # 整数：auth.get_user_from_token 依赖它
         "username": user["username"],
         "role": HOST_TOKEN_SCOPE,
-        "account_role": user.get("role", "user"),
         "scope": HOST_TOKEN_SCOPE,      # 双角色隔离的关键声明
         "token_type": "access",
         "exp": now + HOST_TOKEN_EXPIRE_SECONDS,

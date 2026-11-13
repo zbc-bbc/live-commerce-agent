@@ -17,7 +17,7 @@ from data.live_commerce import llm_endpoint_store
 from data.live_commerce.data_manager import get_data_manager, is_question_like
 from schema.live_commerce_schema import (
     LIVE_SCRIPT_TYPES, DanmakuItem, LiveCommerceSettings, LiveStatsData, OrderItem,
-    PresetPhraseItem, PrivateMessageItem, ProductItem, QuickReplyItem, ReviewItem,
+    PresetPhraseItem, PrivateMessageItem, ProductItem, ReviewItem,
     SmartAlert, UserSessionItem, WSMessage,
 )
 from service import ai_endpoints
@@ -59,21 +59,6 @@ _VIEWER_ALLOWED: frozenset = frozenset({
     # 观众 → 主播私信。方向与 send_viewer_msg（主播 → 观众）相反，
     # 是观众的**主动**发言，所以必须在白名单里；身份仍走 _require_viewer 二次校验。
     "send_host_msg",
-})
-
-# 运营台内部角色：主播（auth.db admin）拥有全部权限，运营（auth.db user）只做日常运营。
-# 这一组是**运营角色不能调用**的消息类型（fail-closed：未列入的仍可调用）。
-_OPERATOR_FORBIDDEN: frozenset = frozenset({
-    # 直播开停与阶段属于主播决策
-    "start_live", "pause_live", "resume_live", "end_live", "switch_stage",
-    # 系统级配置 / 大模型密钥 / 主播资料
-    "save_settings", "update_settings", "update_host_profile",
-    "save_llm_endpoint", "delete_llm_endpoint", "set_active_llm_endpoint",
-    "test_llm_endpoint",
-    # 删除商品与退款终审是高危操作
-    "delete_product", "review_refund", "batch_refund",
-    # 账号角色管理仅主播可操作
-    "set_account_role",
 })
 
 # 单个连接两次充值之间的最小间隔（秒），防止前端连点重复入账
@@ -195,8 +180,6 @@ class LiveCommerceWebSocketManager:
         self._connections: list[WebSocket] = []
         # 连接角色：host(运营台) / viewer(观众端，含游客)。**由鉴权决定**，见 connect()
         self._roles: dict[WebSocket, str] = {}
-        # 运营台内部角色：admin=主播 / user=运营（观众连接为空）
-        self._account_roles: dict[WebSocket, str] = {}
         self._account_names: dict[WebSocket, str] = {}
         # 已鉴权观众：连接 → userId，以及 userId → 其全部连接
         # （同一账号可开多个标签页，互不踢下线；在线人数按去重 userId 计）
@@ -248,8 +231,8 @@ class LiveCommerceWebSocketManager:
 
     async def _resolve_identity(
         self, websocket: WebSocket
-    ) -> Optional[tuple[str, Optional[str], str, str]]:
-        """握手阶段校验 JWT，返回 ``(role, viewer_user_id, account_role, username)`` 或 None（拒绝连接）。
+    ) -> Optional[tuple[str, Optional[str], str]]:
+        """握手阶段校验 JWT，返回 ``(role, viewer_user_id, username)`` 或 None（拒绝连接）。
 
         角色由**凭据**决定，而不是客户端自称：
           * 有效主播 JWT（scope=host）          → host
@@ -267,7 +250,7 @@ class LiveCommerceWebSocketManager:
             if role_hint == "host":
                 logger.warning("WebSocket 自称 host 但未携带 JWT，拒绝连接")
                 return None
-            return ("viewer", None, "", "")
+            return ("viewer", None, "")
 
         # 1) 主播 token
         try:
@@ -278,9 +261,7 @@ class LiveCommerceWebSocketManager:
         if host_claims:
             user = await ops_auth.get_user_by_id(host_claims["user_id"])
             if user and user.get("is_active"):
-                # 老 token 没有 account_role 字段时按主播处理，避免升级后被误锁
-                account_role = "user" if host_claims.get("account_role") == "user" else "admin"
-                return ("host", None, account_role, host_claims.get("username") or "")
+                return ("host", None, host_claims.get("username") or "")
             logger.warning("WebSocket 主播 token 对应账号不存在或已停用，拒绝连接")
             return None
 
@@ -300,7 +281,7 @@ class LiveCommerceWebSocketManager:
         self._data_manager.get_or_create_viewer(
             user_id, row.get("userName") or "观众", row.get("avatar") or ""
         )
-        return ("viewer", user_id, "", "")
+        return ("viewer", user_id, "")
 
     async def connect(self, websocket: WebSocket) -> bool:
         """接受WebSocket连接（握手前先校验 JWT / 角色）。校验失败返回 False。"""
@@ -310,12 +291,11 @@ class LiveCommerceWebSocketManager:
             await websocket.close(code=1008, reason="invalid or expired token")
             return False
 
-        role, bound_user_id, account_role, username = identity
+        role, bound_user_id, username = identity
         await websocket.accept()
         self._connections.append(websocket)
         self._roles[websocket] = role
-        if account_role:
-            self._account_roles[websocket] = account_role
+        if username:
             self._account_names[websocket] = username
         # 为每个连接建立独立的发送队列与发送任务，确保 socket 只被一个 task 串行写入
         q: "asyncio.Queue[dict | None]" = asyncio.Queue()
@@ -353,7 +333,6 @@ class LiveCommerceWebSocketManager:
         if websocket in self._connections:
             self._connections.remove(websocket)
         self._roles.pop(websocket, None)
-        self._account_roles.pop(websocket, None)
         self._account_names.pop(websocket, None)
         self._last_recharge.pop(websocket, None)
         self._last_pm.pop(websocket, None)
@@ -378,7 +357,6 @@ class LiveCommerceWebSocketManager:
         if websocket in self._connections:
             self._connections.remove(websocket)
         self._roles.pop(websocket, None)
-        self._account_roles.pop(websocket, None)
         self._account_names.pop(websocket, None)
         self._last_recharge.pop(websocket, None)
         self._last_pm.pop(websocket, None)
@@ -428,8 +406,27 @@ class LiveCommerceWebSocketManager:
         """把去重后的真实在线观众数告知 DataManager，由其重算并广播在线人数。"""
         self._data_manager.set_online_viewers(len(self._user_conns))
 
+    def _viewer_orders_payload(self, orders, user_id: str) -> list[dict]:
+        """观众订单附带本人评价：前端据此显示「已评价」和评价内容。"""
+        dm = self._data_manager
+        payload = []
+        for o in orders:
+            item = o.model_dump()
+            review = dm.get_order_review(o.orderId, user_id)
+            if review is not None:
+                item["myReview"] = {
+                    "reviewId": review.reviewId,
+                    "rating": review.rating,
+                    "content": review.content,
+                    "timestamp": review.timestamp,
+                    "replyContent": review.replyContent,
+                    "replyTime": review.replyTime,
+                }
+            payload.append(item)
+        return payload
+
     def _operator_name(self, websocket: WebSocket) -> str:
-        """当前操作人展示名：账号名（无则 host），写进操作日志。"""
+        """当前操作人展示名：账号名（无则 host）。"""
         return (self._account_names.get(websocket) or "").strip() or "host"
 
     async def _require_viewer(self, websocket: WebSocket, action: str) -> Optional[str]:
@@ -472,9 +469,6 @@ class LiveCommerceWebSocketManager:
                 # role 必须下发：运营台 token 过期后若静默退化成只读观众端会极难排查，
                 # 前端据此弹阻断层并跳登录页
                 "role": role,
-                # 主播端内部角色：admin=主播（全权限）/ user=运营（受限）
-                "accountRole": self._account_roles.get(websocket, "") if role == "host" else "",
-                "accountName": self._account_names.get(websocket, "") if role == "host" else "",
                 # 观众只拿公开字段：totalAIReplies / totalPrivateMessages / totalDanmaku
                 # 属于运营指标，不该随初始状态一起下发。
                 "liveStatus": live_status if role == "host" else _viewer_safe_live_status(live_status),
@@ -768,17 +762,6 @@ class LiveCommerceWebSocketManager:
                 })
                 return
 
-            # 运营角色闸门：主播(admin)全量，运营(user)不能执行开停播、退款终审、
-            # 删除商品、大模型配置、角色管理等高风险动作。
-            if (msg_type in _OPERATOR_FORBIDDEN
-                    and self._account_roles.get(websocket, "admin") != "admin"):
-                logger.warning("运营角色尝试调用主播专属消息 %s，已拒绝", msg_type)
-                await self._send(websocket, "error", {
-                    "code": "role_forbidden",
-                    "message": "当前为运营角色，无权执行该操作，请联系主播账号",
-                })
-                return
-
             if msg_type == "start_live":
                 result = dm.start_live()
                 await self._send(websocket, "start_live_result", result)
@@ -892,20 +875,42 @@ class LiveCommerceWebSocketManager:
                 })
 
             elif msg_type == "generate_script":
-                product_id = msg_data.get("productId", "")
+                requested = msg_data.get("productId", None)
                 script_type = msg_data.get("scriptType", "product_intro")
                 stage = msg_data.get("stage", "")
-                product = dm.get_product(product_id) if product_id else dm.get_current_product()
+                mounted = dm.get_mounted_products()
+                mounted_ids = {p.productId for p in mounted}
+                product = None
+                product_id = str(requested or "")
+                if product_id:
+                    # 只允许为已挂载商品生成话术，避免口播和直播间货架对不上
+                    if product_id not in mounted_ids:
+                        await self._send(websocket, "generate_script_result", {
+                            "success": False,
+                            "message": "该商品未挂载到直播间，请先挂载后再生成话术",
+                            "script": "",
+                            "productId": product_id,
+                            "productName": "",
+                            "scriptType": script_type,
+                        })
+                        return
+                    product = dm.get_product(product_id)
+                elif requested is None:
+                    # 兼容不传 productId 的旧客户端：默认跟随当前讲解商品
+                    current = dm.get_current_product()
+                    if current is not None and current.productId in mounted_ids:
+                        product = current
+                # requested == ""：前端明确选择「直播整体」，只给挂载清单，不聚焦单品
                 script = None
                 try:
                     from service.ai_live import generate_script
-                    script = await generate_script(product, script_type, stage)
+                    script = await generate_script(product, script_type, stage, mounted)
                 except Exception as e:
                     logger.warning("话术生成异常: %s", e)
                     script = None
                 # AI 失败时给一段内置兜底话术，保证功能始终可用
                 if not script:
-                    script = _fallback_script(product, script_type)
+                    script = _fallback_script(product, script_type, mounted)
                 if product:
                     dm.record_script(product.productId, product.name, script_type, script)
                 await self._send(websocket, "generate_script_result", {
@@ -1120,21 +1125,6 @@ class LiveCommerceWebSocketManager:
                 preset_id = msg_data.get("presetId", "")
                 dm.delete_preset(preset_id)
                 await self._send(websocket, "delete_preset_result", {"success": True})
-
-            elif msg_type == "add_quick_reply":
-                qr = QuickReplyItem(**msg_data.get("quickReply", {}))
-                dm.add_quick_reply(qr)
-                await self._send(websocket, "add_quick_reply_result", {"success": True})
-
-            elif msg_type == "delete_quick_reply":
-                qr_id = msg_data.get("quickReplyId", "")
-                dm.delete_quick_reply(qr_id)
-                await self._send(websocket, "delete_quick_reply_result", {"success": True})
-
-            elif msg_type == "get_quick_replies":
-                await self._send(websocket, "get_quick_replies_result", {
-                    "replies": [q.model_dump() for q in dm.get_quick_replies()],
-                })
 
             elif msg_type == "import_high_freq":
                 questions = msg_data.get("questions", [])
@@ -1380,39 +1370,13 @@ class LiveCommerceWebSocketManager:
                 })
 
             elif msg_type == "get_orders":
-                # scope 默认 real：主播默认只看到真实订单；AI 模拟测试订单必须显式
-                # 传 scope=mock 才会下发，避免两类订单在默认视图里混在一起。
                 status = msg_data.get("status", "")
                 limit = int(msg_data.get("limit", 50))
-                scope = msg_data.get("scope", "real")
-                if scope not in ("real", "mock", "all"):
-                    scope = "real"
                 product_id = str(msg_data.get("productId") or "")
-                orders = dm.get_orders(status, limit, scope=scope, product_id=product_id)
+                orders = dm.get_orders(status, limit, product_id=product_id)
                 await self._send(websocket, "get_orders_result", {
-                    "scope": scope,
                     "productId": product_id,
                     "orders": [o.model_dump() for o in orders],
-                })
-
-            elif msg_type == "generate_ai_test_orders":
-                # 仅运营台可达（不在观众白名单）：生成隔离的 AI 模拟测试订单。
-                # 这些订单 source=ai_test，不扣库存、不计入任何经营统计。
-                try:
-                    count = max(1, min(20, int(msg_data.get("count", 3) or 3)))
-                except (TypeError, ValueError):
-                    count = 3
-                product_id = msg_data.get("productId", "") or ""
-                created = []
-                for _ in range(count):
-                    order = dm.create_ai_test_order(product_id=product_id)
-                    if order is not None:
-                        created.append(order.model_dump())
-                await self._send(websocket, "generate_ai_test_orders_result", {
-                    "success": bool(created),
-                    "created": created,
-                    "message": (f"已生成 {len(created)} 笔模拟测试订单"
-                                if created else "生成失败：没有可用商品"),
                 })
 
             elif msg_type == "review_refund":
@@ -1487,14 +1451,6 @@ class LiveCommerceWebSocketManager:
             elif msg_type == "update_order_status":
                 order_id = msg_data.get("orderId", "")
                 status = msg_data.get("status", "")
-                # 退款是资金操作：运营角色只能发货/取消，退款须主播账号执行
-                if (status == "refunded"
-                        and self._account_roles.get(websocket, "admin") != "admin"):
-                    await self._send(websocket, "error", {
-                        "code": "role_forbidden",
-                        "message": "当前为运营角色，无权执行退款，请联系主播账号",
-                    })
-                    return
                 order = dm.update_order_status(order_id, status)
                 await self._send(websocket, "update_order_status_result", {
                     "success": order is not None,
@@ -1518,12 +1474,7 @@ class LiveCommerceWebSocketManager:
                 ))
 
             elif msg_type == "export_orders":
-                scope = msg_data.get("scope", "real")
-                if scope not in ("real", "mock", "all"):
-                    scope = "real"
-                csv_text = dm.export_orders_csv(scope, msg_data.get("status", "") or "")
-                dm.log_operation("export_orders", f"scope={scope}",
-                                 "导出订单表格", operator=self._operator_name(websocket))
+                csv_text = dm.export_orders_csv(msg_data.get("status", "") or "")
                 await self._send(websocket, "export_orders_result", {
                     "success": True,
                     "filename": f"orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
@@ -1539,20 +1490,27 @@ class LiveCommerceWebSocketManager:
                                  dm.get_refund_reason_summary())
 
             elif msg_type == "remind_pending_pay":
+                # 主播手动催付：默认对全部待付款订单立即催付；可传 orderId 只催单笔。
                 try:
                     minutes = int(msg_data.get("timeoutMinutes", 0) or 0)
                 except (TypeError, ValueError):
                     minutes = 0
-                kwargs = {"operator": self._operator_name(websocket)}
+                order_id = str(msg_data.get("orderId") or "")
+                kwargs = {"operator": self._operator_name(websocket), "order_id": order_id}
                 if minutes > 0:
                     kwargs["timeout_minutes"] = minutes
                 sent = dm.remind_pending_pay(**kwargs)
+                if sent:
+                    message = f"已向 {len(sent)} 笔待付款订单发送 AI 催付私信"
+                elif order_id:
+                    message = "该订单当前不可催付（可能已支付或已取消）"
+                else:
+                    message = "暂无待付款订单"
                 await self._send(websocket, "remind_pending_pay_result", {
                     "success": True,
                     "count": len(sent),
                     "orders": sent,
-                    "message": (f"已向 {len(sent)} 笔超时订单发送 AI 催付私信"
-                                if sent else "暂无需要催付的超时订单"),
+                    "message": message,
                 })
 
             # ── 商品标签分组 / 历史售价 ──────────────────────────────
@@ -1568,23 +1526,7 @@ class LiveCommerceWebSocketManager:
                     "history": dm.get_price_history(product_id),
                 })
 
-            # ── 弹幕重点标记 / 敏感词日志 / AI 知识库 ─────────────────
-            elif msg_type == "mark_danmaku":
-                result = dm.mark_danmaku(
-                    msg_data.get("danmakuId", ""),
-                    bool(msg_data.get("marked", True)),
-                    operator=self._operator_name(websocket),
-                )
-                await self._send(websocket, "mark_danmaku_result", result)
-
-            elif msg_type == "get_marked_danmaku":
-                await self._send(websocket, "get_marked_danmaku_result", {
-                    "items": dm.get_marked_danmaku(
-                        msg_data.get("sessionId", "") or "",
-                        int(msg_data.get("limit", 100) or 100),
-                    ),
-                })
-
+            # ── 敏感词日志 / AI 知识库 ──────────────────────────────
             elif msg_type == "get_sensitive_logs":
                 await self._send(websocket, "get_sensitive_logs_result", {
                     "logs": dm.get_sensitive_logs(
@@ -1678,14 +1620,7 @@ class LiveCommerceWebSocketManager:
                 await self._send(websocket, "review_pain_points_result",
                                  dm.get_review_pain_points())
 
-            # ── 私信：批量发送 / 未读汇总 ─────────────────────────────
-            elif msg_type == "send_batch_private":
-                ids = [str(x) for x in (msg_data.get("userIds") or []) if str(x)]
-                await self._send(websocket, "send_batch_private_result",
-                                 dm.send_batch_private(
-                                     ids, msg_data.get("content", "") or "",
-                                     operator=self._operator_name(websocket)))
-
+            # ── 私信：未读汇总 ──────────────────────────────────────
             elif msg_type == "get_unread_summary":
                 await self._send(websocket, "get_unread_summary_result",
                                  dm.get_unread_summary())
@@ -1695,50 +1630,6 @@ class LiveCommerceWebSocketManager:
                 ids = [str(x) for x in (msg_data.get("sessionIds") or []) if str(x)]
                 await self._send(websocket, "compare_sessions_result",
                                  dm.compare_sessions(ids))
-
-            # ── 系统设置：操作日志 / 账号角色 ─────────────────────────
-            elif msg_type == "get_operation_logs":
-                await self._send(websocket, "get_operation_logs_result", {
-                    "logs": dm.get_operation_logs(
-                        int(msg_data.get("limit", 200) or 200),
-                        msg_data.get("action", "") or "",
-                    ),
-                })
-
-            elif msg_type == "get_accounts":
-                listing = await ops_auth.list_users(
-                    int(msg_data.get("page", 1) or 1), 50)
-                await self._send(websocket, "get_accounts_result", {
-                    **listing,
-                    "currentAccount": self._account_names.get(websocket, ""),
-                    "currentRole": self._account_roles.get(websocket, "admin"),
-                })
-
-            elif msg_type == "set_account_role":
-                try:
-                    target_id = int(msg_data.get("userId") or 0)
-                except (TypeError, ValueError):
-                    target_id = 0
-                new_role = msg_data.get("role", "") or ""
-                if new_role not in ("admin", "user") or target_id <= 0:
-                    await self._send(websocket, "set_account_role_result", {
-                        "success": False, "message": "参数不合法",
-                    })
-                else:
-                    updated = await ops_auth.update_user_role(target_id, new_role)
-                    if updated is not None:
-                        dm.log_operation(
-                            "set_account_role", str(target_id),
-                            f"将账号「{updated.get('username')}」角色设为"
-                            f"{'主播' if new_role == 'admin' else '运营'}",
-                            operator=self._operator_name(websocket),
-                        )
-                    await self._send(websocket, "set_account_role_result", {
-                        "success": updated is not None,
-                        "message": ("已更新为" + ("主播" if new_role == "admin" else "运营"))
-                                   if updated else "账号不存在",
-                        "user": updated,
-                    })
 
             # ========== 观众端 · 账户/购物/订单/评价 ==========
             elif msg_type == "viewer_register":
@@ -1815,7 +1706,7 @@ class LiveCommerceWebSocketManager:
                     "success": True,
                     "token": token,
                     "user": user,
-                    "orders": [o.model_dump() for o in dm.get_user_orders(user_id)],
+                    "orders": self._viewer_orders_payload(dm.get_user_orders(user_id), user_id),
                     "messages": [m.model_dump() for m in dm.get_user_messages(user_id)],
                     "addresses": [a.model_dump() for a in dm.get_addresses(user_id)],
                 })
@@ -2156,6 +2047,8 @@ class LiveCommerceWebSocketManager:
                 order, reason = dm.request_refund(
                     msg_data.get("orderId", ""), user_id, msg_data.get("reason", ""),
                     refund_type=refund_type,
+                    return_address=msg_data.get("returnAddress", "") or "",
+                    return_method=msg_data.get("returnMethod", "") or "",
                 )
                 await self._send(websocket, "request_refund_result", {
                     "success": order is not None,
@@ -2194,7 +2087,7 @@ class LiveCommerceWebSocketManager:
                 status = msg_data.get("status", "") or ""
                 orders = dm.get_user_orders(user_id, status)
                 await self._send(websocket, "get_user_orders_result", {
-                    "orders": [o.model_dump() for o in orders],
+                    "orders": self._viewer_orders_payload(orders, user_id),
                 })
 
             elif msg_type == "get_my_messages":
@@ -2356,9 +2249,29 @@ class LiveCommerceWebSocketManager:
 # ============================================================
 # 话术兜底（AI 不可用时的内置模板，保证生成功能始终可用）
 # ============================================================
-def _fallback_script(product: ProductItem | None, script_type: str) -> str:
-    """根据话术类型生成一段内置带货口播（AI 失败时兜底）。"""
+def _fallback_script(
+    product: ProductItem | None,
+    script_type: str,
+    mounted_products: list[ProductItem] | None = None,
+) -> str:
+    """根据话术类型生成一段内置带货口播（AI 失败时兜底）。
+
+    没有指定单品时也只提「已挂载」的商品，绝不编造未挂载的货。
+    """
     if product is None:
+        mounted = mounted_products or []
+        if mounted:
+            names = "、".join(f"【{p.name}】" for p in mounted[:3])
+            suffix = f"等 {len(mounted)} 款好物" if len(mounted) > 3 else ""
+            if script_type == "closing":
+                return (
+                    f"今天的{names}{suffix}就讲到这里，感谢家人们的陪伴！"
+                    "还没点关注的记得点一下，下一场继续给大家带来更多好物和福利，我们不见不散！"
+                )
+            return (
+                f"哈喽直播间的家人们欢迎进来！今天已经挂载了{names}{suffix}，"
+                "福利都在小黄车里，先点点关注不迷路，我挨个给大家详细讲～"
+            )
         return (
             "哈喽直播间的家人们欢迎进来！今天这场直播福利超多，"
             "等下的商品保证让你们心动，先点点关注不迷路，我们马上开始～"

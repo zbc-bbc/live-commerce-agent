@@ -19,8 +19,8 @@ from schema.live_commerce_schema import (
     COUPON_RULES, LIVE_STAGES, ORDER_CHANNELS, ORDER_CHANNEL_LABELS, ORDER_STATUS_LABELS,
     REFUND_REASON_CATEGORIES, STAGE_STRATEGIES, AddressItem, BlacklistItem, CartLineItem,
     DanmakuItem, KnowledgeBaseItem, LiveCommerceSettings, LiveSessionState, LiveStatsData,
-    OperationLogItem, OrderItem, OrderLineItem, PresetPhraseItem, PriceHistoryItem,
-    PrivateMessageItem, ProductItem, QuickReplyItem, ReviewItem, SensitiveLogItem, SkuItem,
+    OrderItem, OrderLineItem, PresetPhraseItem, PriceHistoryItem,
+    PrivateMessageItem, ProductItem, ReviewItem, SensitiveLogItem, SkuItem,
     SmartAlert, StockLogItem, UserSessionItem, ViewerAccount, ViewerVisitItem,
     VirtualDanmakuSettings, WSMessage, best_coupon, classify_refund_reason,
 )
@@ -39,7 +39,6 @@ PRESETS_FILE = os.path.join(DATA_DIR, "presets_data.json")
 REVIEWS_FILE = os.path.join(DATA_DIR, "reviews_data.json")
 SESSIONS_FILE = os.path.join(DATA_DIR, "sessions_data.json")
 PRIVATE_MSGS_FILE = os.path.join(DATA_DIR, "private_msgs_data.json")
-QUICK_REPLIES_FILE = os.path.join(DATA_DIR, "quick_replies_data.json")
 ORDERS_FILE = os.path.join(DATA_DIR, "orders_data.json")
 VIEWERS_FILE = os.path.join(DATA_DIR, "viewers_data.json")
 # 购物车 / 库存流水 / 加购事件（商品订单迭代新增；均在 data/ 目录下，已被 .gitignore 忽略）
@@ -52,12 +51,10 @@ ORDER_PAY_TIMEOUT_MINUTES = 30
 # ── 全模块迭代新增的独立数据文件 ──
 KNOWLEDGE_FILE = os.path.join(DATA_DIR, "knowledge_base.json")
 SENSITIVE_LOGS_FILE = os.path.join(DATA_DIR, "sensitive_logs.json")
-OPERATION_LOGS_FILE = os.path.join(DATA_DIR, "operation_logs.json")
 PRICE_HISTORY_FILE = os.path.join(DATA_DIR, "price_history.json")
 VIEWER_VISITS_FILE = os.path.join(DATA_DIR, "viewer_visits.json")
 KNOWLEDGE_MAX = 500
 SENSITIVE_LOGS_MAX = 1000
-OPERATION_LOGS_MAX = 2000
 PRICE_HISTORY_MAX = 2000
 VIEWER_VISITS_MAX = 5000
 STAGE_LABELS = {s["key"]: s["label"] for s in LIVE_STAGES}
@@ -440,7 +437,6 @@ class LiveCommerceDataManager:
         self.reviews: list[ReviewItem] = []
         self._review_counter = 0
         # 快捷回复
-        self.quick_replies: dict[str, QuickReplyItem] = {}
         self._qr_counter = 0
         # 商单/订单
         self.orders: dict[str, OrderItem] = {}
@@ -488,17 +484,14 @@ class LiveCommerceDataManager:
         # ── 全模块迭代新增的独立集合 ──
         # AI 问答知识库（主播维护的标准问答，AI 回复优先命中）
         self.knowledge_base: list[KnowledgeBaseItem] = []
-        # 敏感词拦截日志 / 运营台操作日志 / 商品历史售价 / 观众进场离场记录
+        # 敏感词拦截日志 / 商品历史售价 / 观众进场离场记录
         self.sensitive_logs: list[SensitiveLogItem] = []
-        self.operation_logs: list[OperationLogItem] = []
         self.price_history: list[PriceHistoryItem] = []
         self.viewer_visits: list[ViewerVisitItem] = []
         # 观众当前在线连接的进场时间（断开时结算为一条 ViewerVisitItem）
         self._viewer_enter_at: dict[str, str] = {}
         # 观众当前未结算的进场记录：userId -> visitId
         self._viewer_open_visit: dict[str, str] = {}
-        # 已发过超时催付私信的订单（避免反复打扰）
-        self._pay_reminded_orders: set[str] = set()
         # 高频问题 → 各直播阶段的出现次数（TOP10 每行标记所属阶段）
         self.high_freq_stages: dict[str, dict[str, int]] = {}
         # ── 在线人数：真实在线观众数 + 可配置模拟热度基数 ──
@@ -619,7 +612,6 @@ class LiveCommerceDataManager:
         self._load_reviews()
         self._load_sessions()
         self._load_private_messages()
-        self._load_quick_replies()
         self._load_danmaku()
         self._load_orders()
         self._load_viewers()
@@ -629,7 +621,6 @@ class LiveCommerceDataManager:
         self._load_alerts()
         self._load_knowledge()
         self._load_sensitive_logs()
-        self._load_operation_logs()
         self._load_price_history()
         self._load_viewer_visits()
         self._normalize_viewer_ids()
@@ -1159,13 +1150,6 @@ class LiveCommerceDataManager:
         }
         self._save_json(PRIVATE_MSGS_FILE, data)
 
-    def _load_quick_replies(self):
-        data = self._load_json(QUICK_REPLIES_FILE, [])
-        self.quick_replies = {q["quickReplyId"]: QuickReplyItem(**q) for q in data}
-
-    def _save_quick_replies(self):
-        self._save_json(QUICK_REPLIES_FILE, [q.model_dump() for q in self.quick_replies.values()])
-
     def _load_danmaku(self):
         data = self._load_json(DANMAKU_FILE, [])
         self.danmaku_list = [DanmakuItem(**d) for d in data]
@@ -1196,7 +1180,7 @@ class LiveCommerceDataManager:
     def _save_alerts(self):
         self._save_json(ALERTS_FILE, [a.model_dump() for a in self.alerts[-ALERT_HISTORY_MAX:]])
 
-    # ---- 全模块迭代：知识库 / 敏感词日志 / 操作日志 / 价格历史 / 观众到场 ----
+    # ---- 全模块迭代：知识库 / 敏感词日志 / 价格历史 / 观众到场 ----
     @staticmethod
     def _load_models(path: str, model, limit: int = 0) -> list:
         try:
@@ -1223,15 +1207,6 @@ class LiveCommerceDataManager:
         self._save_json(
             SENSITIVE_LOGS_FILE,
             [x.model_dump() for x in self.sensitive_logs[-SENSITIVE_LOGS_MAX:]])
-
-    def _load_operation_logs(self):
-        self.operation_logs = self._load_models(
-            OPERATION_LOGS_FILE, OperationLogItem, OPERATION_LOGS_MAX)
-
-    def _save_operation_logs(self):
-        self._save_json(
-            OPERATION_LOGS_FILE,
-            [x.model_dump() for x in self.operation_logs[-OPERATION_LOGS_MAX:]])
 
     def _load_price_history(self):
         self.price_history = self._load_models(
@@ -2298,34 +2273,6 @@ class LiveCommerceDataManager:
             self._broadcast("new_danmaku", danmaku.model_dump())
         return danmaku
 
-    def mark_danmaku(self, danmaku_id: str, marked: bool = True,
-                     operator: str = "host") -> dict:
-        """主播标记/取消标记重点弹幕（复盘与场控时快速定位）。"""
-        with self._lock:
-            item = next((d for d in self.danmaku_list
-                         if d.danmakuId == danmaku_id), None)
-            if item is None:
-                return {"success": False, "message": "弹幕不存在"}
-            item.isMarked = bool(marked)
-            self._save_danmaku()
-        self.log_operation("mark_danmaku", danmaku_id,
-                           ("标记" if marked else "取消标记") + f"弹幕：{item.content[:40]}",
-                           operator=operator)
-        self._broadcast("danmaku_marked", {
-            "danmakuId": danmaku_id,
-            "isMarked": item.isMarked,
-            "danmaku": item.model_dump(),
-        })
-        return {"success": True, "danmaku": item.model_dump()}
-
-    def get_marked_danmaku(self, session_id: str = "", limit: int = 100) -> list[dict]:
-        with self._lock:
-            rows = [d for d in self.danmaku_list if d.isMarked]
-            if session_id:
-                rows = [d for d in rows if d.sessionId == session_id]
-            rows.sort(key=lambda d: d.timestamp, reverse=True)
-            return [d.model_dump() for d in rows[:max(1, int(limit or 100))]]
-
     def get_danmaku_list(self, count: int = 200) -> list[DanmakuItem]:
         """获取最近N条弹幕"""
         with self._lock:
@@ -2463,45 +2410,6 @@ class LiveCommerceDataManager:
                 "isFromUser": msg.isFromUser,
             }, to_user=uid)
             return msg
-
-    def send_batch_private(self, user_ids: list[str], content: str,
-                           operator: str = "host") -> dict:
-        """批量私信：只发给真实注册观众，逐人入库并定向推送。
-
-        群发内容也会过敏感词检查 —— 运营端误粘贴违规文案时，宁可不发也不群发。
-        """
-        content = (content or "").strip()
-        if not content:
-            return {"success": False, "sent": 0, "skipped": len(user_ids or []),
-                    "message": "私信内容不能为空"}
-        is_violation, reason = self.check_sensitive(content)
-        if is_violation:
-            self.log_sensitive_blocked(content, reason, "host", operator, "private")
-            return {"success": False, "sent": 0, "skipped": len(user_ids or []),
-                    "message": "内容包含敏感词，已拦截"}
-        sent, skipped = 0, 0
-        now = datetime.now()
-        for uid in dict.fromkeys(user_ids or []):
-            uid = str(uid)
-            if not uid or not is_real_user_id(uid) or uid not in self.viewers:
-                skipped += 1
-                continue
-            acc = self.viewers[uid]
-            self.add_private_message(PrivateMessageItem(
-                messageId=f"batch_{int(now.timestamp()*1000)}_{sent}",
-                userId=uid,
-                userName=acc.userName or "观众",
-                avatar=acc.avatar or "",
-                content=content,
-                timestamp=now.isoformat(),
-                isFromUser=False,
-                replyType="manual",
-            ))
-            sent += 1
-        self.log_operation("batch_private_message", f"{sent}人",
-                           f"批量私信：{content[:80]}", operator=operator)
-        return {"success": sent > 0, "sent": sent, "skipped": skipped,
-                "message": f"已发送给 {sent} 位观众"}
 
     def get_unread_summary(self) -> dict:
         """私信未读汇总：总数 + 有未读的会话列表（用于导航红点）。"""
@@ -2747,8 +2655,6 @@ class LiveCommerceDataManager:
             review.replyTime = datetime.now().isoformat()
             review.isHandled = True
             self._save_reviews()
-        self.log_operation("reply_review", review_id,
-                           f"回复评价：{content[:60]}", operator=operator)
         self._broadcast("review_updated", review.model_dump())
         return review, ""
 
@@ -2848,6 +2754,16 @@ class LiveCommerceDataManager:
                 key=lambda r: r.timestamp,
                 reverse=True,
             )
+
+    def get_order_review(self, order_id: str, user_id: str = "") -> Optional[ReviewItem]:
+        """查某订单的观众评价：用于订单卡片展示「已评价」与评价内容。"""
+        if not order_id:
+            return None
+        with self._lock:
+            for r in self.reviews:
+                if r.orderId == order_id and (not user_id or r.userId == user_id):
+                    return r
+        return None
 
     def submit_review(self, product_id: str, user_id: str, user_name: str,
                       content: str, rating: int = 5, order_id: str = "") -> tuple[Optional[ReviewItem], str]:
@@ -3008,91 +2924,11 @@ class LiveCommerceDataManager:
             self._broadcast_product_sales(order.productId)
             return order
 
-    def create_ai_test_order(
-        self,
-        product_id: str = "",
-        quantity: int = 1,
-        status: str = "paid",
-        user_name: str | None = None,
-    ) -> Optional[OrderItem]:
-        """生成一张 **AI 模拟测试订单**（source=ai_test，userId 为空）。
-
-        与 `create_order` 的关键区别：
-          * **不扣商品库存、不改 soldCount** —— 测试数据不得污染真实商品数据；
-          * `source="ai_test"`，运营台只在「模拟测试订单」页展示，默认页看不到；
-          * 不计入 get_order_stats / get_product_sales_map / 本场统计等任何经营口径；
-          * 重启时 `_rollback_mock_side_effects` 与 `_purge_mock_collections` 都会跳过它，
-            因此测试订单可以跨重启保留，便于演示。
-        """
-        with self._lock:
-            products_list = list(self.products.values())
-            product = self.products.get(product_id) if product_id else (
-                random.choice(products_list) if products_list else None
-            )
-            if product is None:
-                return None
-            qty = max(1, int(quantity or 1))
-            order_status = status if status in ORDER_STATUS_LABELS else "paid"
-            self._order_counter += 1
-            now = datetime.now().isoformat()
-            img = (product.images[0] if product.images else product.imageUrl) or ""
-            sku = self._default_sku(product)
-            price = sku.price if sku else product.price
-            amount = round(price * qty, 2)
-            line = OrderLineItem(
-                productId=product.productId, productName=product.name, productImage=img,
-                skuId=sku.skuId if sku else "", skuSpec=sku.spec if sku else "默认规格",
-                quantity=qty, unitPrice=price, originalUnitPrice=price,
-                amount=amount, originalAmount=amount, discountAmount=0, totalAmount=amount,
-                costPrice=(sku.costPrice if sku else product.costPrice) or 0,
-                costAmount=round(((sku.costPrice if sku else product.costPrice) or 0) * qty, 2),
-                channel="legacy",
-            )
-            order = OrderItem(
-                orderId=f"test_order_{int(datetime.now().timestamp()*1000)}_{self._order_counter}",
-                orderNo="TEST" + datetime.now().strftime("%Y%m%d") + f"{self._order_counter:04d}",
-                productId=product.productId,
-                productName=product.name,
-                productImage=img,
-                skuId=sku.skuId if sku else "",
-                skuSpec=sku.spec if sku else "",
-                userId="",
-                userName=user_name or random.choice(self._BUYER_NAMES),
-                quantity=qty,
-                unitPrice=price,
-                items=[line],
-                goodsAmount=amount,
-                originalAmount=amount,
-                totalAmount=amount,
-                costAmount=line.costAmount,
-                channel="legacy",
-                status=order_status,
-                payTime=now if order_status in ("paid", "shipped", "completed") else "",
-                createTime=now,
-                isVirtual=True,
-                source="ai_test",
-                stockDeducted=False,
-            )
-            self.orders[order.orderId] = order
-            self._save_orders()
-            self._broadcast_order("order_new", order)
-            return order
-
-    def get_orders(self, status: str = "", limit: int = 50, scope: str = "real",
+    def get_orders(self, status: str = "", limit: int = 50,
                    product_id: str = "") -> list[OrderItem]:
-        """获取订单列表（按时间倒序，可按状态/商品筛选）。
-
-        scope 是**真伪隔离**的唯一入口：
-          real（默认）—— 只返回真实注册观众的订单，运营台默认看到的就是这些；
-          mock        —— 只返回 AI 模拟测试订单（含历史遗留模拟单），单独页面展示；
-          all         —— 全部，仅供内部排查，不要给前端默认值。
-        """
+        """获取真实订单列表（按时间倒序，可按状态/商品筛选）。"""
         with self._lock:
-            results = list(self.orders.values())
-            if scope == "real":
-                results = [o for o in results if order_is_real(o)]
-            elif scope == "mock":
-                results = [o for o in results if not order_is_real(o)]
+            results = [o for o in self.orders.values() if order_is_real(o)]
             if status:
                 results = [o for o in results if o.status == status]
             if product_id:
@@ -3215,11 +3051,13 @@ class LiveCommerceDataManager:
         order.refundReviewTime = now
 
     def request_refund(self, order_id: str, user_id: str, reason: str = "",
-                       refund_type: str = "refund") -> tuple[Optional[OrderItem], str]:
+                       refund_type: str = "refund", return_address: str = "",
+                       return_method: str = "") -> tuple[Optional[OrderItem], str]:
         """观众提交退款/退货申请：只登记申请，不改 order.status、不动库存/余额。
 
         真正退款要等主播在后台「同意」，由 review_refund 完成。申请状态单独放在
         refundStatus 上，这样待审核期间不会提前影响既有成交/GMV 统计口径。
+        退货退款还必须提供寄件地址与寄件方式，方便主播安排取件/收货。
         """
         reason = (reason or "").strip()
         if not reason:
@@ -3228,6 +3066,17 @@ class LiveCommerceDataManager:
             reason = reason[:200]
         if refund_type not in ("refund", "return"):
             refund_type = "refund"
+        return_address = (return_address or "").strip()[:200]
+        return_method = (return_method or "").strip()[:40]
+        if refund_type == "return":
+            if not return_address:
+                return None, "请填写退货寄件地址"
+            if not return_method:
+                return None, "请选择退货寄件方式"
+        else:
+            # 仅退款不涉及寄回，清空旧值，避免历史退货信息残留到新申请
+            return_address = ""
+            return_method = ""
         with self._lock:
             order = self.orders.get(order_id)
             if not order:
@@ -3243,6 +3092,8 @@ class LiveCommerceDataManager:
             order.refundStatus = "pending"
             order.refundReason = reason
             order.refundType = refund_type
+            order.returnAddress = return_address
+            order.returnMethod = return_method
             order.refundReasonCategory = classify_refund_reason(reason)
             order.refundApplyTime = datetime.now().isoformat()
             order.refundRejectReason = ""
@@ -3364,8 +3215,6 @@ class LiveCommerceDataManager:
                 messages.append(f"{oid}: 当前状态不允许发货")
             else:
                 success += 1
-        self.log_operation("batch_ship", ",".join(map(str, order_ids or [])),
-                           f"批量发货 成功{success} 跳过{skipped}", operator=operator)
         return {"success": success > 0, "shipped": success, "skipped": skipped,
                 "messages": messages}
 
@@ -3387,15 +3236,12 @@ class LiveCommerceDataManager:
                 messages.append(f"{oid}: 当前状态不允许退款")
             else:
                 success += 1
-        self.log_operation("batch_refund", ",".join(map(str, order_ids or [])),
-                           f"批量退款 成功{success} 跳过{skipped} 原因：{reason}",
-                           operator=operator)
         return {"success": success > 0, "refunded": success, "skipped": skipped,
                 "messages": messages, "category": cat}
 
-    def export_orders_csv(self, scope: str = "real", status: str = "") -> str:
-        """导出订单为 CSV 文本（UTF-8 BOM，Excel 直接打开不乱码）。"""
-        orders = self.get_orders(status=status, limit=100000, scope=scope)
+    def export_orders_csv(self, status: str = "") -> str:
+        """导出真实订单为 CSV 文本（UTF-8 BOM，Excel 直接打开不乱码）。"""
+        orders = self.get_orders(status=status, limit=100000)
         buf = io.StringIO()
         writer = csv.writer(buf)
         writer.writerow([
@@ -3460,12 +3306,12 @@ class LiveCommerceDataManager:
                     "categories": rows,
                     "recent": recent[:30]}
 
-    def remind_pending_pay(self, timeout_minutes: int = ORDER_PAY_TIMEOUT_MINUTES,
-                           operator: str = "AI") -> list[dict]:
-        """待付款订单超时 AI 私信催付。
+    def remind_pending_pay(self, timeout_minutes: int = 0,
+                           operator: str = "AI", order_id: str = "") -> list[dict]:
+        """向待付款订单发送 AI 催付私信。
 
-        只催真实注册观众、只催一次（payRemindTime 为空且不在已催集合里），
-        催付消息作为主播侧 AI 私信写入会话，并推送 order_updated 让运营台可见。
+        默认 timeout_minutes=0：主播手动触发时立即催付全部待付款真实订单；
+        传 >0 时只催超过该时长的订单。传 order_id 可只催指定订单。
         """
         now = datetime.now()
         targets = []
@@ -3474,25 +3320,27 @@ class LiveCommerceDataManager:
                 if (o.status != "pending_pay" or o.refundStatus != "none"
                         or not o.userId or not order_is_real(o)):
                     continue
-                if o.payRemindTime or o.orderId in self._pay_reminded_orders:
+                if order_id and o.orderId != order_id:
                     continue
                 created = _parse_dt(o.createTime)
                 if created is None:
                     continue
-                if (now - created).total_seconds() < timeout_minutes * 60:
-                    continue
+                if timeout_minutes and timeout_minutes > 0:
+                    if (now - created).total_seconds() < timeout_minutes * 60:
+                        continue
                 o.payRemindTime = now.isoformat()
-                self._pay_reminded_orders.add(o.orderId)
                 targets.append(o.model_dump())
             if targets:
                 self._save_orders()
         for order_data in targets:
             user_id = order_data.get("userId") or ""
             acc = self.get_viewer(user_id)
+            age_text = (f"已超时 {timeout_minutes} 分钟未支付，"
+                        if timeout_minutes and timeout_minutes > 0 else "还未支付，")
             content = (
                 f"亲爱的{acc.userName if acc else '观众'}，您有一笔待付款订单"
                 f"「{order_data.get('productName') or '商品'}」（¥{order_data.get('totalAmount', 0):.2f}）"
-                f"已超时 {timeout_minutes} 分钟未支付，库存为您保留中，"
+                f"{age_text}库存为您保留中，"
                 f"点击「我的订单」即可继续付款，有疑问随时私信我~"
             )
             self.add_private_message(PrivateMessageItem(
@@ -3505,8 +3353,6 @@ class LiveCommerceDataManager:
                 isFromUser=False,
                 replyType="ai",
             ))
-            self.log_operation("pay_remind", order_data.get("orderId", ""),
-                               f"超时{timeout_minutes}分钟，AI私信催付", operator=operator)
         if targets:
             self._broadcast("pay_remind_sent", {
                 "count": len(targets),
@@ -3514,6 +3360,32 @@ class LiveCommerceDataManager:
                             "userId": o.get("userId")} for o in targets],
             }, host_only=True)
         return targets
+
+    def cancel_expired_pending_orders(self, timeout_minutes: int = ORDER_PAY_TIMEOUT_MINUTES) -> list[OrderItem]:
+        """自动取消超过 timeout_minutes 仍未支付的真实待付款订单。
+
+        复用 update_order_status 的合法流转与库存回补逻辑，逐笔广播 order_updated，
+        观众端与运营台都会立刻看到「已取消」。
+        """
+        minutes = int(timeout_minutes) if timeout_minutes and int(timeout_minutes) > 0 \
+            else ORDER_PAY_TIMEOUT_MINUTES
+        now = datetime.now()
+        expired: list[str] = []
+        with self._lock:
+            for o in self.orders.values():
+                if o.status != "pending_pay" or not order_is_real(o):
+                    continue
+                created = _parse_dt(o.createTime)
+                if created is None:
+                    continue
+                if (now - created).total_seconds() >= minutes * 60:
+                    expired.append(o.orderId)
+        canceled: list[OrderItem] = []
+        for oid in expired:
+            order = self.update_order_status(oid, "canceled")
+            if order is not None:
+                canceled.append(order)
+        return canceled
 
     # ============================================================
     # 观众账户（钱包）
@@ -4289,8 +4161,7 @@ class LiveCommerceDataManager:
         sales: dict[str, dict] = {}
         with self._lock:
             for o in self.orders.values():
-                # AI 模拟测试订单不参与任何销量展示（观众端「已售 N 件」也不掺）
-                if o.status not in paid_statuses or getattr(o, "source", "") == "ai_test":
+                if o.status not in paid_statuses:
                     continue
                 # 按订单行聚合：购物车合并单必须把销量记到每一件商品上，
                 # 只读顶层 productId 会把其余商品漏掉。
@@ -4622,26 +4493,6 @@ class LiveCommerceDataManager:
         return self.scripts_history[:limit]
 
     # ============================================================
-    # 快捷回复管理
-    # ============================================================
-    def add_quick_reply(self, qr: QuickReplyItem) -> QuickReplyItem:
-        with self._lock:
-            self.quick_replies[qr.quickReplyId] = qr
-            self._save_quick_replies()
-            return qr
-
-    def delete_quick_reply(self, qr_id: str) -> bool:
-        with self._lock:
-            if qr_id in self.quick_replies:
-                del self.quick_replies[qr_id]
-                self._save_quick_replies()
-                return True
-            return False
-
-    def get_quick_replies(self) -> list[QuickReplyItem]:
-        return list(self.quick_replies.values())
-
-    # ============================================================
     # 设置管理
     # ============================================================
     def update_settings(self, data: dict) -> LiveCommerceSettings:
@@ -4690,31 +4541,8 @@ class LiveCommerceDataManager:
         return False, ""
 
     # ============================================================
-    # 操作日志 / 敏感词拦截日志
+    # 敏感词拦截日志
     # ============================================================
-    def log_operation(self, action: str, target: str = "", detail: str = "",
-                      operator: str = "host", role: str = "host") -> None:
-        """记录一条运营台操作日志（所有写操作都应调用，便于审计）。"""
-        with self._lock:
-            self.operation_logs.append(OperationLogItem(
-                logId=f"opl_{int(time.time() * 1000)}_{len(self.operation_logs) + 1}",
-                operator=operator or "host",
-                role=role or "host",
-                action=action or "",
-                target=str(target or "")[:120],
-                detail=str(detail or "")[:500],
-                timestamp=datetime.now().isoformat(),
-            ))
-            if len(self.operation_logs) > OPERATION_LOGS_MAX:
-                self.operation_logs = self.operation_logs[-OPERATION_LOGS_MAX:]
-            self._save_operation_logs()
-
-    def get_operation_logs(self, limit: int = 200, action: str = "") -> list[dict]:
-        with self._lock:
-            rows = [x for x in self.operation_logs if not action or x.action == action]
-            rows.sort(key=lambda x: x.timestamp, reverse=True)
-            return [x.model_dump() for x in rows[:max(1, int(limit or 200))]]
-
     def log_sensitive_blocked(self, content: str, reason: str, user_id: str = "",
                               user_name: str = "", scene: str = "danmaku") -> SensitiveLogItem:
         """记录一条敏感词拦截日志并通知运营台。"""
@@ -4859,8 +4687,8 @@ class LiveCommerceDataManager:
                               operator: str = "host") -> dict:
         """主播手动修正某条 AI 回答并沉淀为标准答案。
 
-        做三件事：① 更新原弹幕的 replyContent；② 取原问题写入知识库；
-        ③ 记录操作日志。之后相同问题会被知识库优先命中。
+        做两件事：① 更新原弹幕的 replyContent；② 取原问题写入知识库。
+        之后相同问题会被知识库优先命中。
         """
         corrected_answer = (corrected_answer or "").strip()
         if not corrected_answer:
@@ -4877,9 +4705,6 @@ class LiveCommerceDataManager:
             question = danmaku.content
         item = self.add_knowledge(question, corrected_answer,
                                   source="reply_correction", operator=operator)
-        self.log_operation("correct_ai_reply", danmaku_id,
-                           f"问题「{question[:40]}」已沉淀为标准答案",
-                           operator=operator)
         if item is None:
             return {"success": False, "message": "标准答案保存失败"}
         self._broadcast("danmaku_updated", danmaku.model_dump(), host_only=True)
@@ -6690,6 +6515,8 @@ class LiveCommerceDataManager:
                 "title": report.get("sessionTitle"),
                 "startTime": (report.get("scope") or {}).get("startTime"),
                 "duration": report.get("liveDuration"),
+                "durationStr": report.get("liveDurationStr") or "",
+                "grade": report.get("grade") or "",
                 "gmv": pd.get("gmv", 0),
                 "paidCount": pd.get("paidCount", 0),
                 "orderCount": pd.get("orderCount", 0),
@@ -7201,8 +7028,7 @@ class LiveCommerceDataManager:
         with self._lock:
             per_product: dict[str, list[tuple[int, int]]] = {}
             for o in self.orders.values():
-                # AI 模拟测试订单从不扣库存/销量，不能在这里回补（否则库存凭空增加）
-                if order_is_real(o) or o.status == "refunded" or getattr(o, "source", "") == "ai_test":
+                if order_is_real(o) or o.status == "refunded":
                     continue
                 sold = o.quantity if o.status in self._SOLD_STATUSES else 0
                 per_product.setdefault(o.productId, []).append((o.quantity, sold))
@@ -7241,11 +7067,10 @@ class LiveCommerceDataManager:
                 uid: s for uid, s in self.user_sessions.items()
                 if is_persistable_user_id(uid)
             }
-            # 保留 AI 模拟测试订单（source=ai_test）：它们是显式生成的隔离测试数据，
-            # 不参与统计也不扣库存，跨重启保留便于演示；历史遗留的模拟单照旧清理。
+            # 订单只保留真实注册观众的单，模拟/测试订单一律清理
             for oid in [
                 oid for oid, o in self.orders.items()
-                if not order_is_real(o) and getattr(o, "source", "") != "ai_test"
+                if not order_is_real(o)
             ]:
                 del self.orders[oid]
             # 内存已与磁盘对齐，顺手落盘（幂等：第二次启动时这些文件里已经没有模拟数据）

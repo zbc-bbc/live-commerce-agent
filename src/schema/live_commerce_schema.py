@@ -126,10 +126,10 @@ class OrderItem(BaseModel):
     shipTime: str = Field(default="", description="发货时间")
     createTime: str = Field(description="下单时间")
     isVirtual: bool = Field(default=True, description="是否为模拟订单")
-    # ---- 订单来源隔离：真实观众订单 / AI 模拟测试订单 ----
-    source: Literal["real", "ai_test"] = Field(
+    # ---- 订单来源：真实观众订单 ----
+    source: Literal["real"] = Field(
         default="real",
-        description="订单来源：real=真实观众订单；ai_test=AI 模拟测试订单（不参与统计，单独展示）",
+        description="订单来源：real=真实观众订单",
     )
     # ---- 收货信息快照（下单时从观众地址簿复制，地址后续被改/删不影响历史订单）----
     addressId: str = Field(default="", description="下单时选择的收货地址ID")
@@ -145,6 +145,8 @@ class OrderItem(BaseModel):
     refundReviewTime: str = Field(default="", description="主播审核时间")
     refundRejectReason: str = Field(default="", description="拒绝退款时的说明")
     refundType: str = Field(default="", description="售后类型：refund=仅退款 / return=退货退款")
+    returnAddress: str = Field(default="", description="退货寄件地址（观众申请退货退款时填写，含联系人/电话）")
+    returnMethod: str = Field(default="", description="退货寄件方式：上门取件 / 驿站自寄 / 自行寄回")
     # ---- 商品/订单迭代扩展字段（均带默认值，向后兼容旧 JSON）----
     items: list[OrderLineItem] = Field(
         default_factory=list,
@@ -291,7 +293,6 @@ class DanmakuItem(BaseModel):
         description="观众情绪判定：positive / neutral / negative（纯规则词表，空串=尚未判定）",
     )
     stage: str = Field(default="", description="所属直播阶段（warmup/flash_sale/...）")
-    isMarked: bool = Field(default=False, description="主播是否将该弹幕标记为重点")
 
 
 # ============================================================
@@ -396,7 +397,7 @@ class ReviewItem(BaseModel):
 
 
 # ============================================================
-# 迭代新增：AI 知识库 / 敏感词日志 / 操作日志 / 价格历史 / 观众到场记录
+# 迭代新增：AI 知识库 / 敏感词日志 / 价格历史 / 观众到场记录
 # ============================================================
 class KnowledgeBaseItem(BaseModel):
     """AI 问答知识库：主播可维护的「标准问题 → 标准答案」。"""
@@ -422,17 +423,6 @@ class SensitiveLogItem(BaseModel):
     scene: str = Field(default="danmaku", description="场景：danmaku/private/review")
     sessionId: str = Field(default="", description="所属直播场次ID")
     timestamp: str = Field(description="拦截时间")
-
-
-class OperationLogItem(BaseModel):
-    """运营台操作日志：谁在什么时候做了什么。"""
-    logId: str = Field(description="日志唯一标识")
-    operator: str = Field(default="host", description="操作人账号")
-    role: str = Field(default="host", description="操作人角色：host/operator")
-    action: str = Field(description="动作标识，如 batch_ship / save_settings")
-    target: str = Field(default="", description="操作对象（订单号/商品ID/评价ID等）")
-    detail: str = Field(default="", description="操作详情")
-    timestamp: str = Field(description="操作时间")
 
 
 class PriceHistoryItem(BaseModel):
@@ -589,16 +579,6 @@ class LiveCommerceSettings(BaseModel):
     privateMessage: PrivateMessageSettings = Field(default_factory=PrivateMessageSettings)
     aiReply: AIReplySettings = Field(default_factory=AIReplySettings)
     system: SystemSettings = Field(default_factory=SystemSettings)
-
-
-# ============================================================
-# 快捷回复模型
-# ============================================================
-class QuickReplyItem(BaseModel):
-    """快捷回复数据模型"""
-    quickReplyId: str = Field(description="唯一标识")
-    content: str = Field(description="回复内容")
-    category: str = Field(default="general", description="分类")
 
 
 # ============================================================
