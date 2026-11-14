@@ -458,6 +458,8 @@ class LiveCommerceDataManager:
         self._mounted_at: dict[str, str] = {}
         # 本场商品点击：productId -> 点击次数。开播时清空，属于会话级统计。
         self._product_clicks: dict[str, int] = {}
+        # 按商品去重的点击观众（漏斗按商品筛选时用；全局 _click_viewers 无法区分商品）
+        self._product_click_viewers: dict[str, set[str]] = {}
         # 本场点击过商品的真实观众（去重）；游客没有 userId，不计入「点击人数」。
         self._click_viewers: set[str] = set()
         # AI 话术生成历史（内存，不入盘）
@@ -1979,6 +1981,7 @@ class LiveCommerceDataManager:
             )
             if is_real_user_id(user_id):
                 self._click_viewers.add(user_id)
+                self._product_click_viewers.setdefault(product_id, set()).add(user_id)
             count = self._product_clicks[product_id]
         stats = self.get_live_room_stats()
         # 只广播给运营台：点击明细属于主播侧数据，不能回灌观众端。
@@ -2139,7 +2142,11 @@ class LiveCommerceDataManager:
             return rows
 
     def get_conversion_funnel(self, product_id: str = "") -> dict:
-        """电商转化漏斗：观看 → 商品点击 → 加购 → 下单 → 支付 → 完成。"""
+        """电商转化漏斗：观看 → 点击/加购 → 下单 → 支付 → 确认收货。
+
+        加购和直接下单不是互斥关系：把点击、加购、下单用户合并为「点击/加购」
+        兴趣步骤，保证漏斗逐级递减，避免出现「提交订单 > 加购」的倒挂。
+        """
         with self._lock:
             start = self.live_state.startTime or ""
             orders = self._session_orders_locked(real_only=True)
@@ -2152,7 +2159,7 @@ class LiveCommerceDataManager:
                            if is_real_user_id(d.userId)}
             if product_id:
                 viewers = {o.userId for o in orders} | viewers
-                clickers = {uid for uid in self._click_viewers}
+                clickers = set(self._product_click_viewers.get(product_id, set()))
             else:
                 clickers = set(self._click_viewers)
             cart_users = {
@@ -2166,10 +2173,10 @@ class LiveCommerceDataManager:
                           if o.userId and o.status in paid_statuses}
             completed_users = {o.userId for o in orders
                                if o.userId and o.status == "completed"}
+            interest_users = clickers | cart_users | order_users
             steps = [
                 {"key": "view", "label": "观看直播", "count": len(viewers)},
-                {"key": "click", "label": "点击商品", "count": len(clickers)},
-                {"key": "cart", "label": "加入购物车", "count": len(cart_users)},
+                {"key": "interest", "label": "点击/加购商品", "count": len(interest_users)},
                 {"key": "order", "label": "提交订单", "count": len(order_users)},
                 {"key": "pay", "label": "完成支付", "count": len(paid_users)},
                 {"key": "complete", "label": "确认收货", "count": len(completed_users)},
@@ -4762,6 +4769,7 @@ class LiveCommerceDataManager:
             self._session_real_users = set()
             # 商品点击是本场会话级统计，新一场从 0 开始
             self._product_clicks.clear()
+            self._product_click_viewers.clear()
             self._click_viewers.clear()
             self._online_peak = 0
             self._online_real_peak = 0

@@ -757,8 +757,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 
       <!-- 3. 地域分布 + 观众标签分布 -->
       <div class="lc-grid lc-grid-2" style="margin-top:16px">
-        <div class="lc-card"><div class="lc-card-title">🗺 观众地域分布</div><div id="audienceRegionChart" style="height:300px"></div></div>
-        <div class="lc-card"><div class="lc-card-title">🏷 观众标签分布</div><div id="audienceTagChart" style="height:300px"></div></div>
+        <div class="lc-card"><div class="lc-card-title">🗺 观众地域分布（虚拟）</div><div id="audienceRegionChart" style="height:300px"></div></div>
+        <div class="lc-card"><div class="lc-card-title">🏷 观众标签分布（虚拟）</div><div id="audienceTagChart" style="height:300px"></div></div>
       </div>
 
       <!-- 4. 商品 Top + 本场商品点击与转化 -->
@@ -791,9 +791,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
         <div class="lc-card-title" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
           <span>⏱ 直播阶段筛选与分阶段对比</span>
           <div style="display:flex;gap:8px;align-items:center">
-            <select class="lc-sel" id="anStageSession" style="width:260px" onchange="loadStageAnalysis(this.value)">
-              <option value="">本场直播</option>
-            </select>
+            <span style="font-size:11px;color:#94a3b8">本场直播</span>
             <select class="lc-sel" id="anStageFilter" style="width:130px" onchange="renderStageAnalysis()">
               <option value="all">全部阶段</option>
               <option value="warmup">预热</option>
@@ -802,7 +800,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
               <option value="interact">互动促单</option>
               <option value="closing">收尾</option>
             </select>
-            <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="loadStageAnalysis(document.getElementById('anStageSession').value)">↻ 刷新</button>
+            <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="loadStageAnalysis('')">↻ 刷新</button>
           </div>
         </div>
         <div id="stageAnalysisTable" style="margin-top:8px;font-size:12px;color:#94a3b8">加载中…</div>
@@ -1444,9 +1442,8 @@ function switchPage(page) {
   }
   if (page==='analysis') {
     renderAnalysisPage();
-    populateAnalysisStageSelect();
     populateFunnelProductSelect();
-    loadStageAnalysis(S.stageSessionId || '');
+    loadStageAnalysis('');
     loadConversionFunnel('');
     loadRefundReasonSummary();
     loadAudienceProfile();
@@ -5807,15 +5804,6 @@ function renderSensitiveLogs(logs){
 }
 
 // ---------- 数据分析：阶段 / 漏斗 / 商品对比 / 画像 ----------
-function populateAnalysisStageSelect(){
-  var sel=document.getElementById('anStageSession');
-  if(!sel) return;
-  var keep=sel.value||S.stageSessionId||'';
-  sel.innerHTML='<option value="">本场直播</option>'+(S.sessions||[]).map(function(s){
-    return '<option value="'+esc(s.sessionId)+'">'+esc(s.title||s.sessionId)+'</option>';
-  }).join('');
-  sel.value=keep;
-}
 function populateFunnelProductSelect(){
   var sel=document.getElementById('anFunnelProd');
   if(!sel) return;
