@@ -1571,7 +1571,7 @@ class LiveCommerceDataManager:
                     if self._online_samples else 0)
         meta = {
             "sessionId": sid,
-            "title": f"{product_name} · {start_label}",
+            "title": f"直播场次 · {start_label}" if start_label else "直播场次",
             "productId": product.productId if product else "",
             "productName": product_name,
             "startTime": start_time,
@@ -5652,7 +5652,7 @@ class LiveCommerceDataManager:
         return {
             "source": "current",
             "sessionId": sid,
-            "sessionTitle": f"{product_name} · {start_label}" if start_label else product_name,
+            "sessionTitle": f"直播场次 · {start_label}" if start_label else "直播场次",
             "product": product,
             "productId": product_id,
             "productName": product_name,
