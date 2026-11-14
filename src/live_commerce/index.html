@@ -164,6 +164,38 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .lc-mini-btn{padding:2px 8px;border-radius:6px;font-size:11px;cursor:pointer;border:1px solid #e2e8f0;background:#fff;color:#475569}
 .lc-mini-btn:hover{border-color:#c7d2fe;color:#2563eb}
 .lc-empty-row{text-align:center;color:#94a3b8;padding:24px;font-size:13px}
+/* ===== 数据分析大屏 ===== */
+.an-hero{background:linear-gradient(135deg,#0b1f4b 0%,#173d8f 42%,#2563eb 100%);border-radius:16px;padding:18px 20px 16px;color:#fff;box-shadow:0 12px 30px rgba(15,42,95,.22);position:relative;overflow:hidden}
+.an-hero:before{content:'';position:absolute;right:-60px;top:-80px;width:260px;height:260px;border-radius:50%;background:rgba(255,255,255,.06)}
+.an-hero-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;position:relative;z-index:1}
+.an-hero-title{font-size:18px;font-weight:700;letter-spacing:.02em}
+.an-hero-sub{font-size:11px;color:#bfdbfe;margin-top:4px}
+.an-hero-badge{font-size:11px;padding:4px 10px;border-radius:999px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);white-space:nowrap}
+.an-kpi-primary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px;position:relative;z-index:1}
+.an-kpi-secondary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:8px;position:relative;z-index:1}
+.an-kpi{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:9px 12px;min-width:0}
+.an-kpi.primary{background:rgba(255,255,255,.13);border-color:rgba(255,255,255,.2)}
+.an-kpi .k{font-size:11px;color:#bfdbfe;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.an-kpi .v{font-size:23px;font-weight:700;line-height:1.25;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.an-kpi.primary .v{font-size:29px}
+.an-kpi .s{font-size:10px;color:#93c5fd;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.an-hero-charts{display:grid;grid-template-columns:minmax(230px,1fr) 2.2fr;gap:12px;margin-top:12px;position:relative;z-index:1}
+.an-hero-panel{background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:10px 12px}
+.an-panel-title{font-size:12px;font-weight:600;color:#dbeafe;margin-bottom:2px}
+.an-hero-feedback{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;font-size:11px;color:#dbeafe;position:relative;z-index:1}
+.an-hero-feedback .chip{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:4px 10px}
+.an-feedback-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.an-feedback-stat{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px}
+.an-feedback-stat .v{font-size:22px;font-weight:700;line-height:1.2}
+.an-feedback-stat .k{font-size:11px;color:#64748b;margin-top:2px}
+.an-feedback-stat .s{font-size:10px;color:#94a3b8;margin-top:2px}
+.an-feedback-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+.an-feedback-box{background:#f8fafc;border:1px solid #eef2f7;border-radius:10px;padding:10px 12px;min-height:100px}
+.an-feedback-box .t{font-size:12px;font-weight:600;color:#334155;margin-bottom:6px}
+.an-feedback-line{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:#475569;padding:3px 0;border-bottom:1px dashed #eef2f7}
+.an-feedback-line:last-child{border-bottom:0}
+.an-feedback-empty{font-size:11px;color:#94a3b8;padding:12px 0;text-align:center}
+@media (max-width:1100px){.an-kpi-primary,.an-kpi-secondary{grid-template-columns:repeat(2,1fr)}.an-hero-charts{grid-template-columns:1fr}.an-feedback-grid{grid-template-columns:repeat(3,1fr)}.an-feedback-cols{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -680,24 +712,81 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 
     <div class="lc-inner" id="page-analysis">
       <div class="lc-page-hdr">
-        <div><h2>📊 商品数据分析</h2><div class="sub">弹幕统计、观众画像、转化率分析</div></div>
-        <div style="display:flex;gap:12px;font-size:12px;color:#64748b">
-          提及: <strong id="anMention">0</strong> 意向分: <strong id="anIntent">0</strong>
-          <span title="意向分 = 100 × (0.4×人均弹幕率 + 0.3×私信观众占比 + 0.3×下单观众占比)，按本场真实观众数归一" style="cursor:help">ⓘ</span>
+        <div><h2>📊 商品数据分析</h2><div class="sub">本场直播总览 · 商品转化 · 观众画像</div></div>
+        <div style="font-size:12px;color:#64748b">
+          场次: <strong id="anSessionLabel">--</strong>
+          · 更新: <strong id="anUpdateTime">--</strong>
         </div>
       </div>
-      <div class="lc-grid lc-grid-4" style="margin-bottom:16px">
-        <div class="lc-stat lc-card"><div class="nv" id="anTotalDm">0</div><div class="lb">弹幕总数</div></div>
-        <div class="lc-stat lc-card"><div class="nv" id="anAiReplies">0</div><div class="lb">AI回复</div></div>
-        <div class="lc-stat lc-card"><div class="nv" id="anOnline">0</div><div class="lb">在线人数</div></div>
-        <div class="lc-stat lc-card"><div class="nv" id="anInquiry">0</div><div class="lb">咨询用户</div></div>
-      </div>
-      <div class="lc-grid lc-grid-2">
-        <div class="lc-card"><div class="lc-card-title">📈 弹幕趋势统计</div><div id="dmTrendChart" style="height:280px"></div></div>
-        <div class="lc-card"><div class="lc-card-title">👥 观众画像分布</div><div id="audienceChart" style="height:280px"></div></div>
+
+      <!-- 1. 本场直播数据大屏：总览 + 商品点击转化 + 订单反馈摘要 -->
+      <div class="an-hero">
+        <div class="an-hero-head">
+          <div>
+            <div class="an-hero-title">本场直播数据总览</div>
+            <div class="an-hero-sub" id="anHeroSub">等待开播数据…</div>
+          </div>
+          <div class="an-hero-badge" id="anHeroStatus">未开播</div>
+        </div>
+        <div class="an-kpi-primary" id="anKpiPrimary"></div>
+        <div class="an-kpi-secondary" id="anKpiSecondary"></div>
+        <div class="an-hero-charts">
+          <div class="an-hero-panel">
+            <div class="an-panel-title">观众画像</div>
+            <div id="audienceChart" style="height:220px"></div>
+          </div>
+          <div class="an-hero-panel">
+            <div class="an-panel-title">本场互动与成交趋势</div>
+            <div id="anTrendChart" style="height:220px"></div>
+          </div>
+        </div>
+        <div class="an-hero-feedback" id="anHeroFeedback"></div>
       </div>
 
-      <!-- 直播阶段筛选 + 分阶段对比 -->
+      <!-- 2. 本场订单反馈 -->
+      <div class="lc-card" style="margin-top:16px">
+        <div class="lc-card-title" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <span>📦 本场订单反馈</span>
+          <div style="display:flex;gap:6px">
+            <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="loadSessionOrders();loadRefundReasonSummary()">↻ 刷新</button>
+            <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="switchPage('orders')">前往订单管理 →</button>
+          </div>
+        </div>
+        <div id="anOrderFeedback"></div>
+      </div>
+
+      <!-- 3. 地域分布 + 观众标签分布 -->
+      <div class="lc-grid lc-grid-2" style="margin-top:16px">
+        <div class="lc-card"><div class="lc-card-title">🗺 观众地域分布</div><div id="audienceRegionChart" style="height:300px"></div></div>
+        <div class="lc-card"><div class="lc-card-title">🏷 观众标签分布</div><div id="audienceTagChart" style="height:300px"></div></div>
+      </div>
+
+      <!-- 4. 商品 Top + 本场商品点击与转化 -->
+      <div class="lc-grid lc-grid-2" style="margin-top:16px">
+        <div class="lc-card"><div class="lc-card-title" style="justify-content:space-between;align-items:center"><span>🏆 本场商品 Top</span><span id="productTopHint" style="font-size:11px;font-weight:400;color:#94a3b8"></span></div><div id="productTopChart" style="height:320px"></div></div>
+        <div class="lc-card"><div class="lc-card-title">🛒 本场商品点击与转化</div><div id="productConvChart" style="height:320px"></div></div>
+      </div>
+      <div class="lc-card" style="margin-top:16px">
+        <div class="lc-card-title">🛒 本场商品点击与转化明细</div>
+        <div class="lc-scroll" id="liveRoomProductStats" style="max-height:320px;margin-top:6px"></div>
+      </div>
+
+      <!-- 5. 电商转化漏斗 -->
+      <div class="lc-card" style="margin-top:16px">
+        <div class="lc-card-title" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <span>🛒 电商转化漏斗</span>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select class="lc-sel" id="anFunnelProd" style="width:220px" onchange="loadConversionFunnel(this.value)">
+              <option value="">全部商品</option>
+            </select>
+            <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="loadConversionFunnel(document.getElementById('anFunnelProd').value)">↻</button>
+          </div>
+        </div>
+        <div id="funnelChart" style="height:320px"></div>
+        <div id="funnelTable" style="font-size:12px;color:#64748b;margin-top:6px"></div>
+      </div>
+
+      <!-- 6. 直播阶段筛选 + 分阶段对比 -->
       <div class="lc-card" style="margin-top:16px">
         <div class="lc-card-title" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
           <span>⏱ 直播阶段筛选与分阶段对比</span>
@@ -721,64 +810,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
           <div id="stageAnalysisChart" style="height:280px"></div>
           <div id="stageGmvChart" style="height:280px"></div>
         </div>
-      </div>
-
-      <!-- 电商转化漏斗 -->
-      <div class="lc-card" style="margin-top:16px">
-        <div class="lc-card-title" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-          <span>🛒 电商转化漏斗</span>
-          <div style="display:flex;gap:8px;align-items:center">
-            <select class="lc-sel" id="anFunnelProd" style="width:220px" onchange="loadConversionFunnel(this.value)">
-              <option value="">全部商品</option>
-            </select>
-            <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="loadConversionFunnel(document.getElementById('anFunnelProd').value)">↻</button>
-          </div>
-        </div>
-        <div id="funnelChart" style="height:320px"></div>
-        <div id="funnelTable" style="font-size:12px;color:#64748b;margin-top:6px"></div>
-      </div>
-
-      <!-- 多商品数据对比 -->
-      <div class="lc-card" style="margin-top:16px">
-        <div class="lc-card-title" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-          <span>⚖️ 多商品数据对比</span>
-          <div style="display:flex;gap:6px">
-            <button class="lc-btn lc-btn-primary lc-btn-sm" onclick="runProductCompare()">对比选中商品</button>
-            <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="clearProductCompare()">清空</button>
-          </div>
-        </div>
-        <div id="prodComparePicker" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;font-size:12px"></div>
-        <div class="lc-scroll" id="prodCompareResult" style="max-height:360px">
-          <div class="lc-empty"><div class="icon">⚖️</div>勾选 2 个以上商品后点击「对比选中商品」</div>
-        </div>
-      </div>
-
-      <!-- 观众画像：模拟地域 + 自动标签 -->
-      <div class="lc-grid lc-grid-2" style="margin-top:16px">
-        <div class="lc-card"><div class="lc-card-title">🗺 观众地域分布（模拟）</div><div id="audienceRegionChart" style="height:280px"></div></div>
-        <div class="lc-card"><div class="lc-card-title">🏷 观众标签分布（自动打标）</div><div id="audienceTagChart" style="height:280px"></div></div>
-      </div>
-      <div class="lc-card" style="margin-top:16px">
-        <div class="lc-card-title">📋 本场直播数据总览</div>
-        <div id="liveDataOverview" style="font-size:13px"></div>
-      </div>
-      <!-- 本场商品点击与转化 -->
-      <div class="lc-card" style="margin-top:16px">
-        <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center">
-          <span>🛒 本场商品点击与转化</span>
-          <span style="font-size:11px;font-weight:400;color:#94a3b8">点击 = 观众打开商品详情 / 点击推送卡片；下单只含真实注册观众</span>
-        </div>
-        <div class="lc-grid lc-grid-4" id="liveRoomStatRow" style="margin-top:6px"></div>
-        <div class="lc-scroll" style="margin-top:12px;max-height:300px" id="liveRoomProductStats"></div>
-      </div>
-      <!-- 订单明细 / 成交统计 / 状态筛选已统一迁移到「订单管理」页。
-           分析页只保留按商品的累计销量分析，避免两页重复维护同一套订单数据。 -->
-      <div class="lc-card" style="margin-top:16px">
-        <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center">
-          <span>🏆 商品销量 Top（累计真实成交）</span>
-          <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="switchPage('orders')">前往订单管理 →</button>
-        </div>
-        <div id="orderByProduct" style="margin-top:8px;font-size:13px"></div>
       </div>
     </div>
 
@@ -1289,7 +1320,7 @@ var S = {
   orderTrace: null, refundReasons: null,
   batchSelected: {},                         // 订单批量勾选 {orderId:true}
   stageAnalysis: [], stageSessionId: '',
-  funnel: null, productCompare: [], compareIds: {},
+  funnel: null,
   audienceProfile: null,
   reviewsPain: null,
   unreadSummary: null,
@@ -1418,7 +1449,6 @@ function switchPage(page) {
     loadStageAnalysis(S.stageSessionId || '');
     loadConversionFunnel('');
     loadRefundReasonSummary();
-    renderProductComparePicker();
     loadAudienceProfile();
   }
   if (page==='orders') { renderOrdersPage(); loadRefundReasonSummary(); }
@@ -2949,27 +2979,228 @@ function renderDmSessionResult(d){
 // ============================================================
 // Rendering: Analysis Page
 // ============================================================
+function anNowText(){
+  var d=new Date();
+  function p(x){return ('0'+x).slice(-2);}
+  return p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+}
+function anDurationText(sec){
+  sec=Number(sec)||0;
+  var h=Math.floor(sec/3600), m=Math.round((sec%3600)/60);
+  return (h?h+'小时':'')+m+'分钟';
+}
+function anClock(ts){
+  var d=new Date(ts);
+  if(isNaN(d.getTime())) return '';
+  function p(x){return ('0'+x).slice(-2);}
+  return p(d.getHours())+':'+p(d.getMinutes());
+}
+function analysisOrderFacts(){
+  var ss=S.sessionOrderStats||{}, orders=S.sessionOrders||[], reviews=S.reviews||[];
+  var sid=S.liveStatus.sessionId||'';
+  // 没有本场 sessionId 时不把历史评价算进「本场差评」
+  var neg=sid?(reviews||[]).filter(function(r){
+    return r.sessionId===sid && (Number(r.rating)||5)<=3;
+  }):[];
+  var pendingReceive=orders.filter(function(o){return o.status==='shipped';}).length;
+  var refundPending=orders.filter(function(o){return o.refundStatus==='pending';}).length;
+  var refunded=orders.filter(function(o){return o.status==='refunded'||o.refundStatus==='approved';});
+  return {ss:ss,orders:orders,reviews:reviews,neg:neg,
+          pendingReceive:pendingReceive,refundPending:refundPending,refunded:refunded};
+}
+function anKpiHtml(label,value,sub,primary){
+  return '<div class="an-kpi'+(primary?' primary':'')+'">'+
+    '<div class="k">'+esc(label)+'</div>'+
+    '<div class="v">'+esc(String(value))+'</div>'+
+    '<div class="s">'+esc(sub||'')+'</div></div>';
+}
+function renderAnalysisHeroKpis(){
+  var ls=S.liveStatus||{}, ss=S.sessionOrderStats||{}, lr=S.liveRoomStats||{}, st=S.stats||{};
+  var facts=analysisOrderFacts();
+  var gmv = ss.gmv!=null?Number(ss.gmv):Number(lr.gmv)||0;
+  var paid = ss.paidCount!=null?Number(ss.paidCount):Number(lr.paidOrderCount)||0;
+  var clicks = Number(lr.clickCount)||0;
+  var clickUsers = Number(lr.clickViewerCount)||0;
+  var conv = Number(lr.clickToOrderRate)||0;
+  var online = Number(ls.onlineCount)||0;
+  var duration = Number(ls.liveDuration)||0;
+  var dm = Number(ls.totalDanmaku)||0;
+  var inquiries = Number(st.inquiryCount!=null?st.inquiryCount:ls.totalPrivateMessages)||0;
+  var refund = Number(ss.refundCount)||0;
+  var refundRate = (paid+refund)?(refund/(paid+refund)*100):0;
+  var aov = paid?(gmv/paid):0;
+
+  var p=document.getElementById('anKpiPrimary');
+  if(p) p.innerHTML=
+    anKpiHtml('本场 GMV','¥'+fmtNum(gmv),'本场成交',true)+
+    anKpiHtml('成交订单',fmtNum(paid),'已支付',true)+
+    anKpiHtml('点击→下单',conv+'%','点击人数 '+fmtNum(clickUsers),true)+
+    anKpiHtml('实时在线',fmtNum(online),'当前直播间',true);
+  var s=document.getElementById('anKpiSecondary');
+  if(s) s.innerHTML=
+    anKpiHtml('直播时长',anDurationText(duration),'本场',false)+
+    anKpiHtml('商品点击',fmtNum(clicks),'点击人数 '+fmtNum(clickUsers),false)+
+    anKpiHtml('真实弹幕',fmtNum(dm),'观众互动',false)+
+    anKpiHtml('咨询人数',fmtNum(inquiries),'私信咨询',false)+
+    anKpiHtml('客单价','¥'+fmtNum(aov),'GMV / 支付单',false)+
+    anKpiHtml('退款单',fmtNum(refund),'退款率 '+refundRate.toFixed(1)+'%',false)+
+    anKpiHtml('待付款',fmtNum(ss.pendingPay||0),'需要催付',false)+
+    anKpiHtml('待发货',fmtNum(ss.pendingShip||0),'需要发货',false);
+
+  var sub=document.getElementById('anHeroSub');
+  if(sub){
+    if(ls.startTime){
+      sub.textContent='场次 '+(ls.sessionId||'').slice(-10)+' · 开播 '+fmtTime(ls.startTime)+' · 已播 '+anDurationText(duration);
+    }else{
+      sub.textContent='未开播，暂无本场数据';
+    }
+  }
+  var badge=document.getElementById('anHeroStatus');
+  if(badge){
+    var map={live:'直播中',paused:'已暂停',ended:'已结束',idle:'未开播'};
+    badge.textContent=map[ls.status]||'未开播';
+  }
+  var label=document.getElementById('anSessionLabel');
+  if(label) label.textContent=ls.sessionId?('…'+ls.sessionId.slice(-10)):'本场直播';
+  var upd=document.getElementById('anUpdateTime');
+  if(upd) upd.textContent=anNowText();
+
+  var hf=document.getElementById('anHeroFeedback');
+  if(hf) hf.innerHTML=[
+    ['待付款',ss.pendingPay||0],['待发货',ss.pendingShip||0],
+    ['待收货',facts.pendingReceive],['退款待审核',facts.refundPending],
+    ['本场差评',facts.neg.length]
+  ].map(function(x){return '<span class="chip">'+x[0]+' <b>'+fmtNum(x[1])+'</b></span>';}).join('');
+}
+function renderAnalysisHero(){
+  renderAnalysisHeroKpis();
+  renderAudienceChart();
+  renderAnalysisTrendChart();
+}
+function renderAnalysisTrendChart(){
+  var el=document.getElementById('anTrendChart');
+  if(!el) return;
+  try{
+    var sid=S.liveStatus.sessionId||'';
+    if(!S.liveStatus.startTime && !(S.sessionOrders||[]).length){
+      if(window.__anTrendChart){try{window.__anTrendChart.dispose()}catch(e){}window.__anTrendChart=null;}
+      el.innerHTML='<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#93c5fd;font-size:12px">未开播，暂无本场互动/成交趋势</div>';
+      return;
+    }
+    var items=[];
+    (S.dmList||[]).forEach(function(d){
+      if(sid && d.sessionId && d.sessionId!==sid) return;
+      if(!dmIsRealViewer(d) || !d.timestamp) return;
+      var t=new Date(d.timestamp); if(!isNaN(t.getTime())) items.push({t:t,type:'dm'});
+    });
+    (S.sessionOrders||[]).forEach(function(o){
+      if(!o.createTime) return;
+      var t=new Date(o.createTime); if(!isNaN(t.getTime())) items.push({t:t,type:'order',o:o});
+    });
+    if(!items.length){
+      if(window.__anTrendChart){try{window.__anTrendChart.dispose()}catch(e){}window.__anTrendChart=null;}
+      el.innerHTML='<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#93c5fd;font-size:12px">暂无本场互动/成交数据</div>';
+      return;
+    }
+    var times=items.map(function(x){return x.t.getTime();});
+    var start=S.liveStatus.startTime?new Date(S.liveStatus.startTime):new Date(Math.min.apply(null,times));
+    if(isNaN(start.getTime())) start=new Date(Math.min.apply(null,times));
+    var end=new Date(Math.max(Date.now(), Math.max.apply(null,times)));
+    if(end<start) end=start;
+    var span=Math.max(end-start,10*60*1000);
+    var step=Math.max(5*60*1000, Math.ceil(span/12/(5*60*1000))*5*60*1000);
+    var n=Math.max(6,Math.ceil(span/step));
+    var labels=[],dm=[],ord=[],gmv=[];
+    for(var i=0;i<n;i++){
+      labels.push(anClock(start.getTime()+i*step)); dm.push(0); ord.push(0); gmv.push(0);
+    }
+    items.forEach(function(x){
+      var k=Math.floor((x.t.getTime()-start.getTime())/step);
+      if(k<0||k>=n) return;
+      if(x.type==='dm'){dm[k]++;return;}
+      var o=x.o||{};
+      if(o.status==='canceled') return;
+      ord[k]++;
+      if(['paid','shipped','completed'].indexOf(o.status)>=0) gmv[k]+=Number(o.totalAmount)||0;
+    });
+    el.innerHTML='';
+    if(window.__anTrendChart)window.__anTrendChart.dispose();
+    var ch=echarts.init(el);window.__anTrendChart=ch;
+    ch.setOption({
+      backgroundColor:'transparent',
+      tooltip:{trigger:'axis'},
+      legend:{bottom:0,textStyle:{color:'#bfdbfe',fontSize:10}},
+      grid:{left:38,right:44,top:18,bottom:38},
+      xAxis:{type:'category',data:labels,axisLabel:{color:'#bfdbfe',fontSize:9},
+        axisLine:{lineStyle:{color:'rgba(255,255,255,.25)'}}},
+      yAxis:[
+        {type:'value',name:'条/单',nameTextStyle:{color:'#93c5fd',fontSize:9},
+         axisLabel:{color:'#bfdbfe',fontSize:9},splitLine:{lineStyle:{color:'rgba(255,255,255,.08)'}}},
+        {type:'value',name:'GMV',nameTextStyle:{color:'#93c5fd',fontSize:9},
+         axisLabel:{color:'#bfdbfe',fontSize:9},splitLine:{show:false}}
+      ],
+      series:[
+        {name:'真实弹幕',type:'bar',data:dm,itemStyle:{color:'rgba(96,165,250,.72)'},barMaxWidth:14},
+        {name:'下单',type:'line',smooth:true,data:ord,itemStyle:{color:'#fbbf24'},lineStyle:{color:'#fbbf24',width:2},symbolSize:4},
+        {name:'GMV',type:'line',yAxisIndex:1,smooth:true,data:gmv,itemStyle:{color:'#34d399'},lineStyle:{color:'#34d399',width:2},areaStyle:{color:'rgba(52,211,153,.12)'},symbolSize:4}
+      ]
+    });
+  }catch(e){}
+}
+function renderOrderFeedback(){
+  var el=document.getElementById('anOrderFeedback');
+  if(!el) return;
+  if(!S.liveStatus.startTime && !(S.sessionOrders||[]).length){
+    el.innerHTML='<div class="lc-empty" style="padding:20px 0"><div class="icon">📦</div>未开播，暂无本场订单反馈</div>';
+    return;
+  }
+  var f=analysisOrderFacts();
+  var tiles=[
+    {v:f.ss.pendingPay||0,k:'待付款',s:'需要催付',c:'#d97706'},
+    {v:f.ss.pendingShip||0,k:'待发货',s:'等待发货',c:'#2563eb'},
+    {v:f.pendingReceive,k:'待收货',s:'已发出',c:'#4f46e5'},
+    {v:f.refundPending,k:'退款待审核',s:'需要处理',c:'#dc2626'},
+    {v:f.neg.length,k:'本场差评',s:'需要关注',c:'#b91c1c'}
+  ];
+  var reasonMap={};
+  f.refunded.concat(f.orders.filter(function(o){return o.refundStatus==='pending';})).forEach(function(o){
+    var r=(o.refundReason||'').trim()||'未填写原因';
+    var g=reasonMap[r]||{reason:r,count:0,amount:0};
+    g.count++; g.amount+=Number(o.totalAmount)||0; reasonMap[r]=g;
+  });
+  var reasons=Object.keys(reasonMap).map(function(k){return reasonMap[k];})
+    .sort(function(a,b){return b.count-a.count;}).slice(0,3);
+  var recent=f.neg.slice().sort(function(a,b){return String(b.timestamp||'').localeCompare(String(a.timestamp||''));}).slice(0,3);
+  var reasonHtml=reasons.length?reasons.map(function(x){
+    return '<div class="an-feedback-line"><span>'+esc(x.reason)+' ×'+x.count+'</span><span>¥'+fmtNum(x.amount)+'</span></div>';
+  }).join(''):'<div class="an-feedback-empty">本场暂无退款</div>';
+  var reviewHtml=recent.length?recent.map(function(r){
+    var stars='★'.repeat(Number(r.rating)||0)+'☆'.repeat(5-(Number(r.rating)||0));
+    var c=String(r.content||''); if(c.length>26)c=c.slice(0,26)+'…';
+    return '<div class="an-feedback-line"><span><span style="color:#f59e0b">'+stars+'</span> '+esc(c)+'</span><span style="color:#94a3b8">'+esc((r.userName||'').slice(0,8))+'</span></div>';
+  }).join(''):'<div class="an-feedback-empty">本场暂无差评，口碑良好</div>';
+  el.innerHTML='<div class="an-feedback-grid">'+tiles.map(function(x){
+    return '<div class="an-feedback-stat" style="border-top:3px solid '+x.c+'">'+
+      '<div class="v" style="color:'+x.c+'">'+fmtNum(x.v)+'</div>'+
+      '<div class="k">'+x.k+'</div><div class="s">'+x.s+'</div></div>';
+  }).join('')+'</div>'+
+  '<div class="an-feedback-cols">'+
+    '<div class="an-feedback-box"><div class="t">退款原因 Top3</div>'+reasonHtml+'</div>'+
+    '<div class="an-feedback-box"><div class="t">最近差评</div>'+reviewHtml+'</div>'+
+  '</div>';
+}
 function renderAnalysisPage() {
-  var ls=S.liveStatus, st=S.stats;
-  // 优先用后端 liveStatus 数据，回退到本地 dmList 长度
-  var totalDm = ls.totalDanmaku || S.dmList.length || 0;
-  var totalReplies = ls.totalAIReplies || S.dmList.filter(function(d){return d.isReplied}).length || 0;
-  document.getElementById('anTotalDm').textContent=fmtNum(totalDm);
-  document.getElementById('anAiReplies').textContent=fmtNum(totalReplies);
-  document.getElementById('anOnline').textContent=fmtNum(ls.onlineCount||0);
-  document.getElementById('anInquiry').textContent=fmtNum(ls.totalPrivateMessages||0);
-  document.getElementById('anMention').textContent=fmtNum(st.mentionCount||0);
-  document.getElementById('anIntent').textContent=fmtNum(Math.round(st.intentScore||0));
-  renderDmTrendChart(); renderAudienceChart(); renderLiveOverview();
+  renderAnalysisHero();
+  renderOrderFeedback();
   renderLiveRoomStats();
-  if (S.curPage==='analysis') { loadLiveRoomStats(); loadOrderData(); }
+  if (S.curPage==='analysis') { loadLiveRoomStats(); loadOrderData(); loadSessionOrders(); }
 }
 // ===== 商品累计销量 Top =====
 // 订单明细、成交统计与状态筛选统一由「订单管理」页负责；分析页只保留按商品的
 // 累计销量分析，避免两页重复维护同一份订单数据。
 function loadOrderData(){
   if(!S.orderStats) wsSend('get_order_stats');
-  else renderOrderByProduct();
+  else renderProductTopChart();
 }
 // 订单状态 → 徽章配色 / 中文名。提到函数外共用：订单管理页的宽表格
 // 和 控制台的紧凑列表（renderSessionOrders）都读这一份，别再各写一张表。
@@ -3266,36 +3497,133 @@ function renderLiveRoomStatBar(){
     '已付款 <strong>'+fmtNum(st.paidOrderCount||0)+'</strong> · '+
     'GMV <strong style="color:#dc2626">¥'+fmtNum(st.gmv||0)+'</strong>';
 }
-function renderLiveRoomStats(){
-  renderLiveRoomStatBar();
-  var row=document.getElementById('liveRoomStatRow');
+function productStatsList(){
   var st=S.liveRoomStats||{};
-  if(row){
-    row.innerHTML=statCard('商品点击', st.clickCount||0, '#2563eb')+
-      statCard('点击人数', st.clickViewerCount||0, '#0891b2')+
-      statCard('本场下单', st.orderCount||0, '#d97706')+
-      statCard('已付款单', st.paidOrderCount||0, '#059669')+
-      statCard('成交金额', '¥'+fmtNum(st.gmv||0), '#dc2626')+
-      statCard('点击→下单', (st.clickToOrderRate||0)+'%', '#7c3aed');
+  var list=(st.productStats||[]).slice();
+  if(!list.length && S.orderStats){
+    list=(S.orderStats.byProduct||[]).map(function(x){
+      return {productId:x.productId,name:x.name,qty:x.qty,gmv:x.amount,
+              clicks:0,orderCount:0,paidCount:0,mounted:false};
+    });
   }
-  var el=document.getElementById('liveRoomProductStats');
+  return list;
+}
+function renderProductTopChart(){
+  var el=document.getElementById('productTopChart');
   if(!el) return;
-  var list=st.productStats||[];
-  if(!list.length){
-    el.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:10px 0">本场暂无商品点击或订单</div>';
+  var list=productStatsList().slice();
+  var hint=document.getElementById('productTopHint');
+  var isSession=list.some(function(x){return (Number(x.gmv)||0)>0;});
+  // 本场尚未产生成交时，回退到累计真实成交，避免整块空白
+  if(!isSession && S.orderStats){
+    list=(S.orderStats.byProduct||[]).map(function(x){
+      return {productId:x.productId,name:x.name,qty:x.qty,gmv:x.amount,
+              clicks:0,orderCount:0,paidCount:0,mounted:false};
+    });
+    if(hint) hint.textContent='未开播 · 展示累计真实成交';
+  }else if(hint){
+    hint.textContent=isSession?'按本场成交额':'';
+  }
+  list=list.sort(function(a,b){return (Number(b.gmv)||0)-(Number(a.gmv)||0);}).slice(0,8).reverse();
+  if(!list.length || !list.some(function(x){return (Number(x.gmv)||0)>0;})){
+    if(window.__productTopChart){try{window.__productTopChart.dispose()}catch(e){}window.__productTopChart=null;}
+    el.innerHTML='<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:12px">本场暂无成交商品</div>';
     return;
   }
-  el.innerHTML='<table class="lc-tbl2"><tr><th>商品</th><th>挂载</th><th>点击</th><th>下单</th><th>已付款</th><th>件数</th><th>GMV</th></tr>'+
+  try{
+    el.innerHTML='';
+    if(window.__productTopChart)window.__productTopChart.dispose();
+    var ch=echarts.init(el);window.__productTopChart=ch;
+    var names=list.map(function(x){var n=String(x.name||x.productId||'');return n.length>12?n.slice(0,12)+'…':n;});
+    var vals=list.map(function(x){return Number(x.gmv)||0;});
+    ch.setOption({
+      tooltip:{trigger:'axis',axisPointer:{type:'shadow'},
+        formatter:function(ps){
+          var r=list[ps[0].dataIndex];
+          return esc(r.name||r.productId)+'<br>GMV ¥'+fmtNum(r.gmv||0)+
+                 '<br>件数 '+fmtNum(r.qty||0)+' · 下单 '+fmtNum(r.orderCount||0);
+        }},
+      grid:{left:125,right:70,top:10,bottom:18},
+      xAxis:{type:'value',axisLabel:{fontSize:9,color:'#94a3b8'},splitLine:{lineStyle:{color:'#eef2f7'}}},
+      yAxis:{type:'category',data:names,axisLabel:{fontSize:10,color:'#475569'}},
+      series:[{type:'bar',data:vals,barMaxWidth:18,
+        itemStyle:{color:{type:'linear',x:0,y:0,x2:1,y2:0,colorStops:[
+          {offset:0,color:'#60a5fa'},{offset:1,color:'#2563eb'}]}},
+        label:{show:true,position:'right',fontSize:9,color:'#2563eb',
+          formatter:function(p){return '¥'+fmtNum(p.value);}}}]
+    });
+  }catch(e){}
+}
+function renderProductConvChart(){
+  var el=document.getElementById('productConvChart');
+  if(!el) return;
+  var list=productStatsList().slice().sort(function(a,b){return (Number(b.clicks)||0)-(Number(a.clicks)||0);}).slice(0,6);
+  if(!list.length || !list.some(function(x){return (Number(x.clicks)||0)>0;})){
+    if(window.__productConvChart){try{window.__productConvChart.dispose()}catch(e){}window.__productConvChart=null;}
+    el.innerHTML='<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:12px">本场暂无商品点击数据</div>';
+    return;
+  }
+  try{
+    el.innerHTML='';
+    if(window.__productConvChart)window.__productConvChart.dispose();
+    var ch=echarts.init(el);window.__productConvChart=ch;
+    var names=list.map(function(x){var n=String(x.name||x.productId||'');return n.length>10?n.slice(0,10)+'…':n;});
+    var clicks=list.map(function(x){return Number(x.clicks)||0;});
+    var rate=list.map(function(x){return x.clicks?Math.round((Number(x.orderCount)||0)/x.clicks*1000)/10:0;});
+    ch.setOption({
+      tooltip:{trigger:'axis',axisPointer:{type:'shadow'},
+        formatter:function(ps){
+          var r=list[ps[0].dataIndex];
+          return esc(r.name||r.productId)+'<br>点击 '+fmtNum(r.clicks||0)+
+                 ' · 下单 '+fmtNum(r.orderCount||0)+' · 支付 '+fmtNum(r.paidCount||0)+
+                 '<br>GMV ¥'+fmtNum(r.gmv||0);
+        }},
+      legend:{top:0,textStyle:{fontSize:10,color:'#64748b'}},
+      grid:{left:40,right:42,top:30,bottom:48},
+      xAxis:{type:'category',data:names,axisLabel:{fontSize:8,color:'#64748b',interval:0,rotate:18}},
+      yAxis:[
+        {type:'value',name:'点击',axisLabel:{fontSize:9,color:'#94a3b8'},splitLine:{lineStyle:{color:'#eef2f7'}}},
+        {type:'value',name:'转化率%',axisLabel:{fontSize:9,color:'#94a3b8'},splitLine:{show:false}}
+      ],
+      series:[
+        {name:'点击次数',type:'bar',data:clicks,barMaxWidth:22,itemStyle:{color:'#2563eb'}},
+        {name:'点击→下单',type:'line',yAxisIndex:1,data:rate,smooth:true,symbolSize:5,
+          itemStyle:{color:'#f59e0b'},lineStyle:{color:'#f59e0b',width:2},
+          label:{show:true,position:'top',fontSize:9,color:'#d97706',formatter:'{c}%'}}
+      ]
+    });
+  }catch(e){}
+}
+function renderLiveRoomProductTable(){
+  var el=document.getElementById('liveRoomProductStats');
+  if(!el) return;
+  var list=productStatsList();
+  if(!list.length || !list.some(function(r){return (Number(r.clicks)||0)+(Number(r.orderCount)||0)+(Number(r.gmv)||0)>0;})){
+    el.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:16px 0;text-align:center">本场暂无商品点击/成交数据，开播后自动统计</div>';
+    return;
+  }
+  el.innerHTML='<table class="lc-tbl2"><tr><th>商品</th><th>点击</th><th>下单</th><th>支付</th><th>点击→下单</th><th>件数</th><th>GMV</th></tr>'+
     list.slice(0,20).map(function(r){
+      var rate=r.clicks?Math.round((Number(r.orderCount)||0)/r.clicks*1000)/10:0;
       return '<tr>'+
         '<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis">'+esc(r.name||r.productId)+'</td>'+
-        '<td>'+(r.mounted?'✅':'—')+'</td>'+
         '<td style="color:#2563eb;font-weight:600">'+fmtNum(r.clicks||0)+'</td>'+
         '<td>'+fmtNum(r.orderCount||0)+'</td>'+
         '<td>'+fmtNum(r.paidCount||0)+'</td>'+
+        '<td><div style="display:flex;align-items:center;gap:6px;min-width:90px">'+
+          '<div style="flex:1;height:6px;background:#eef2f7;border-radius:3px;overflow:hidden">'+
+            '<div style="width:'+Math.min(100,rate)+'%;height:100%;background:#2563eb"></div></div>'+
+          '<span style="font-size:10px;color:#475569;white-space:nowrap">'+rate+'%</span></div></td>'+
         '<td>'+fmtNum(r.qty||0)+'</td>'+
-        '<td style="color:#dc2626">¥'+fmtNum(r.gmv||0)+'</td></tr>';
+        '<td style="color:#dc2626;font-weight:600">¥'+fmtNum(r.gmv||0)+'</td></tr>';
     }).join('')+'</table>';
+}
+function renderLiveRoomStats(){
+  renderLiveRoomStatBar();
+  renderProductTopChart();
+  renderProductConvChart();
+  renderLiveRoomProductTable();
+  if(S.curPage==='analysis') renderAnalysisHeroKpis();
 }
 
 // 订单是否属于真实用户。与后端 order_is_real 同源的判据是 userId 前缀，
@@ -3377,42 +3705,9 @@ function orderAct(orderId,status,btn){
   toast(labels[status]||'操作已提交','success');
   setTimeout(function(){ if(btn){ btn.disabled=false; } },1800);
 }
-function renderOrderByProduct(){
-  var el=document.getElementById('orderByProduct');
-  if(!el||!S.orderStats)return;
-  var top=S.orderStats.byProduct||[];
-  if(!top.length){el.innerHTML='<div style="color:#94a3b8;text-align:center;padding:20px">暂无成交</div>';return;}
-  var maxQ=top[0].qty||1;
-  el.innerHTML=top.slice(0,8).map(function(b){
-    var w=Math.round(b.qty/maxQ*100);
-    return '<div style="margin-bottom:8px">'+
-      '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px;gap:8px">'+
-        '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:50%">'+esc(b.name)+'</span>'+
-        '<span style="color:#64748b;white-space:nowrap">'+b.qty+'件 · ¥'+fmtNum(b.amount)+
-          ' <button class="lc-mini-btn" style="padding:0 5px;font-size:10px" onclick="quickOrderLookup(\''+esc(b.productId)+'\')">查单</button></span></div>'+
-      '<div style="background:#eef2f7;border-radius:4px;height:8px;overflow:hidden"><div style="width:'+w+'%;background:#2563eb;height:100%;border-radius:4px"></div></div>'+
-    '</div>';
-  }).join('');
-}
 // 「▶️ 模拟一波成交」按钮与 simulateOrders() 已删除：它会通过 WS 让后端凭空生成
 // 5 张 userId="" 的假订单并直接改动商品库存/销量，运营台的成交数据因此混入从未发生
 // 过的交易。后端对应的 simulate_orders / buy_product 两条消息也已一并移除。
-function renderDmTrendChart() {
-  try {
-    if(window.__dmTrendChart) window.__dmTrendChart.dispose();
-    var chart=echarts.init(document.getElementById('dmTrendChart'));
-    window.__dmTrendChart=chart;
-    var data=S.dmList.slice(-30);
-    var times=data.map(function(d){return fmtTime(d.timestamp)});
-    var counts=data.map(function(_,i){return i+1});
-    chart.setOption({
-      tooltip:{trigger:'axis'},grid:{left:40,right:20,top:20,bottom:58},
-      xAxis:{type:'category',data:times.length>10?times.filter(function(_,i){return i%Math.ceil(times.length/10)===0}):times,axisLabel:{fontSize:10,rotate:30}},
-      yAxis:{type:'value'},
-      series:[{type:'line',data:counts,smooth:true,lineStyle:{color:'#2563eb',width:2},areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'rgba(37,99,235,.2)'},{offset:1,color:'rgba(37,99,235,0)'}]}},symbol:'circle',symbolSize:6}]
-    });
-  }catch(e){}
-}
 // 观众画像：按**真实观众会话**的 userLevel 计数。
 // 旧实现是写死的 35/25/20/12/8，与直播间里到底有谁毫无关系 —— 一个观众都没有时
 // 也照样画出一张漂亮的饼图。现在没数据就显示空态。
@@ -3437,32 +3732,25 @@ function renderAudienceChart() {
     var counts={};
     real.forEach(function(s){counts[s.userLevel]=(counts[s.userLevel]||0)+1});
     chart.setOption({
+      backgroundColor:'transparent',
+      textStyle:{color:'#dbeafe'},
       tooltip:{trigger:'item',formatter:'{b}: {c} ({d}%)'},
-      series:[{type:'pie',radius:['30%','60%'],center:['50%','50%'],
+      legend:{bottom:0,textStyle:{color:'#bfdbfe',fontSize:10}},
+      series:[{type:'pie',radius:['38%','64%'],center:['50%','46%'],
         data:AUD_LEVELS.filter(function(l){return counts[l[0]]}).map(function(l){
           return {name:l[1],value:counts[l[0]],itemStyle:{color:l[2]}};
         }),
-        label:{fontSize:12,formatter:'{b}\n{d}%'},
-        emphasis:{itemStyle:{shadowBlur:10,shadowColor:'rgba(0,0,0,.15)'}}
-      }]
+        label:{fontSize:10,color:'#dbeafe',formatter:'{b}\n{d}%'},
+        labelLine:{lineStyle:{color:'rgba(255,255,255,.35)'}},
+        emphasis:{itemStyle:{shadowBlur:10,shadowColor:'rgba(0,0,0,.25)'}}
+      }],
+      graphic:[
+        {type:'text',left:'center',top:'36%',style:{text:String(real.length),fill:'#fff',fontSize:24,fontWeight:700,textAlign:'center'}},
+        {type:'text',left:'center',top:'47%',style:{text:'真实观众',fill:'#bfdbfe',fontSize:10,textAlign:'center'}}
+      ]
     });
   }catch(e){}
 }
-function renderLiveOverview() {
-  var ls=S.liveStatus,st=S.stats;
-  var dur=ls.liveDuration||0;
-  var h=Math.floor(dur/3600),m=Math.floor((dur%3600)/60);
-  var ds=(h>0?h+'小时':'')+m+'分钟';
-  document.getElementById('liveDataOverview').innerHTML=
-    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">'+
-    '<div class="lc-stat lc-card"><div class="nv">'+ds+'</div><div class="lb">直播时长</div></div>'+
-    '<div class="lc-stat lc-card"><div class="nv">'+fmtNum(ls.totalDanmaku||0)+'</div><div class="lb">真实观众弹幕</div></div>'+
-    '<div class="lc-stat lc-card"><div class="nv">'+fmtNum(ls.totalAIReplies||0)+'</div><div class="lb">AI回复（真实）</div></div>'+
-    '<div class="lc-stat lc-card"><div class="nv">'+fmtNum(st.virtualDanmakuCount||0)+'</div><div class="lb">氛围弹幕（不计入统计）</div></div>'+
-    '<div class="lc-stat lc-card"><div class="nv">'+fmtNum(Math.round(st.aiReplySuccessRate||0))+'%</div><div class="lb">回复成功率</div></div>'+
-    '<div class="lc-stat lc-card"><div class="nv">'+fmtNum(st.potentialOrderCount||0)+'</div><div class="lb">潜在订单</div></div></div>';
-}
-
 // ============================================================
 // Rendering: Reviews Page
 // ============================================================
@@ -4614,9 +4902,9 @@ on('stats_update',function(d){
   if(d.stats)S.stats=d.stats;
   if(d.liveStatus)Object.assign(S.liveStatus,d.liveStatus);
   if(S.curPage==='console')updateConsoleStats();
-  if(S.curPage==='analysis')renderAnalysisPage();
+  if(S.curPage==='analysis')renderAnalysisHeroKpis();
 });
-on('new_review',function(d){if(d.reviewId&&!S.reviews.find(function(r){return r.reviewId===d.reviewId})){S.reviews.push(d);if(S.curPage==='reviews')renderReviewsPage();if(S.curPage==='orders')renderAdminOrders();}});
+on('new_review',function(d){if(d.reviewId&&!S.reviews.find(function(r){return r.reviewId===d.reviewId})){S.reviews.push(d);if(S.curPage==='reviews')renderReviewsPage();if(S.curPage==='orders')renderAdminOrders();if(S.curPage==='analysis'){renderAnalysisHeroKpis();renderOrderFeedback();}}});
 // 注意：后端从不广播 high_freq_update，这里原本挂了一个永远不触发的死监听。
 // 高频问题统一走 get_high_freq 请求-响应（见 loadHighFreq / get_high_freq_result）。
 on('get_high_freq_result',function(d){
@@ -4650,7 +4938,7 @@ on('get_user_messages_result',function(d){
   S.inboxMsgs=d.messages||[];
   renderInboxDetail();
 });
-on('get_stats_result',function(d){if(d.stats)S.stats=d.stats;if(d.liveStatus)Object.assign(S.liveStatus,d.liveStatus);if(S.curPage==='console')updateConsoleStats();if(S.curPage==='analysis')renderAnalysisPage();});
+on('get_stats_result',function(d){if(d.stats)S.stats=d.stats;if(d.liveStatus)Object.assign(S.liveStatus,d.liveStatus);if(S.curPage==='console')updateConsoleStats();if(S.curPage==='analysis')renderAnalysisHeroKpis();});
 on('get_settings_result',function(d){if(d.settings){S.settings=d.settings;applySettings(d.settings);}});
 on('save_settings_result',function(d){if(d.success)toast('设置已保存','success');});
 
@@ -4854,27 +5142,28 @@ on('get_orders_result',function(d){
 });
 on('get_order_stats_result',function(d){
   if(d.stats)S.orderStats=d.stats;
-  if(S.curPage==='analysis')renderOrderByProduct();
+  if(S.curPage==='analysis'){renderProductTopChart();renderProductConvChart();}
   if(S.curPage==='orders')renderAdminStats();
 });
 on('get_session_orders_result',function(d){
   if(d.orders)S.sessionOrders=d.orders;
   if(d.stats)S.sessionOrderStats=d.stats;
   if(S.curPage==='console')renderSessionOrders();
+  if(S.curPage==='analysis'){renderAnalysisHeroKpis();renderAnalysisTrendChart();renderOrderFeedback();}
 });
 on('order_new',function(d){
   // 新订单到达：刷新分析页的商品销量 Top 与商品数据；在控制台就地刷「本场订单」，
   // 主播不用切页就能看到刚成交的那一单。
   if(d&&d.orderId)pushNotice('order','新订单',(d.userName||'观众')+' 下单 ¥'+fmtNum(d.totalAmount||0)+
     (d.productName?(' · '+d.productName):''));
-  if(S.curPage==='analysis')wsSend('get_order_stats');
+  if(S.curPage==='analysis'){wsSend('get_order_stats');loadSessionOrders();}
   if(S.curPage==='console')loadSessionOrders();
   if(S.curPage==='orders')loadAdminOrders();
   loadLiveRoomStats();
   wsSend('get_products');
 });
 on('order_updated',function(d){
-  if(S.curPage==='analysis')wsSend('get_order_stats');
+  if(S.curPage==='analysis'){wsSend('get_order_stats');loadSessionOrders();}
   if(S.curPage==='console')loadSessionOrders();
   if(S.curPage==='orders')loadAdminOrders();
   else if(d && d.refundStatus==='pending') wsSend('get_orders',{scope:'real',limit:200});
@@ -4955,7 +5244,6 @@ on('correct_reply_result',function(d){
 });
 on('get_stage_analysis_result',function(d){ S.stageSessionId=(d&&d.sessionId)||S.stageSessionId; renderStageAnalysis(d); });
 on('get_conversion_funnel_result',function(d){ renderFunnel(d); });
-on('compare_products_result',function(d){ renderProductCompareResult((d&&d.products)||[]); });
 on('get_audience_profile_result',function(d){ renderAudienceProfile(d); });
 on('reply_review_result',function(d){
   if(d&&d.success){
@@ -5547,7 +5835,20 @@ function renderStageAnalysis(d){
   var sel=document.getElementById('anStageFilter');
   var stage=(sel&&sel.value)||'all';
   var rows=stage==='all'?all:all.filter(function(s){return s.stage===stage;});
+  var hasData=rows.some(function(s){
+    return (Number(s.danmaku)||0)+(Number(s.questions)||0)+(Number(s.orderCount)||0)+(Number(s.paidCount)||0)+(Number(s.gmv)||0)>0;
+  });
   var t=document.getElementById('stageAnalysisTable');
+  if(!hasData){
+    if(t) t.innerHTML='<div class="lc-empty"><div class="icon">⏱</div>未开播或本场暂无阶段数据</div>';
+    var c1=document.getElementById('stageAnalysisChart');
+    var c2=document.getElementById('stageGmvChart');
+    if(window.__stageChart){try{window.__stageChart.dispose()}catch(e){}window.__stageChart=null;}
+    if(window.__stageGmvChart){try{window.__stageGmvChart.dispose()}catch(e){}window.__stageGmvChart=null;}
+    if(c1) c1.innerHTML='';
+    if(c2) c2.innerHTML='';
+    return;
+  }
   if(t){
     t.innerHTML=rows.length?'<table class="lc-tbl2"><tr><th>阶段</th><th>弹幕</th><th>提问</th><th>互动观众</th><th>下单</th><th>支付</th><th>GMV</th></tr>'+
       rows.map(function(s){
@@ -5562,9 +5863,9 @@ function renderStageAnalysis(d){
     if(c1){
       if(window.__stageChart)window.__stageChart.dispose();
       var ch=echarts.init(c1);window.__stageChart=ch;
-      ch.setOption({tooltip:{trigger:'axis'},legend:{bottom:0,textStyle:{fontSize:11}},
-        grid:{left:40,right:20,top:20,bottom:40},
-        xAxis:{type:'category',data:rows.map(function(s){return s.label;}),axisLabel:{fontSize:10,interval:0,rotate:15}},
+      ch.setOption({tooltip:{trigger:'axis'},legend:{bottom:0,textStyle:{fontSize:10}},
+        grid:{left:40,right:20,top:20,bottom:58},
+        xAxis:{type:'category',data:rows.map(function(s){return s.label;}),axisLabel:{fontSize:9,interval:0,rotate:15}},
         yAxis:{type:'value'},
         series:[{name:'弹幕',type:'bar',data:rows.map(function(s){return s.danmaku}),itemStyle:{color:'#2563eb'}},
                 {name:'支付单',type:'bar',data:rows.map(function(s){return s.paidCount}),itemStyle:{color:'#10b981'}}]});
@@ -5573,8 +5874,8 @@ function renderStageAnalysis(d){
     if(c2){
       if(window.__stageGmvChart)window.__stageGmvChart.dispose();
       var ch2=echarts.init(c2);window.__stageGmvChart=ch2;
-      ch2.setOption({tooltip:{trigger:'axis'},grid:{left:50,right:20,top:20,bottom:40},
-        xAxis:{type:'category',data:rows.map(function(s){return s.label;}),axisLabel:{fontSize:10,interval:0,rotate:15}},
+      ch2.setOption({tooltip:{trigger:'axis'},grid:{left:55,right:20,top:20,bottom:58},
+        xAxis:{type:'category',data:rows.map(function(s){return s.label;}),axisLabel:{fontSize:9,interval:0,rotate:15}},
         yAxis:{type:'value',name:'GMV'},
         series:[{name:'GMV',type:'line',smooth:true,areaStyle:{opacity:.15},data:rows.map(function(s){return s.gmv}),itemStyle:{color:'#f59e0b'}}]});
     }
@@ -5586,51 +5887,38 @@ function loadConversionFunnel(productId){
 function renderFunnel(d){
   S.funnel=d;
   var steps=(d&&d.steps)||[];
-  try{
-    var el=document.getElementById('funnelChart');
-    if(el){
-      if(window.__funnelChart)window.__funnelChart.dispose();
-      var ch=echarts.init(el);window.__funnelChart=ch;
-      ch.setOption({tooltip:{trigger:'item',formatter:'{b}<br>人数：{c}<br>转化率：{d}%'},
-        series:[{type:'funnel',left:'8%',right:'8%',top:10,bottom:10,minSize:'20%',
-          label:{formatter:'{b} {c}人'},itemStyle:{borderWidth:1},
-          data:steps.map(function(s,i){return {name:s.label,value:s.count,itemStyle:{color:['#2563eb','#3b82f6','#60a5fa','#7c3aed','#10b981','#059669'][i%6]}};})}]});
-    }
-  }catch(e){}
+  var el=document.getElementById('funnelChart');
   var t=document.getElementById('funnelTable');
-  if(t) t.innerHTML=steps.map(function(s){return '<span style="display:inline-block;margin-right:16px">'+esc(s.label)+
-    ' <b>'+fmtNum(s.count)+'</b> 人'+(s.rate!==undefined?'（'+s.rate+'%）':'')+'</span>';}).join('');
-}
-function renderProductComparePicker(){
-  var el=document.getElementById('prodComparePicker');
+  if(t) t.innerHTML='';
   if(!el) return;
-  el.innerHTML=(S.products||[]).map(function(p){
-    return '<label style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border:1px solid #e2e8f0;border-radius:12px;cursor:pointer">'+
-      '<input type="checkbox" '+(S.compareIds[p.productId]?'checked':'')+' onchange="toggleCompareProduct(\''+esc(p.productId)+'\',this.checked)">'+esc(p.name)+'</label>';
-  }).join('')||'<span style="color:#94a3b8">暂无商品</span>';
-}
-function toggleCompareProduct(pid,on){
-  if(on)S.compareIds[pid]=true; else delete S.compareIds[pid];
-}
-function clearProductCompare(){ S.compareIds={}; S.productCompare=[]; renderProductComparePicker(); renderProductCompareResult(); }
-function runProductCompare(){
-  var ids=Object.keys(S.compareIds);
-  if(ids.length<2){toast('请至少勾选 2 个商品','warn');return;}
-  wsSend('compare_products',{productIds:ids});
-}
-function renderProductCompareResult(rows){
-  if(rows) S.productCompare=rows;
-  var el=document.getElementById('prodCompareResult');
-  if(!el) return;
-  rows=S.productCompare||[];
-  if(!rows.length){el.innerHTML='<div class="lc-empty"><div class="icon">⚖️</div>勾选 2 个以上商品后点击「对比选中商品」</div>';return;}
-  el.innerHTML='<table class="lc-tbl2"><tr><th>商品</th><th>销量</th><th>GMV</th><th>点击</th><th>加购人数</th><th>退款</th><th>评分</th><th>库存</th></tr>'+
-    rows.map(function(r){
-      return '<tr><td style="font-weight:600">'+esc(r.name)+'</td><td>'+fmtNum(r.qty)+'</td>'+
-        '<td style="color:#dc2626;font-weight:600">¥'+fmtNum(r.gmv)+'</td><td>'+fmtNum(r.clicks)+'</td>'+
-        '<td>'+fmtNum(r.cartUsers)+'</td><td>'+fmtNum(r.refundCount)+'</td>'+
-        '<td>'+((r.avgRating||r.rating)?(r.avgRating||r.rating)+' 分':'—')+'</td><td>'+fmtNum(r.stock)+'</td></tr>';
-    }).join('')+'</table>';
+  if(window.__funnelChart){try{window.__funnelChart.dispose()}catch(e){}window.__funnelChart=null;}
+  var counts=steps.map(function(s){return Number(s.count)||0;});
+  var max=Math.max.apply(null, counts.concat([0]));
+  // 漏斗必须以「观看直播 > 0」为起点；只有后置步骤有数说明口径不完整，宁可不画
+  if(!steps.length || max<=0 || !(Number(steps[0].count)>0)){
+    el.innerHTML='<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:12px">暂无转化数据，开播后自动统计</div>';
+    return;
+  }
+  var colors=['#2563eb','#3b82f6','#60a5fa','#7c3aed','#10b981','#059669'];
+  var prev=null;
+  el.innerHTML='<div style="display:flex;flex-direction:column;gap:10px;padding:10px 4px 0">'+
+    steps.map(function(s,i){
+      var count=Number(s.count)||0;
+      var rate=i===0?100:(prev?Math.round(count/prev*1000)/10:0);
+      var w=max?Math.max(count/max*100,count>0?5:0):0;
+      var color=colors[i%colors.length];
+      prev=count;
+      var inside=w>18;
+      return '<div style="display:flex;align-items:center;gap:10px">'+
+        '<div style="width:90px;text-align:right;font-size:11px;color:#64748b">'+esc(s.label)+'</div>'+
+        '<div style="flex:1;height:30px;background:#eef2f7;border-radius:5px;overflow:hidden;position:relative">'+
+          '<div style="width:'+w+'%;height:100%;background:linear-gradient(90deg,'+color+'aa,'+color+');border-radius:5px;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;color:#fff;font-size:11px;font-weight:600">'+(inside?fmtNum(count)+' 人':'')+'</div>'+
+          (!inside?'<span style="position:absolute;left:'+Math.min(96,w+1)+'%;top:6px;font-size:11px;color:'+color+';font-weight:600">'+fmtNum(count)+' 人</span>':'')+
+        '</div>'+
+        '<div style="width:80px;font-size:10px;text-align:right;color:'+(i===0?'#94a3b8':(rate>=50?'#059669':'#d97706'))+'">'+(i===0?'起始':rate+'%')+'</div>'+
+      '</div>';
+    }).join('')+
+    '<div style="font-size:10px;color:#94a3b8;text-align:right;padding-right:90px">转化率 = 本步骤 / 上一步骤</div></div>';
 }
 function loadAudienceProfile(){ wsSend('get_audience_profile'); }
 function renderAudienceProfile(d){
@@ -5638,21 +5926,55 @@ function renderAudienceProfile(d){
   try{
     var r=document.getElementById('audienceRegionChart');
     if(r){
-      if(window.__regionChart)window.__regionChart.dispose();
-      var ch=echarts.init(r);window.__regionChart=ch;
-      ch.setOption({tooltip:{trigger:'item'},legend:{type:'scroll',bottom:0,textStyle:{fontSize:10}},
-        series:[{type:'pie',radius:['38%','66%'],center:['50%','44%'],
-          label:{fontSize:10,formatter:'{b} {d}%'},
-          data:(d.regions||[]).map(function(x){return {name:x.region,value:x.count};})}]});
+      var regions=(d.regions||[]).slice().sort(function(a,b){return (b.count||0)-(a.count||0);});
+      var top=regions.slice(0,8);
+      var rest=regions.slice(8).reduce(function(a,x){return a+(Number(x.count)||0);},0);
+      if(rest>0) top.push({region:'其他',count:rest});
+      if(!top.length){
+        if(window.__regionChart){try{window.__regionChart.dispose()}catch(e){}window.__regionChart=null;}
+        r.innerHTML='<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:12px">暂无地域数据</div>';
+      }else{
+        var total=top.reduce(function(a,x){return a+(Number(x.count)||0);},0)||1;
+        if(window.__regionChart)window.__regionChart.dispose();
+        var ch=echarts.init(r);window.__regionChart=ch;
+        var names=top.map(function(x){return x.region;}).reverse();
+        var vals=top.map(function(x){return Number(x.count)||0;}).reverse();
+        ch.setOption({
+          tooltip:{trigger:'axis',axisPointer:{type:'shadow'},
+            formatter:function(ps){var x=top[top.length-1-ps[0].dataIndex];return esc(x.region)+'：'+fmtNum(x.count)+' 人（'+(x.count/total*100).toFixed(1)+'%）';}},
+          grid:{left:70,right:60,top:10,bottom:18},
+          xAxis:{type:'value',axisLabel:{fontSize:9,color:'#94a3b8'},splitLine:{lineStyle:{color:'#eef2f7'}}},
+          yAxis:{type:'category',data:names,axisLabel:{fontSize:10,color:'#475569'}},
+          series:[{type:'bar',data:vals,barMaxWidth:18,
+            itemStyle:{color:{type:'linear',x:0,y:0,x2:1,y2:0,colorStops:[
+              {offset:0,color:'#60a5fa'},{offset:1,color:'#2563eb'}]}},
+            label:{show:true,position:'right',fontSize:9,color:'#2563eb',
+              formatter:function(p){return fmtNum(p.value)+' 人 · '+(p.value/total*100).toFixed(1)+'%';}}}]
+        });
+      }
     }
     var t=document.getElementById('audienceTagChart');
     if(t){
-      if(window.__tagChart)window.__tagChart.dispose();
-      var ch2=echarts.init(t);window.__tagChart=ch2;
-      var tags=(d.tags||[]);
-      ch2.setOption({tooltip:{trigger:'axis'},grid:{left:80,right:20,top:10,bottom:20},
-        xAxis:{type:'value'},yAxis:{type:'category',data:tags.map(function(x){return x.tag;}),axisLabel:{fontSize:11}},
-        series:[{type:'bar',data:tags.map(function(x){return x.count;}),itemStyle:{color:'#7c3aed'},barMaxWidth:20}]});
+      var tags=(d.tags||[]).slice().sort(function(a,b){return (b.count||0)-(a.count||0);}).slice(0,8);
+      if(!tags.length){
+        if(window.__tagChart){try{window.__tagChart.dispose()}catch(e){}window.__tagChart=null;}
+        t.innerHTML='<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:12px">暂无观众标签数据</div>';
+      }else{
+        if(window.__tagChart)window.__tagChart.dispose();
+        var ch2=echarts.init(t);window.__tagChart=ch2;
+        var tn=tags.map(function(x){return x.tag;}).reverse();
+        var tv=tags.map(function(x){return Number(x.count)||0;}).reverse();
+        ch2.setOption({
+          tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
+          grid:{left:78,right:46,top:10,bottom:18},
+          xAxis:{type:'value',axisLabel:{fontSize:9,color:'#94a3b8'},splitLine:{lineStyle:{color:'#eef2f7'}}},
+          yAxis:{type:'category',data:tn,axisLabel:{fontSize:10,color:'#475569'}},
+          series:[{type:'bar',data:tv,barMaxWidth:20,
+            itemStyle:{color:{type:'linear',x:0,y:0,x2:1,y2:0,colorStops:[
+              {offset:0,color:'#a78bfa'},{offset:1,color:'#7c3aed'}]}},
+            label:{show:true,position:'right',fontSize:9,color:'#6d28d9'}}]
+        });
+      }
     }
   }catch(e){}
 }
@@ -6071,6 +6393,7 @@ function startServices() {
   setInterval(function(){
     if(S.curPage==='danmaku')renderDmPage();
     if(S.curPage==='reviews')updateReviewStats();
+    if(S.curPage==='analysis'){renderAnalysisHeroKpis();renderAnalysisTrendChart();renderOrderFeedback();}
 },5000);
 }
 </script>
