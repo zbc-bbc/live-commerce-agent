@@ -200,6 +200,7 @@ src/data/live_commerce/data/reports/*
 !src/data/live_commerce/data/reports/.gitkeep
 src/data/live_commerce/data/uploads/*
 !src/data/live_commerce/data/uploads/.gitkeep
+src/data/live_commerce/data/backups/*
 src/data/live_commerce/archives/*
 !src/data/live_commerce/archives/.gitkeep
 

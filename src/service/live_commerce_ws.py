@@ -14,7 +14,9 @@ from typing import Any, Optional
 from fastapi import WebSocket, WebSocketDisconnect
 
 from data.live_commerce import llm_endpoint_store
-from data.live_commerce.data_manager import get_data_manager, is_question_like
+from data.live_commerce.data_manager import (
+    get_data_manager, is_human_user_id, is_question_like, load_demo_viewer_ids,
+)
 from schema.live_commerce_schema import (
     LIVE_SCRIPT_TYPES, DanmakuItem, LiveCommerceSettings, LiveStatsData, OrderItem,
     PresetPhraseItem, PrivateMessageItem, ProductItem, ReviewItem,
@@ -489,6 +491,14 @@ class LiveCommerceWebSocketManager:
                     # 只发真实观众评价：运营台的「用户评价管理」不掺模拟数据。
                     # （观众端要看全量评价走 get_reviews 这条消息，不受此处影响。）
                     "reviews": [r.model_dump() for r in dm.get_reviews(source="user")],
+                    # 「弹幕历史记录」专用：最近 100 条里可能塞满 AI 虚拟弹幕，
+                    # 所以从更大范围里筛出真人弹幕单独下发，避免真实发言被挤掉。
+                    "realDanmaku": [
+                        d.model_dump() for d in dm.get_danmaku_list(1000)
+                        if is_human_user_id(d.userId) and not d.isViolation
+                    ][-200:],
+                    # 前端实时推送也要能识别演示账号（只用于 host 端过滤）。
+                    "demoViewerIds": sorted(load_demo_viewer_ids()),
                     "onlineBreakdown": dm.get_online_breakdown(),
                     # 本场直播数据（商品点击 / 下单数量 / GMV），仅运营台可见
                     "liveRoomStats": dm.get_live_room_stats(),
@@ -1826,7 +1836,13 @@ class LiveCommerceWebSocketManager:
                 user_id = await self._require_viewer(websocket, "get_cart")
                 if not user_id:
                     return
-                await self._send(websocket, "get_cart_result", dm.get_cart(user_id))
+                # 回包结构与 add/update/remove/clear 保持一致，统一放在 cart 字段下：
+                # 观众端 onCartResult 只认 d.cart，裸 payload 会被忽略，导致结算后
+                # 本地购物车一直停留在旧状态（徽标和弹层都还在）。
+                await self._send(websocket, "get_cart_result", {
+                    "success": True,
+                    "cart": dm.get_cart(user_id),
+                })
 
             elif msg_type == "add_cart":
                 user_id = await self._require_viewer(websocket, "add_cart")

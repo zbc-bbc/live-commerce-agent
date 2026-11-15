@@ -667,7 +667,9 @@ function wsConn(){
   ws.onclose=function(e){
     setConnPill(false);
     var code = e && e.code;
-    if(code===1000||code===1001) return;
+    // 1000/1001 是服务端正常关闭或服务重启（不是用户退出），继续重连；
+    // 旧逻辑直接 return，服务一重启观众端就永久停在连接断开状态。
+    if(code===1000||code===1001){ scheduleReconnect(); return; }
     var hadToken = !!S.token;
     if(code===1008){
       // 服务端在已接受连接后以 1008 拒绝（token 过期/伪造）→ 清本地 token，按游客重连。
@@ -2227,7 +2229,10 @@ function updateCartBadge(){
   else el.style.display='none';
 }
 function onCartResult(d, quiet){
+  // 兼容两种回包：标准 {cart:{...}}，以及只带购物车字段的裸 payload。
+  // 只认 d.cart 时，get_cart_result 会被静默丢弃，结算后购物车会停留在旧状态。
   if(d && d.cart) S.cart=d.cart;
+  else if(d && d.items) S.cart=d;
   if(S.cart && S.cart.couponRules && S.cart.couponRules.length) S.coupons=S.cart.couponRules;
   S.cartLoaded=true; updateCartBadge();
   if(S.sheetMode==='cart') renderCartSheet();
@@ -2244,7 +2249,9 @@ function onAddCartResult(d){
 function openCart(){
   if(!isLoggedIn()){ _pendingAction=openCart; openAuth('login'); return; }
   S.sheetMode='cart';
-  if(!S.cartLoaded) wsSend('get_cart',{});
+  // 每次打开都以服务端为准刷新：下单/付款后购物车已在服务端清理，
+  // 只靠首次加载的本地缓存会把付过款的商品继续显示在弹层里。
+  wsSend('get_cart',{});
   renderCartSheet();
 }
 function renderCartSheet(){
@@ -2363,6 +2370,9 @@ function onPayOrderResult(d){
     if(order && order.orderId) S.bought.push(order.orderId);
     showPayOk(order);
     fetchProducts();
+    // 付款后再对一次购物车：结算时服务端已移除已下单行，这里保证徽标与
+    // 弹层不会因为本地缓存而继续显示付过款的商品。
+    wsSend('get_cart',{});
   } else {
     if(d.balance!=null){ S.acc.balance=Number(d.balance)||0; renderWallet(); }
     toast(d.message||'支付失败','err');

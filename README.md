@@ -419,6 +419,37 @@ role: viewer keys: 7 products: 14 liveStatus: ['currentStage','liveDuration','on
 - 观众 H5：直播间商品横条下方出现固定的 `📌 置顶` 条，聊天列表里对应弹幕高亮；
 - 新连接重连后从 `init_state.pinnedDanmaku` 恢复置顶展示，开播（`start_live`）时两端同时清空。
 
+### 8. 生成演示观众与订单（可选）
+
+想让「商品数据分析 → 转化漏斗 / 阶段对比 / 商品 Top」和订单管理一打开就有真实感数据，
+可在服务启动后执行（**不是**往 JSON 里写假数字，所有记录都走线上真实链路落库）：
+
+```bash
+# 默认 24 个观众：开一场新直播 → 注册/登录 → 发弹幕 → 点商品 → 加购
+# → 下单 → 支付 → 发货 → 确认收货 → 评价/申请退款
+.venv/Scripts/python.exe scripts/seed_demo_viewers.py
+
+# 已经在直播中，沿用本场只补人气（不新增订单）
+.venv/Scripts/python.exe scripts/seed_demo_viewers.py --no-orders --no-start-live
+
+# 指定服务地址 / 主播账号 / 观众数量 / 观众密码
+.venv/Scripts/python.exe scripts/seed_demo_viewers.py \
+  --base-url http://127.0.0.1:8085 --host-user host01 --host-pass host123456 \
+  --viewers 24 --password demo123456
+```
+
+- 观众昵称与密码固定（默认 `demo123456`），重复执行会**登录复用**账号，不会每次多造一批新号；
+  可以用这些账号在观众端直接登录。演示数据主要用于观众端氛围、观众列表与模拟画像；
+  运营台的真实口径（订单管理、退款审核、本场数据总览、电商转化漏斗、本场商品 Top）
+  只统计真人账号，`demo_viewer_ids.json` 里登记的演示账号会被排除。
+- 脚本结尾打印的「本场真人数据」只含真人观众，通常会明显小于本次脚本造出的互动量
+  （演示账号按设计不计入运营台口径）。
+- **私信默认不生成**：收件箱是主播面对真人的工作台，演示账号不往里塞会话。确需演示时加
+  `--with-private-messages`；用完可停服执行
+  `scripts/purge_demo_private_messages.py` 清掉演示账号的私信（账号、订单等数据保留）。
+- 数据按**场次**统计：重新开播后「本场」会归零，需要再跑一次；历史订单、观众账号、
+  进场记录仍持久化在 `viewers.db` 与 `src/data/live_commerce/data/` 下。
+
 ### 常见问题
 
 | 现象 | 原因 / 解决 |

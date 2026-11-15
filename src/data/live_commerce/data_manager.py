@@ -41,6 +41,10 @@ SESSIONS_FILE = os.path.join(DATA_DIR, "sessions_data.json")
 PRIVATE_MSGS_FILE = os.path.join(DATA_DIR, "private_msgs_data.json")
 ORDERS_FILE = os.path.join(DATA_DIR, "orders_data.json")
 VIEWERS_FILE = os.path.join(DATA_DIR, "viewers_data.json")
+# 演示脚本（scripts/seed_demo_viewers.py）登记的账号 ID。这些账号走的是真实注册
+# 链路（同样是 v_ 前缀），但订单/退款是脚本造的，运营台的订单工作台需要把它们
+# 和真人订单区分开，见 is_demo_viewer / order_is_human。
+DEMO_IDS_FILE = os.path.join(DATA_DIR, "demo_viewer_ids.json")
 # 购物车 / 库存流水 / 加购事件（商品订单迭代新增；均在 data/ 目录下，已被 .gitignore 忽略）
 CARTS_FILE = os.path.join(DATA_DIR, "carts_data.json")
 STOCK_LOGS_FILE = os.path.join(DATA_DIR, "stock_logs_data.json")
@@ -394,6 +398,55 @@ def order_is_real(order: Any) -> bool:
     由 _audit_identity_consistency 在启动时对账并告警。
     """
     return classify_user_id(getattr(order, "userId", "")) == "viewer"
+
+
+# 演示账号登记表的 mtime 缓存：(mtime, ids)。seed_demo_viewers.py 会在服务运行
+# 期间登记新账号，所以不能只在进程启动时读一次；用一个 stat 判断是否要重读。
+_demo_ids_cache: Optional[tuple[float, frozenset[str]]] = None
+
+
+def load_demo_viewer_ids() -> frozenset[str]:
+    """读取「演示脚本账号」登记表（demo_viewer_ids.json）。"""
+    global _demo_ids_cache
+    try:
+        mtime = os.path.getmtime(DEMO_IDS_FILE)
+    except OSError:
+        _demo_ids_cache = None
+        return frozenset()
+    if _demo_ids_cache is not None and _demo_ids_cache[0] == mtime:
+        return _demo_ids_cache[1]
+    try:
+        with open(DEMO_IDS_FILE, encoding="utf-8") as f:
+            raw = json.load(f) or []
+    except (OSError, json.JSONDecodeError, TypeError):
+        return frozenset()
+    ids = frozenset(str(x).strip() for x in raw if str(x).strip())
+    _demo_ids_cache = (mtime, ids)
+    return ids
+
+
+def is_demo_viewer(uid: Any) -> bool:
+    """是否由 scripts/seed_demo_viewers.py 批量注册的演示账号。
+
+    这些账号走的是真实注册链路（同样是 v_ 前缀），订单也能正常流转；但订单和
+    退款申请是脚本批量造的，不属于主播要处理的工作量，运营台的订单列表 /
+    退款审核 / 退款原因汇总要按真人口径把它们排除。
+    """
+    return str(uid or "").strip() in load_demo_viewer_ids()
+
+
+def is_human_user_id(uid: Any) -> bool:
+    """真人观众：服务端发号的真实注册账号，且不是 seed 脚本的演示账号。
+
+    运营台的「本场数据」口径统一用它：演示账号走的是真实链路，但行为是脚本
+    批量造的，混进漏斗 / 总览会让主播看到对不上自己操作的数字。
+    """
+    return is_real_user_id(uid) and not is_demo_viewer(uid)
+
+
+def order_is_human(order: Any) -> bool:
+    """运营台订单工作台口径：真人观众订单（排除演示脚本账号）。"""
+    return is_human_user_id(getattr(order, "userId", ""))
 
 
 class LiveCommerceDataManager:
@@ -1485,8 +1538,11 @@ class LiveCommerceDataManager:
             return False
 
     def note_session_viewer(self, user_id: str) -> None:
-        """记录一个本场登录过的真实观众（WebSocket 层 _bind_user 时调用）。"""
-        if is_real_user_id(user_id):
+        """记录一个本场登录过的真人观众（WebSocket 层 _bind_user 时调用）。
+
+        演示脚本账号不计入：本场漏斗 / 总览里的「观看直播」只反映真人。
+        """
+        if is_human_user_id(user_id):
             with self._lock:
                 self._session_real_users.add(user_id)
 
@@ -1528,14 +1584,19 @@ class LiveCommerceDataManager:
 
     @staticmethod
     def _count_session_danmaku(items: list[DanmakuItem]) -> dict:
-        """场次弹幕统计：总数、真实观众数、提问数、情绪分布。"""
+        """场次弹幕统计：总数、真实观众数、提问数、情绪分布。
+
+        `human` 排除 seed 脚本的演示账号，运营台「场次弹幕复盘」用它做展示口径。
+        """
         counts = {
-            "total": len(items), "real": 0, "question": 0,
+            "total": len(items), "real": 0, "human": 0, "question": 0,
             "emotion": 0, "positive": 0, "negative": 0, "neutral": 0,
         }
         for d in items:
             if is_real_user_id(d.userId):
                 counts["real"] += 1
+            if is_human_user_id(d.userId) and not d.isViolation:
+                counts["human"] += 1
             if d.isQuestion:
                 counts["question"] += 1
             sentiment = d.sentiment or classify_sentiment(d.content)
@@ -1610,13 +1671,33 @@ class LiveCommerceDataManager:
         return meta
 
     def get_danmaku_sessions(self) -> list[dict]:
-        """所有已归档场次摘要（按开播时间倒序）。"""
+        """所有已归档场次摘要（按开播时间倒序）。
+
+        旧归档的索引里没有 `human`（排除 seed 演示账号后的真人弹幕数），但复盘页
+        的下拉必须和列表口径一致，否则会出现「下拉显示 24 条、点进去 0 条」。
+        这里对缺字段的历史场次读一次场次文件补齐，新归档已在 meta 里直接带 human。
+        """
         with self._lock:
             index = self._load_json(
                 os.path.join(danmaku_sessions_dir(), DANMAKU_SESSION_INDEX), [])
         if not isinstance(index, list):
             return []
         sessions = [m for m in index if isinstance(m, dict) and m.get("sessionId")]
+        session_dir = danmaku_sessions_dir()
+        for meta in sessions:
+            if "human" in meta:
+                continue
+            try:
+                data = self._load_json(
+                    os.path.join(session_dir, f"{meta['sessionId']}.json"), {})
+                raw = data.get("danmaku", []) if isinstance(data, dict) else []
+                meta["human"] = sum(
+                    1 for d in raw
+                    if isinstance(d, dict)
+                    and is_human_user_id(d.get("userId"))
+                    and not d.get("isViolation"))
+            except (OSError, ValueError, TypeError):
+                meta["human"] = int(meta.get("real") or 0)
         sessions.sort(key=lambda m: str(m.get("startTime", "")), reverse=True)
         return sessions
 
@@ -1642,9 +1723,14 @@ class LiveCommerceDataManager:
         items: list[DanmakuItem] = []
         for d in raw:
             try:
-                items.append(DanmakuItem(**d))
+                item = DanmakuItem(**d)
             except Exception:
                 continue
+            # 复盘页只回看真人观众的弹幕：AI 虚拟弹幕、u001 模拟观众、主播本人
+            # 以及 seed 脚本的演示账号都不进列表，避免主播对着假数据复盘。
+            # 命中敏感词被拦截的消息也排除 —— 它从未公开显示，不能算进本场互动。
+            if is_human_user_id(item.userId) and not item.isViolation:
+                items.append(item)
         counts = self._count_session_danmaku(items)
 
         flt = (filter_type or "all").strip().lower()
@@ -1956,8 +2042,11 @@ class LiveCommerceDataManager:
         """记录一次观众端商品点击（打开详情 / 点击推送卡片）。
 
         只有直播进行中（live/paused）才计入本场统计；未开播时的浏览不计入，
-        否则主播看到的「本场点击数」会混进开播前的闲逛。游客点击也计数，
-        但「点击人数」只统计已登录的真实观众，避免把无身份连接算成人。
+        否则主播看到的「本场点击数」会混进开播前的闲逛。
+
+        **只统计真人观众**（v_ 前缀，且排除 seed 脚本的演示账号）：分析页的
+        商品点击 / 转化 / 漏斗全部按真人口径，游客、历史账号、演示账号的点击
+        不计数，避免「点击数」虚高而「点击人数」对不上。
         """
         with self._lock:
             product = self.products.get(product_id)
@@ -1965,6 +2054,13 @@ class LiveCommerceDataManager:
                 return {"success": False, "counted": False, "message": "商品不存在"}
             if not product.isOnSale:
                 return {"success": False, "counted": False, "message": "商品未挂载到直播间"}
+            if not is_human_user_id(user_id):
+                return {
+                    "success": True,
+                    "counted": False,
+                    "productId": product_id,
+                    "message": "仅统计真人观众的点击",
+                }
             counting = (
                 self.live_state.status in ("live", "paused")
                 and bool(self.live_state.startTime)
@@ -1979,9 +2075,8 @@ class LiveCommerceDataManager:
             self._product_clicks[product_id] = (
                 self._product_clicks.get(product_id, 0) + 1
             )
-            if is_real_user_id(user_id):
-                self._click_viewers.add(user_id)
-                self._product_click_viewers.setdefault(product_id, set()).add(user_id)
+            self._click_viewers.add(user_id)
+            self._product_click_viewers.setdefault(product_id, set()).add(user_id)
             count = self._product_clicks[product_id]
         stats = self.get_live_room_stats()
         # 只广播给运营台：点击明细属于主播侧数据，不能回灌观众端。
@@ -2001,8 +2096,9 @@ class LiveCommerceDataManager:
         """本场直播数据基础统计：商品点击、下单数量、成交金额与单品转化。
 
         口径与运营台「本场订单」一致（``_session_orders_locked(real_only=True)``）：
-        只统计真实注册观众、且落在当前 startTime 之后的订单。未开播时订单维度
-        全部为 0，但已挂载商品仍会列出（方便主播开播前检查挂载情况）。
+        只统计**本场真人观众**（排除 seed 脚本的演示账号）且落在当前 startTime
+        之后的订单。未开播时订单维度全部为 0，但已挂载商品仍会列出（方便主播
+        开播前检查挂载情况）。
         """
         with self._lock:
             mounted = [p for p in self.products.values() if p.isOnSale]
@@ -2071,7 +2167,9 @@ class LiveCommerceDataManager:
                 "onlineCount": self.live_state.onlineCount,
                 "mountedCount": len(mounted),
                 "clickCount": click_count,
-                "clickViewerCount": len(self._click_viewers),
+                "clickViewerCount": len({
+                    u for u in self._click_viewers if not is_demo_viewer(u)
+                }),
                 "orderCount": order_count,
                 "paidOrderCount": paid_count,
                 "pendingPayCount": sum(1 for o in orders if o.status == "pending_pay"),
@@ -2100,6 +2198,7 @@ class LiveCommerceDataManager:
             for stage in LIVE_STAGES:
                 key = stage["key"]
                 stage_dm = [d for d in items if d.stage == key]
+                stage_real = [d for d in stage_dm if is_real_user_id(d.userId)]
                 stage_orders = [o for o in orders if o.stage == key]
                 paid = [o for o in stage_orders if o.status in paid_statuses]
                 rows.append({
@@ -2107,10 +2206,12 @@ class LiveCommerceDataManager:
                     "label": stage["label"],
                     "icon": stage["icon"],
                     "danmaku": len(stage_dm),
-                    "realDanmaku": sum(1 for d in stage_dm if is_real_user_id(d.userId)),
+                    "realDanmaku": len(stage_real),
                     "questions": sum(1 for d in stage_dm if d.isQuestion),
-                    "uniqueViewers": len({d.userId for d in stage_dm
-                                          if is_real_user_id(d.userId)}),
+                    # 分析页按真实用户口径：弹幕/提问都只取 v_ 观众，
+                    # 虚拟弹幕和模拟观众不参与阶段对比。
+                    "realQuestions": sum(1 for d in stage_real if d.isQuestion),
+                    "uniqueViewers": len({d.userId for d in stage_real}),
                     "positive": sum(1 for d in stage_dm
                                     if (d.sentiment or classify_sentiment(d.content))
                                     == "positive"),
@@ -2127,13 +2228,14 @@ class LiveCommerceDataManager:
             other_orders = [o for o in orders if o.stage not in STAGE_LABELS]
             if other_dm or other_orders:
                 paid = [o for o in other_orders if o.status in paid_statuses]
+                other_real = [d for d in other_dm if is_real_user_id(d.userId)]
                 rows.append({
                     "stage": "unassigned", "label": "未分阶段", "icon": "❓",
                     "danmaku": len(other_dm),
-                    "realDanmaku": sum(1 for d in other_dm if is_real_user_id(d.userId)),
+                    "realDanmaku": len(other_real),
                     "questions": sum(1 for d in other_dm if d.isQuestion),
-                    "uniqueViewers": len({d.userId for d in other_dm
-                                          if is_real_user_id(d.userId)}),
+                    "realQuestions": sum(1 for d in other_real if d.isQuestion),
+                    "uniqueViewers": len({d.userId for d in other_real}),
                     "positive": 0, "negative": 0,
                     "orderCount": len(other_orders), "paidCount": len(paid),
                     "qty": sum(o.quantity for o in paid),
@@ -2144,6 +2246,9 @@ class LiveCommerceDataManager:
     def get_conversion_funnel(self, product_id: str = "") -> dict:
         """电商转化漏斗：观看 → 点击/加购 → 下单 → 支付 → 确认收货。
 
+        只统计**本场直播的真人观众**（排除 seed 脚本的演示账号），漏斗各级
+        都从同一批人里取，避免「观看 43 人、下单 10 单」却对不上主播的操作。
+
         加购和直接下单不是互斥关系：把点击、加购、下单用户合并为「点击/加购」
         兴趣步骤，保证漏斗逐级递减，避免出现「提交订单 > 加购」的倒挂。
         """
@@ -2153,19 +2258,21 @@ class LiveCommerceDataManager:
             if product_id:
                 orders = [o for o in orders if self._product_has_order(o, product_id)]
             paid_statuses = ("paid", "shipped", "completed")
-            viewers = set(self._session_real_users)
+            viewers = {u for u in self._session_real_users if not is_demo_viewer(u)}
             if not viewers:
                 viewers = {d.userId for d in self.current_session_danmaku
-                           if is_real_user_id(d.userId)}
+                           if is_human_user_id(d.userId)}
             if product_id:
                 viewers = {o.userId for o in orders} | viewers
-                clickers = set(self._product_click_viewers.get(product_id, set()))
+                clickers = {u for u in self._product_click_viewers.get(product_id, set())
+                            if not is_demo_viewer(u)}
             else:
-                clickers = set(self._click_viewers)
+                clickers = {u for u in self._click_viewers if not is_demo_viewer(u)}
             cart_users = {
                 str(e.get("userId") or "")
                 for e in self.cart_events
-                if e.get("userId") and (not product_id or e.get("productId") == product_id)
+                if e.get("userId") and not is_demo_viewer(e.get("userId"))
+                and (not product_id or e.get("productId") == product_id)
                 and (not start or str(e.get("timestamp") or "") >= start)
             }
             order_users = {o.userId for o in orders if o.userId}
@@ -2174,6 +2281,10 @@ class LiveCommerceDataManager:
             completed_users = {o.userId for o in orders
                                if o.userId and o.status == "completed"}
             interest_users = clickers | cart_users | order_users
+            # 漏斗起点 = 本场连接过的真人观众 ∪ 有真实行为的观众。
+            # 只依赖连接集合时，服务重启 / 观众先连后开播都会让 _session_real_users
+            # 为空，后置步骤明明有数却因为「观看 0 人」画不出来（前端会判为口径不完整）。
+            viewers = viewers | interest_users
             steps = [
                 {"key": "view", "label": "观看直播", "count": len(viewers)},
                 {"key": "interest", "label": "点击/加购商品", "count": len(interest_users)},
@@ -2249,8 +2360,8 @@ class LiveCommerceDataManager:
     def add_danmaku(self, danmaku: DanmakuItem) -> DanmakuItem:
         """添加弹幕（含敏感词拦截）。
 
-        totalDanmaku 只统计**真实观众**的弹幕（判据是 userId 前缀，不是 isVirtual ——
-        模拟弹幕的 isVirtual 是 False，旧写法把它们全算进了真实口径）。
+        totalDanmaku 只统计**真人观众**的弹幕（v_ 真实账号且排除演示脚本账号，
+        不是 isVirtual —— 模拟弹幕的 isVirtual 是 False，旧写法把它们全算进了真实口径）。
         命中敏感词时：标记 isViolation、写拦截日志、只推给运营台，不再公开广播。
         """
         blocked = False
@@ -2267,7 +2378,7 @@ class LiveCommerceDataManager:
             self.danmaku_list.append(danmaku)
             self._remember_live_danmaku_locked(danmaku)
             self._danmaku_counter += 1
-            if is_real_user_id(danmaku.userId) and not danmaku.isViolation:
+            if is_human_user_id(danmaku.userId) and not danmaku.isViolation:
                 self.live_state.totalDanmaku += 1
             # 只有会被写进盘的那部分才触发落盘：虚拟弹幕每秒都可能生成，不能让它带写。
             if is_persistable_user_id(danmaku.userId):
@@ -2358,7 +2469,7 @@ class LiveCommerceDataManager:
                     d.isReplied = True
                     d.replyContent = reply_content
                     d.replyTime = datetime.now().isoformat()
-                    if is_real_user_id(d.userId):
+                    if is_human_user_id(d.userId):
                         self.live_state.totalAIReplies += 1
                         self.stats.totalAIReplies += 1
                     if is_persistable_user_id(d.userId):
@@ -2382,7 +2493,7 @@ class LiveCommerceDataManager:
         track_unread=False → 只入库/广播，不累加会话未读数，也不计入真实咨询数。
         generate_mock_data 重灌模拟私信时必须传 False：那些 u00x 模拟会话本来就不该
         在运营台的未读红点上出现（决策：运营台只呈现真实用户）。
-        totalPrivateMessages 只统计真实观众（判据同 add_danmaku）。
+        totalPrivateMessages 只统计真人观众（判据同 add_danmaku，演示账号不计）。
         """
         with self._lock:
             uid = msg.userId
@@ -2392,7 +2503,7 @@ class LiveCommerceDataManager:
             self._msg_counter += 1
             if is_persistable_user_id(uid):
                 self._save_private_messages()
-            if msg.isFromUser and track_unread and is_real_user_id(uid):
+            if msg.isFromUser and track_unread and is_human_user_id(uid):
                 self.live_state.totalPrivateMessages += 1
             # 更新会话
             session = self._get_or_create_session(uid, msg.userName, msg.avatar)
@@ -2461,10 +2572,11 @@ class LiveCommerceDataManager:
         return session
 
     def get_all_sessions(self) -> list[UserSessionItem]:
-        """获取所有用户会话"""
+        """获取所有用户会话（运营台口径：排除 seed 脚本的演示账号）。"""
         with self._lock:
             return sorted(
-                list(self.user_sessions.values()),
+                [s for s in self.user_sessions.values()
+                 if not is_demo_viewer(s.userId)],
                 key=lambda s: s.lastMessageTime,
                 reverse=True,
             )
@@ -2638,9 +2750,13 @@ class LiveCommerceDataManager:
             self.reviews.append(review)
             self._review_counter += 1
             self._save_reviews()
-        self._broadcast("new_review", review.model_dump())
-        # 差评实时预警：只推运营台，前端弹窗 + 声音提示
-        if review.sentiment == "negative":
+        payload = review.model_dump()
+        # 观众端仍要收到（商品卡评分氛围），但运营台必须能识别演示账号并在
+        # 实时推送里直接丢弃，否则 seed 脚本一跑就会把假评价塞进主播列表。
+        payload["isDemoViewer"] = is_demo_viewer(review.userId)
+        self._broadcast("new_review", payload)
+        # 差评实时预警：只推运营台，且只对真人评价告警（演示账号不打扰主播）。
+        if review.sentiment == "negative" and is_human_user_id(review.userId):
             self._broadcast("negative_review_alert", {
                 "review": review.model_dump(),
                 "message": f"收到差评 {review.rating} 星：{review.content[:40]}",
@@ -2672,8 +2788,11 @@ class LiveCommerceDataManager:
         不依赖外部 LLM，保证后台一打开就能看到结果。
         """
         with self._lock:
-            negatives = [r for r in self.reviews if r.sentiment == "negative"
-                         or int(r.rating or 5) <= 2]
+            # 只聚合真人观众的评价：u001~u010 与 seed 演示账号的差评只用于观众端
+            # 评分氛围，不能出现在主播的「AI 差评痛点」里，否则会对着不存在的人做整改。
+            negatives = [r for r in self.reviews
+                         if is_human_user_id(r.userId)
+                         and (r.sentiment == "negative" or int(r.rating or 5) <= 2)]
             groups: dict[str, dict] = {}
             for r in negatives:
                 hits = [w for w in _NEGATIVE_WORDS if w in (r.content or "")]
@@ -2740,6 +2859,10 @@ class LiveCommerceDataManager:
                 results = [r for r in results if r.productId == product_id]
             if source:
                 results = [r for r in results if r.source == source]
+                # source=user 是运营台「用户评价管理」的口径：再加一道真人账号
+                # 校验，保证页面只展示真人观众的评价（seed 演示账号也不进列表）。
+                if source == "user":
+                    results = [r for r in results if is_human_user_id(r.userId)]
             if keyword:
                 results = [r for r in results if keyword.lower() in r.content.lower()]
             return sorted(results, key=lambda r: r.timestamp, reverse=True)
@@ -2933,9 +3056,14 @@ class LiveCommerceDataManager:
 
     def get_orders(self, status: str = "", limit: int = 50,
                    product_id: str = "") -> list[OrderItem]:
-        """获取真实订单列表（按时间倒序，可按状态/商品筛选）。"""
+        """获取真人订单列表（按时间倒序，可按状态/商品筛选）。
+
+        只保留真人账号的订单：模拟订单（u00x / 无 userId）本来就进不来，演示脚本
+        批量注册的账号（demo_viewer_ids.json）也一并排除 —— 订单管理工作台是主播
+        处理真实售后/退款的地方，演示数据留在数据分析里撑图表即可。
+        """
         with self._lock:
-            results = [o for o in self.orders.values() if order_is_real(o)]
+            results = [o for o in self.orders.values() if order_is_human(o)]
             if status:
                 results = [o for o in results if o.status == status]
             if product_id:
@@ -3247,7 +3375,7 @@ class LiveCommerceDataManager:
                 "messages": messages, "category": cat}
 
     def export_orders_csv(self, status: str = "") -> str:
-        """导出真实订单为 CSV 文本（UTF-8 BOM，Excel 直接打开不乱码）。"""
+        """导出真人订单为 CSV 文本（UTF-8 BOM，Excel 直接打开不乱码）。"""
         orders = self.get_orders(status=status, limit=100000)
         buf = io.StringIO()
         writer = csv.writer(buf)
@@ -3283,8 +3411,12 @@ class LiveCommerceDataManager:
         """退款原因汇总（数据分析用）：分类计数、金额、占比与最近原因列表。"""
         labels = {c["key"]: c["label"] for c in REFUND_REASON_CATEGORIES}
         with self._lock:
+            # 与订单列表同一口径：只汇总真人观众的退款，模拟订单、演示脚本账号
+            # 的退款都不进主播的售后汇总，否则会出现「列表里没有、汇总里多出几单」。
             refunded = [o for o in self.orders.values()
-                        if o.status == "refunded" or o.refundStatus in ("approved", "pending")]
+                        if order_is_human(o)
+                        and (o.status == "refunded"
+                             or o.refundStatus in ("approved", "pending"))]
             total = len(refunded)
             groups: dict[str, dict] = {}
             recent = []
@@ -3626,17 +3758,27 @@ class LiveCommerceDataManager:
 
     @staticmethod
     def _simulated_region(user_id: str) -> str:
-        """按 userId 稳定映射到模拟地域（同一观众永远同一地区，便于演示画像）。"""
+        """按 userId 稳定映射到模拟地域（同一观众永远同一地区，便于演示画像）。
+
+        这是**展示用模拟数据**：没有真实定位来源，分析页标题会明确标注
+        「模拟数据」，与「本场商品 Top」等真实口径区分开。
+        """
         regions = ["广东", "浙江", "江苏", "上海", "北京", "四川", "山东",
                    "河南", "湖北", "福建", "湖南", "陕西", "重庆", "安徽"]
         if not user_id:
-            return "未知"
+            return "其他"
         return regions[sum(ord(c) for c in user_id) % len(regions)]
 
     def get_audience_profile(self) -> dict:
-        """观众画像：模拟地域分布 + 自动标签分布（分析页饼图）。"""
+        """观众画像：地域分布 + 自动标签分布（分析页图表，均标注为模拟数据）。
+
+        这两块是演示用的模拟画像：人口取真实注册的 v_ 账号（含 seed 脚本的
+        演示账号），地域按 userId 稳定映射，保证图表始终有完整的分布、不会
+        出现「未填写」这类空档。真实的成交/商品口径见本场商品 Top 等图表。
+        """
         with self._lock:
-            viewers = list(self.viewers.items())
+            viewers = [(uid, acc) for uid, acc in self.viewers.items()
+                       if is_real_user_id(uid)]
             orders_by_user: dict[str, list[OrderItem]] = {}
             for o in self.orders.values():
                 if order_is_real(o):
@@ -4914,7 +5056,11 @@ class LiveCommerceDataManager:
                 "currentStage": s.currentStage,
                 "startTime": s.startTime,
                 "liveDuration": s.liveDuration,
+                # onlineCount 是「模拟热度基数 + 真实在线」，只适合控制台的观感展示；
+                # 分析页要求只算真实用户，读 realOnlineCount（观众连接会被
+                # _VIEWER_LIVE_FIELDS 裁掉，不会把运营口径下发给观众）。
                 "onlineCount": s.onlineCount,
+                "realOnlineCount": self._real_online,
                 "totalDanmaku": s.totalDanmaku,
                 "totalPrivateMessages": s.totalPrivateMessages,
                 "totalAIReplies": s.totalAIReplies,
@@ -5051,20 +5197,20 @@ class LiveCommerceDataManager:
             self.auto_reply_danmaku(danmaku_id, content, is_real=False)
 
     def _session_real_danmaku(self) -> list[DanmakuItem]:
-        """本场真实观众弹幕（锁内调用）。"""
+        """本场真人观众弹幕（锁内调用，演示账号不计）。"""
         return [d for d in self.danmaku_list
-                if is_real_user_id(d.userId) and self._in_session(d.timestamp)]
+                if is_human_user_id(d.userId) and self._in_session(d.timestamp)]
 
     def _session_orders_locked(self, real_only: bool = True) -> list[OrderItem]:
-        """本场订单：createTime 落在当前直播会话内；real_only 时只留真实注册观众（锁内调用）。
+        """本场订单：createTime 落在当前直播会话内；real_only 时只留真人观众（锁内调用）。
 
         口径的**唯一出处** —— generate_report / _recompute_real_stats_locked /
         get_session_orders 都走这里，别再各写一遍
-        `order_is_real(o) and self._in_session(o.createTime)`。这件事原先已经有两份
+        `order_is_human(o) and self._in_session(o.createTime)`。这件事原先已经有两份
         副本，加第三份的话，将来改口径必漏，而漏掉的那处会安静地算出另一套数字。
         """
         return [o for o in self.orders.values()
-                if (not real_only or order_is_real(o)) and self._in_session(o.createTime)]
+                if (not real_only or order_is_human(o)) and self._in_session(o.createTime)]
 
     def _recompute_real_stats_locked(self) -> None:
         """在锁内按真实事件重算统计面板的全部指标（**没有任何随机量**）。
@@ -5078,7 +5224,8 @@ class LiveCommerceDataManager:
           avgResponseTime     —— 本场真实弹幕 replyTime - timestamp 的均值（秒）
           virtualDanmakuCount —— 列表里虚拟弹幕条数（含上一场，仅供对照氛围量级）
           mentionCount        —— 本场真实弹幕提到当前商品名/卖点/标签的条数
-          inquiryCount        —— 本场真实观众发来的私信条数
+          inquiryCount        —— 本场发过私信的真人观众数（按 userId 去重，
+                                 只数观众发出的消息，主播/AI 回复不重复计人）
           intentScore         —— 100 × (0.4×人均弹幕率 + 0.3×私信观众占比 + 0.3×下单观众占比)，
                                  三个分量各自先按「真实观众数」归一并截顶到 1；没有人时恒为 0
           potentialOrderCount —— 真实观众的待付款订单数（加购未付款）
@@ -5116,17 +5263,21 @@ class LiveCommerceDataManager:
             self.stats.mentionCount = sum(
                 1 for d in real_dm if any(h and h in d.content for h in hints))
 
-        # 真实私信（本场 + 真实观众）
-        real_msgs = [m for uid, msgs in self.private_messages.items()
-                     if is_real_user_id(uid)
-                     for m in msgs if self._in_session(m.timestamp)]
-        self.stats.inquiryCount = len(real_msgs)
+        # 咨询人数：本场发过私信的真人观众数（按 userId 去重）。
+        # 只数观众发出的消息（isFromUser），主播/AI 的回复不算新的咨询；
+        # 演示账号不计。旧实现统计的是消息条数，和「人数」标签对不上。
+        consulting_users = {
+            uid for uid, msgs in self.private_messages.items()
+            if is_human_user_id(uid)
+            and any(m.isFromUser and self._in_session(m.timestamp) for m in msgs)
+        }
+        self.stats.inquiryCount = len(consulting_users)
 
         # 意向度：三个分量按真实观众数归一，再截顶到 1
         viewers = max(len(self._session_real_users), 1)
         dm_per_viewer = min(1.0, n_dm / viewers / 3.0)   # 人均 3 条弹幕视为满格
         senders = {uid for uid, msgs in self.private_messages.items()
-                   if is_real_user_id(uid)
+                   if is_human_user_id(uid)
                    and any(self._in_session(m.timestamp) for m in msgs)}
         private_ratio = min(1.0, len(senders) / viewers)
         # 必须和上面两个分量同口径（本场）。只按 order_is_real 数全量订单的话，
@@ -5140,10 +5291,10 @@ class LiveCommerceDataManager:
 
         self.stats.potentialOrderCount = sum(
             1 for o in self.orders.values()
-            if order_is_real(o) and o.status == "pending_pay")
+            if order_is_human(o) and o.status == "pending_pay")
         self.stats.humanTransferCount = sum(
             1 for uid, s in self.user_sessions.items()
-            if is_real_user_id(uid) and s.status == "human_reception")
+            if is_human_user_id(uid) and s.status == "human_reception")
         self.stats.presetUsedCount = sum(1 for p in self.presets.values() if p.useCount > 0)
 
     def _stats_update_loop(self):
@@ -5629,11 +5780,11 @@ class LiveCommerceDataManager:
             # 直播结束后缓冲已归档清空；从滚动列表按 sessionId 兜底，
             # 保证 end_live 自动生成报告时仍有完整场次数据。
             items = [d for d in self.danmaku_list if d.sessionId == sid]
-        real_dm = [d for d in items if is_real_user_id(d.userId)]
+        real_dm = [d for d in items if is_human_user_id(d.userId)]
         real_reviews = [r for r in self.reviews
-                        if is_real_user_id(r.userId) and self._in_session(r.timestamp)]
+                        if is_human_user_id(r.userId) and self._in_session(r.timestamp)]
         real_msgs = [m for uid, msgs in self.private_messages.items()
-                     if is_real_user_id(uid)
+                     if is_human_user_id(uid)
                      for m in msgs if self._in_session(m.timestamp)]
         real_orders = self._session_orders_locked()
         mock_orders_excluded = sum(
@@ -5696,23 +5847,23 @@ class LiveCommerceDataManager:
         end_time = str(meta.get("endTime") or "")
         product_id = str(meta.get("productId") or "")
         product_name = str(meta.get("productName") or "未上架商品")
-        real_dm = [d for d in items if is_real_user_id(d.userId)]
+        real_dm = [d for d in items if is_human_user_id(d.userId)]
         with self._lock:
             real_orders = [
                 o for o in self.orders.values()
-                if order_is_real(o)
+                if order_is_human(o)
                 and _timestamp_in_window(o.createTime, start_time, end_time)]
             mock_orders_excluded = sum(
                 1 for o in self.orders.values()
-                if not order_is_real(o)
+                if not order_is_human(o)
                 and _timestamp_in_window(o.createTime, start_time, end_time))
             real_reviews = [
                 r for r in self.reviews
-                if is_real_user_id(r.userId)
+                if is_human_user_id(r.userId)
                 and _timestamp_in_window(r.timestamp, start_time, end_time)]
             real_msgs = [
                 m for uid, msgs in self.private_messages.items()
-                if is_real_user_id(uid)
+                if is_human_user_id(uid)
                 for m in msgs
                 if _timestamp_in_window(m.timestamp, start_time, end_time)]
             product = self.products.get(product_id) if product_id else None
@@ -5968,19 +6119,6 @@ class LiveCommerceDataManager:
         if not improvements:
             improvements.append("保持本场节奏，继续补充常见问题话术库")
 
-        if not real_dm and not paid_orders:
-            conclusion = ("本场没有真实观众弹幕与真实成交，报告仅保留场次信息。"
-                          "建议下一场提前预热，并引导观众登录后参与互动与下单。")
-        else:
-            conclusion = (
-                f"本场共 {len(real_dm)} 条真实观众弹幕（{question_count} 个提问），"
-                f"真实成交 {len(paid_orders)} 单 / GMV ¥{gmv}，"
-                f"AI 回复覆盖率 {reply_rate:.0f}%。"
-            )
-            if sentiment_counts["positive"] or sentiment_counts["negative"]:
-                conclusion += (f"弹幕情绪正面 {sentiment_counts['positive']} 条、"
-                               f"负面 {sentiment_counts['negative']} 条。")
-
         stats_snapshot = {
             "mentionCount": mention_count,
             "intentScore": int(ds.get("intent_score") or 0),
@@ -6107,6 +6245,69 @@ class LiveCommerceDataManager:
         if not ai_suggestions:
             ai_suggestions.append("本场数据平稳，建议保持现有节奏并继续积累知识库问答。")
 
+        # ---- 复盘结论：经营结果 → 关键问题 → 可执行动作 ----
+        # 旧版结论只是把弹幕/订单数复述一遍，主播看完仍然不知道下一步做什么。
+        # 这里按「成绩 / 关注点 / 商品 / 售后 / 口碑 / 互动 / 下一步」组织，
+        # 每一行都带具体数字或对象，直接可用来做下一场的调整。
+        if not real_dm and not paid_orders:
+            conclusion = (
+                "【结论】本场没有真人互动与成交，现有数据不足以形成经营判断。\n"
+                "【排查】确认观众是否登录、主推商品是否已挂载、开播通知是否触达老客户。\n"
+                "【下一步】1) 开播前用私信或社群通知老客户；2) 开场 5 分钟做登录抽奖/福袋；"
+                "3) 提前准备主推商品的 3 条核心卖点话术。"
+            )
+        else:
+            aov = round(gmv / len(paid_orders), 2) if paid_orders else 0.0
+            concl_lines = [
+                f"【成绩】真人观众 {unique_real} 人、弹幕 {len(real_dm)} 条"
+                f"（提问 {question_count} 个）；成交 {len(paid_orders)} 单 / GMV ¥{gmv}，"
+                f"客单价 ¥{aov:.2f}，支付转化率 {conversion_rate}%。"
+            ]
+            if top_questions:
+                top_q = top_questions[0]
+                concl_lines.append(
+                    f"【关注点】观众问得最多的是「{top_q['question']}」"
+                    f"（{top_q['count']} 次），建议把标准答案放进快捷话术或 AI 知识库。")
+            if products_out and products_out[0]["gmv"] > 0:
+                top = products_out[0]
+                share = round(top["gmv"] / gmv * 100, 1) if gmv else 0.0
+                line = (f"【商品】「{top['name']}」贡献 {share}% 的 GMV"
+                        f"（{top['qty']} 件）")
+                if share >= 70 and len(paid_orders) >= 3:
+                    line += "；单品依赖偏高，建议下一场增加 1-2 个备选主推分散风险"
+                concl_lines.append(line + "。")
+            if refund_summary["count"]:
+                top_refund = (refund_summary["categories"][0]
+                              if refund_summary["categories"] else None)
+                line = (f"【售后】退款 {refund_summary['count']} 单"
+                        f"（退款率 {refund_summary['rate']}%，"
+                        f"¥{refund_summary['amount']}）")
+                if top_refund:
+                    line += f"，主要集中在「{top_refund['label']}」"
+                concl_lines.append(line + "。")
+            if negative_summary["count"]:
+                top_pain = (negative_summary["points"][0]["point"]
+                            if negative_summary["points"] else "综合体验")
+                concl_lines.append(
+                    f"【口碑】差评 {negative_summary['count']} 条，"
+                    f"主要痛点是「{top_pain}」。")
+            barrier_text = ""
+            if barrier_counts:
+                top_key = max(barrier_counts.items(), key=lambda kv: kv[1])[0]
+                top_cat = next((c for c in _BARRIER_CATEGORIES
+                                if c["type"] == top_key), None)
+                if top_cat:
+                    barrier_text = (f"；最大顾虑是「{top_cat['title']}」"
+                                    f"（{barrier_counts[top_key]} 条）")
+            concl_lines.append(
+                f"【互动】AI 回复覆盖率 {reply_rate:.0f}%，"
+                f"未答提问 {unanswered} 个{barrier_text}。")
+            actions = [a.rstrip("。；;，, ") for a in (ai_suggestions or improvements)[:3]]
+            if actions:
+                concl_lines.append("【下一步】" + "；".join(
+                    f"{i + 1}) {a}" for i, a in enumerate(actions)))
+            conclusion = "\n".join(concl_lines)
+
         report = {
             # schemaVersion 4：新增分阶段对比、退款/差评汇总、AI 运营建议。
             "schemaVersion": 4,
@@ -6133,7 +6334,7 @@ class LiveCommerceDataManager:
                 "excludedMockDanmaku": mock_dm_excluded,
                 "excludedMockOrders": mock_orders_excluded,
                 "excludedMockReviews": sum(
-                    1 for r in self.reviews if not is_real_user_id(r.userId)),
+                    1 for r in self.reviews if not is_human_user_id(r.userId)),
             },
             "summary": {
                 "overallGrade": grade,
@@ -7108,7 +7309,10 @@ class LiveCommerceDataManager:
             real: list[ReviewItem] = []
             excluded_mock = 0
             for r in self.reviews:
-                if r.source == "user":
+                # 双保险：来源必须是观众主动提交（source=user），且账号必须是
+                # 真人观众。只有 source 一条判据时，将来若有别的写入路径漏打
+                # source，模拟评价就会混进总结；演示账号也要一并排除。
+                if r.source == "user" and is_human_user_id(r.userId):
                     real.append(r)
                 else:
                     excluded_mock += 1

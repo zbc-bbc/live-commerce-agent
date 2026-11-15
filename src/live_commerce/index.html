@@ -165,25 +165,25 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .lc-mini-btn:hover{border-color:#c7d2fe;color:#2563eb}
 .lc-empty-row{text-align:center;color:#94a3b8;padding:24px;font-size:13px}
 /* ===== 数据分析大屏 ===== */
-.an-hero{background:linear-gradient(135deg,#0b1f4b 0%,#173d8f 42%,#2563eb 100%);border-radius:16px;padding:18px 20px 16px;color:#fff;box-shadow:0 12px 30px rgba(15,42,95,.22);position:relative;overflow:hidden}
-.an-hero:before{content:'';position:absolute;right:-60px;top:-80px;width:260px;height:260px;border-radius:50%;background:rgba(255,255,255,.06)}
+.an-hero{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:18px 20px 16px;color:#0f172a;box-shadow:0 6px 20px rgba(15,23,42,.06);position:relative;overflow:hidden}
+.an-hero:before{content:'';position:absolute;right:-60px;top:-80px;width:260px;height:260px;border-radius:50%;background:rgba(37,99,235,.05)}
 .an-hero-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;position:relative;z-index:1}
-.an-hero-title{font-size:18px;font-weight:700;letter-spacing:.02em}
-.an-hero-sub{font-size:11px;color:#bfdbfe;margin-top:4px}
-.an-hero-badge{font-size:11px;padding:4px 10px;border-radius:999px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);white-space:nowrap}
+.an-hero-title{font-size:18px;font-weight:700;letter-spacing:.02em;color:#0f172a}
+.an-hero-sub{font-size:11px;color:#64748b;margin-top:4px}
+.an-hero-badge{font-size:11px;padding:4px 10px;border-radius:999px;background:#eff6ff;border:1px solid #bfdbfe;color:#2563eb;white-space:nowrap}
 .an-kpi-primary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px;position:relative;z-index:1}
 .an-kpi-secondary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:8px;position:relative;z-index:1}
-.an-kpi{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:9px 12px;min-width:0}
-.an-kpi.primary{background:rgba(255,255,255,.13);border-color:rgba(255,255,255,.2)}
-.an-kpi .k{font-size:11px;color:#bfdbfe;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.an-kpi .v{font-size:23px;font-weight:700;line-height:1.25;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.an-kpi.primary .v{font-size:29px}
-.an-kpi .s{font-size:10px;color:#93c5fd;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.an-kpi{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:9px 12px;min-width:0}
+.an-kpi.primary{background:#fff;border-color:#dbeafe;box-shadow:0 2px 8px rgba(37,99,235,.06)}
+.an-kpi .k{font-size:11px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.an-kpi .v{font-size:23px;font-weight:700;line-height:1.25;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#0f172a}
+.an-kpi.primary .v{font-size:29px;color:#1d4ed8}
+.an-kpi .s{font-size:10px;color:#94a3b8;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .an-hero-charts{display:grid;grid-template-columns:minmax(230px,1fr) 2.2fr;gap:12px;margin-top:12px;position:relative;z-index:1}
-.an-hero-panel{background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:10px 12px}
-.an-panel-title{font-size:12px;font-weight:600;color:#dbeafe;margin-bottom:2px}
-.an-hero-feedback{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;font-size:11px;color:#dbeafe;position:relative;z-index:1}
-.an-hero-feedback .chip{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:4px 10px}
+.an-hero-panel{background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px}
+.an-panel-title{font-size:12px;font-weight:600;color:#334155;margin-bottom:2px}
+.an-hero-feedback{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;font-size:11px;color:#64748b;position:relative;z-index:1}
+.an-hero-feedback .chip{background:#f8fafc;border:1px solid #e2e8f0;border-radius:999px;padding:4px 10px;color:#475569}
 .an-feedback-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
 .an-feedback-stat{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px}
 .an-feedback-stat .v{font-size:22px;font-weight:700;line-height:1.2}
@@ -398,7 +398,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
             <div class="lc-card">
               <div class="lc-card-title" style="justify-content:space-between;align-items:center">
                 <span>👀 当前观看直播观众 <span id="consoleViewerCount" class="lc-tag lc-tag-green" style="margin-left:4px">0</span></span>
-                <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="refreshViewers()">↻ 刷新</button>
+                <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="consoleRefresh()">↻ 刷新</button>
               </div>
               <div id="consoleViewerList" class="lc-scroll" style="max-height:300px">
                 <div class="lc-empty"><div class="icon">👀</div>当前没有观众在线</div>
@@ -563,18 +563,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
     <!-- ============ PAGE 2: 弹幕与AI问答 ============ -->
     <div class="lc-inner" id="page-danmaku">
       <div class="lc-page-hdr">
-        <div><h2>💬 弹幕与AI问答</h2><div class="sub">查看所有弹幕记录和AI回复</div></div>
+        <div><h2>💬 弹幕与AI问答</h2><div class="sub">查看真实观众弹幕和AI回复（已排除 AI 虚拟/模拟/演示账号）</div></div>
         <div style="font-size:12px;color:#64748b">
           弹幕: <strong id="dmDmTotal">0</strong> | AI回复: <strong id="dmRepliedTotal">0</strong>
         </div>
       </div>
       <div class="lc-grid lc-grid-2">
         <div class="lc-card">
-          <div class="lc-card-title">📝 弹幕历史记录</div>
-          <div class="lc-tab" id="dmHistoryTab">
-            <button class="active" data-tab="real" onclick="switchDmHistoryTab('real')">真实观众</button>
-            <button data-tab="sim" onclick="switchDmHistoryTab('sim')">AI虚拟 / 模拟</button>
-            <button data-tab="all" onclick="switchDmHistoryTab('all')">全部</button>
+          <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center">
+            <span>📝 弹幕历史记录（仅真实观众）</span>
+            <span id="dmHistoryCount" style="font-size:11px;font-weight:400;color:#94a3b8"></span>
           </div>
           <div class="lc-scroll" id="dmHistoryList" style="max-height:470px">
             <div class="lc-empty"><div class="icon">💬</div>暂无弹幕记录</div>
@@ -681,7 +679,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
         <div class="lc-card">
           <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
             <span>📄 订单列表</span>
-            <span style="font-size:11px;font-weight:400;color:#94a3b8">仅展示真实注册观众的订单</span>
+            <span style="font-size:11px;font-weight:400;color:#94a3b8">仅展示真实观众订单（已排除演示账号）</span>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0" id="adminOrderFilters"></div>
           <!-- 批量操作条：勾选后启用 -->
@@ -712,7 +710,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 
     <div class="lc-inner" id="page-analysis">
       <div class="lc-page-hdr">
-        <div><h2>📊 商品数据分析</h2><div class="sub">本场直播总览 · 商品转化 · 观众画像</div></div>
+        <div><h2>📊 商品数据分析</h2><div class="sub">本场直播总览 · 商品转化 · 观众画像（仅统计真实注册观众）</div></div>
         <div style="font-size:12px;color:#64748b">
           场次: <strong id="anSessionLabel">--</strong>
           · 更新: <strong id="anUpdateTime">--</strong>
@@ -757,8 +755,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 
       <!-- 3. 地域分布 + 观众标签分布 -->
       <div class="lc-grid lc-grid-2" style="margin-top:16px">
-        <div class="lc-card"><div class="lc-card-title">🗺 观众地域分布（虚拟）</div><div id="audienceRegionChart" style="height:300px"></div></div>
-        <div class="lc-card"><div class="lc-card-title">🏷 观众标签分布（虚拟）</div><div id="audienceTagChart" style="height:300px"></div></div>
+        <div class="lc-card"><div class="lc-card-title">🗺 观众地域分布（模拟数据）</div><div id="audienceRegionChart" style="height:300px"></div></div>
+        <div class="lc-card"><div class="lc-card-title">🏷 观众标签分布（模拟数据）</div><div id="audienceTagChart" style="height:300px"></div></div>
       </div>
 
       <!-- 4. 商品 Top + 本场商品点击与转化 -->
@@ -814,7 +812,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
     <!-- ============ PAGE 4: 用户评价管理 ============ -->
     <div class="lc-inner" id="page-reviews">
       <div class="lc-page-hdr">
-        <div><h2>⭐ 用户评价管理</h2><div class="sub">查看观众提问与AI回复详情</div></div>
+        <div><h2>⭐ 用户评价管理</h2><div class="sub">仅展示真人观众的评价与反馈（已排除演示账号）</div></div>
         <div style="font-size:12px;color:#64748b">
           总数: <strong id="rvTotal">0</strong> 好评: <strong id="rvPos" style="color:#10b981">0</strong> 中评: <strong id="rvNeu" style="color:#d97706">0</strong> 差评: <strong id="rvNeg" style="color:#ef4444">0</strong>
         </div>
@@ -1001,7 +999,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
       <!-- 场次弹幕复盘：选定已归档场次，按提问 / 情绪筛选本场弹幕 -->
       <div class="lc-card" style="margin-top:16px">
         <div class="lc-card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-          <span>💬 场次弹幕复盘</span>
+          <span>💬 场次弹幕复盘（仅真人观众）</span>
           <button class="lc-btn lc-btn-outline lc-btn-sm" onclick="loadDmSessions()">↻ 刷新场次</button>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0">
@@ -1249,7 +1247,9 @@ var S = {
   curPage: 'console',
   aiReplyFilter: 'ai',
   reviewFilter: 'all',
-  dmHistoryTab: 'real',   // 弹幕历史：默认只看真实观众（注册用户）
+  dmHistoryTab: 'real',   // 兼容旧引用；弹幕历史现在固定只显示真人观众
+  realDmList: null,       // 真人观众弹幕历史（后端从更大范围筛出，避免被虚拟弹幕挤掉）
+  demoViewerIdSet: {},    // seed 演示账号 ID 集合，用于前端实时过滤
   // 场次弹幕复盘（复盘页）：已归档场次列表 / 当前选中场次 / 筛选条件
   dmSessions: [],
   dmSessionId: '',
@@ -1328,6 +1328,8 @@ window.__camStream = null;
 window.__camOn = false;
 
 var ws = null, wsR = null, wsA = 0, wsQ = [], LL = {}, wsConnected = false, wsInitDone = false;
+// 断线提示节流：连接掉了以后每次点击都 toast 会刷屏，5 秒内只提示一次
+var wsWarnAt = 0;
 
 // ============================================================
 // WebSocket
@@ -1342,7 +1344,7 @@ function wsConn() {
   try { htok = localStorage.getItem('lc_auth_token') || ''; } catch(e) {}
   ws = new WebSocket(wsProto + '//' + loc.host + '/ws/live-commerce?host_token=' + encodeURIComponent(htok));
   ws.onopen = function() {
-    wsA = 0; wsConnected = true; wsInitDone = true;
+    wsA = 0; wsConnected = true; wsInitDone = true; wsWarnAt = 0;
     document.getElementById('wsStatus').innerHTML = '<span class="lc-dot live"></span>已连接 &#10003;';
     while (wsQ.length && ws.readyState === 1) { ws.send(wsQ.shift()); }
     // 重连后解锁可能因断线而卡在「生成中」的话术按钮
@@ -1363,9 +1365,10 @@ function wsConn() {
       return;
     }
     if (e.code === 1000 || e.code === 1001) {
-      document.getElementById('wsStatus').innerHTML = '<span class="lc-dot idle"></span>连接已断开';
-      console.log('[LiveCommerce] WebSocket正常关闭');
-      return;
+      // 1000/1001 = 服务端正常关闭 / 服务重启（热重载、手动重启都会发 1001）。
+      // 这不是用户主动退出，必须继续重连；旧逻辑直接 return，重启后整页会
+      // 永久停在「连接已断开」，只能手动刷新。
+      console.log('[LiveCommerce] WebSocket 服务端关闭（' + e.code + '），准备重连');
     }
     var msg = '第'+(wsA+1)+'次重连...';
     document.getElementById('wsStatus').innerHTML = '<span class="lc-dot idle"></span>'+msg;
@@ -1388,8 +1391,12 @@ function wsSend(t, d) {
   if (ws && ws.readyState === 1) { ws.send(msg); }
   else {
     wsQ.push(msg);
-    if (wsInitDone && wsA > 0 && wsA % 5 === 0) {
-      toast('消息已排队，等待连接恢复…','warn');
+    // 曾经连上过、现在断了：操作不会静默消失，明确告诉用户「正在重连」。
+    // 首屏连接中（wsInitDone=false）不提示，避免刚打开页面就弹一串。
+    var now = Date.now();
+    if (wsInitDone && !wsConnected && now - wsWarnAt > 5000) {
+      wsWarnAt = now;
+      toast('连接已断开，正在重连…本次操作会在恢复后提交','warn');
     }
   }
 }
@@ -2286,7 +2293,11 @@ function renderProductsPage() {
   }).join('');
 }
 function statCard(label, val, color) {
-  return '<div class="lc-card"><div class="lc-stat"><div class="nv" style="color:'+color+'">'+fmtNum(val)+'</div><div class="lb">'+label+'</div></div></div>';
+  // val 可以是数字，也可以是已经格式化好的字符串（如 "¥19,964"）。
+  // 旧实现一律 fmtNum(val)，把 "¥19,964" 再转数字会得到 NaN → 0，
+  // 订单管理的「累计 GMV」因此一直显示 0。
+  var text = (typeof val === 'string' && val.charAt(0) === '¥') ? val : fmtNum(val);
+  return '<div class="lc-card"><div class="lc-stat"><div class="nv" style="color:'+color+'">'+text+'</div><div class="lb">'+label+'</div></div></div>';
 }
 // 商品管理操作
 function setCurProdFromMgr(pid) { setCurProd(pid); }
@@ -2673,8 +2684,10 @@ function updateConsoleStats() {
   document.getElementById('statOnline').textContent=fmtNum(ls.onlineCount);
   var rate=total?Math.round(replied/total*100):0;
   document.getElementById('statReplyRate').textContent=rate+'%';
-  document.getElementById('dmDmTotal').textContent=fmtNum(total||ls.totalDanmaku);
-  document.getElementById('dmRepliedTotal').textContent=fmtNum(replied||ls.totalAIReplies);
+  // 弹幕页头部按本场真人口径显示（后端 totalDanmaku / totalAIReplies 均已排除
+  // AI 虚拟、模拟观众和演示账号），与「弹幕历史记录」列表同口径。
+  document.getElementById('dmDmTotal').textContent=fmtNum(ls.totalDanmaku||0);
+  document.getElementById('dmRepliedTotal').textContent=fmtNum(ls.totalAIReplies||0);
 }
 function renderTopQuestions() {
   var list=S.hfq;
@@ -2745,61 +2758,30 @@ function renderDmPage() {
   renderTopQuestionsChart();
   updateConsoleStats();
 }
-function switchDmHistoryTab(tab){
-  S.dmHistoryTab=tab;
-  document.querySelectorAll('#dmHistoryTab button').forEach(function(b){
-    b.classList.toggle('active',b.dataset.tab===tab);
-  });
-  renderDmHistoryList();
-}
-function updateDmHistoryTabs(){
-  // 首次调用时按钮里还只有静态文案，借 dataset.label 记下来，之后只换数字
-  var all=S.dmList||[];
-  var n={ real:all.filter(dmIsRealViewer).length, sim:all.filter(dmIsSimulated).length, all:all.length };
-  var nQ=all.filter(function(d){return dmIsRealViewer(d)&&d.isQuestion;}).length;
-  document.querySelectorAll('#dmHistoryTab button').forEach(function(b){
-    var lb=b.dataset.label||b.textContent;
-    b.dataset.label=lb;
-    var t=b.dataset.tab;
-    b.innerHTML=esc(lb)+' <span style="opacity:.7">'+n[t]+'</span>'+
-      (t==='real'&&nQ?' <span style="color:#d97706">问'+nQ+'</span>':'');
-  });
+function realDanmakuHistory(){
+  // 优先用后端单独下发的真人弹幕历史（从更大范围筛出，不会被虚拟弹幕挤掉）；
+  // 老服务端没有该字段时退回从最近 100 条里过滤。
+  var list = Array.isArray(S.realDmList) ? S.realDmList : (S.dmList||[]).filter(dmIsRealViewer);
+  return list.filter(dmIsRealViewer);
 }
 function renderDmHistoryList() {
-  // 弹幕历史记录 = 纯弹幕流水：只展示观众发送的原始弹幕，不内嵌 AI 回复内容。
-  // 真实注册观众（userId 前缀 v_）与 AI 虚拟/模拟弹幕**分开**：运营主要看前者，
-  // 所以默认落在「真实观众」页签上。
-  var all=S.dmList||[];
-  var tab=S.dmHistoryTab||'real';
-  updateDmHistoryTabs();
-  var list = tab==='real' ? all.filter(dmIsRealViewer)
-           : tab==='sim'  ? all.filter(dmIsSimulated)
-           : all;
+  // 弹幕历史记录 = 纯弹幕流水，只展示真人观众发送的原始弹幕：
+  // AI 虚拟弹幕、u001 模拟观众、主播本人、seed 演示账号全部不进来。
+  var list=realDanmakuHistory();
   var el=document.getElementById('dmHistoryList');
+  var cnt=document.getElementById('dmHistoryCount');
+  if(cnt) cnt.textContent=list.length?('共 '+fmtNum(list.length)+' 条'):'';
   if(!el) return;
   if(!list.length){
-    var tip = tab==='real' ? '暂无真实观众弹幕（注册用户发言后才会出现在这里）'
-            : tab==='sim'  ? '暂无 AI 虚拟 / 模拟弹幕'
-            : '暂无弹幕记录';
-    el.innerHTML='<div class="lc-empty"><div class="icon">💬</div>'+tip+'</div>';
+    el.innerHTML='<div class="lc-empty"><div class="icon">💬</div>暂无真实观众弹幕（注册用户发言后才会出现在这里）</div>';
     return;
   }
-  var KIND_TAG={ viewer:['观众','#2563eb'], virtual:['AI','#7c3aed'],
-                 mock:['模拟','#94a3b8'], host:['主播','#ef4444'],
-                 legacy:['老账号','#94a3b8'], system:['系统','#94a3b8'], unknown:['其他','#94a3b8'] };
   el.innerHTML=list.slice().reverse().map(function(d){
-    // 来源标签只在「全部」页签里打：分开的页签里每条都是同一种，打了是噪音
-    var tg='';
-    if(tab==='all'){
-      var k=KIND_TAG[danmakuKind(d)]||KIND_TAG.unknown;
-      tg='<span style="color:'+k[1]+';font-size:10px;border:1px solid '+k[1]+
-         ';border-radius:3px;padding:0 3px;margin-right:4px">'+k[0]+'</span>';
-    }
     // 提问标记：注册用户提的问题是运营最关心的，单独标出来
     var q=d.isQuestion?'<span style="color:#d97706;font-weight:600;margin-right:4px">问</span>':'';
     return '<div class="lc-dm-item">'+
       '<span style="font-weight:600;color:#1e293b;font-size:11px">'+esc(d.userName||'用户')+'</span> '+
-      tg+q+
+      q+
       '<span style="color:#475569">'+esc(d.content)+'</span>'+
       '<span style="float:right;color:#cbd5e1;font-size:10px">'+fmtTime(d.timestamp)+'</span>'+
     '</div>';
@@ -2884,8 +2866,10 @@ function renderDmSessions(sessions){
   if(!cur || !S.dmSessions.some(function(s){return s.sessionId===cur})) cur=S.dmSessions[0].sessionId;
   S.dmSessionId=cur;
   sel.innerHTML=S.dmSessions.map(function(s){
+    // human 是排除演示账号后的真人弹幕数；旧归档没有该字段时退回 real。
+    var humanN = (s.human!=null?s.human:s.real)||0;
     return '<option value="'+esc(s.sessionId)+'"'+(s.sessionId===cur?' selected':'')+'>'+
-      esc(sessionOptionLabel(s))+'（'+fmtNum(s.total||0)+'条）</option>';
+      esc(sessionShortLabel(s))+' · 真实观众 '+fmtNum(humanN)+' 条</option>';
   }).join('');
   selectDmSession(cur);
 }
@@ -2897,7 +2881,8 @@ function populateHfqSessionSelect(){
   var html='<option value="">本场（直播中）</option>';
   (S.dmSessions||[]).forEach(function(s){
     html+='<option value="'+esc(s.sessionId)+'">'+
-      esc(sessionOptionLabel(s)+' · 真实弹幕 '+fmtNum(s.real||0)+' 条')+'</option>';
+      esc(sessionShortLabel(s)+' · 真实弹幕 '+
+          fmtNum((s.human!=null?s.human:s.real)||0)+' 条')+'</option>';
   });
   sel.innerHTML=html;
   var exists=cur && (S.dmSessions||[]).some(function(s){return s.sessionId===cur});
@@ -2942,11 +2927,13 @@ function renderDmSessionResult(d){
   var fname={all:'全部',question:'提问',emotion:'有情绪',positive:'正面',negative:'负面',neutral:'中性'}[f]||'全部';
   var kw=S.dmSessionKeyword?(' · 关键词「'+esc(S.dmSessionKeyword)+'」'):'';
   if(meta){
-    meta.innerHTML='<strong>'+esc(sessionDisplayTitle(s))+'</strong>'+
+    // counts 由后端按「真人观众」重新统计（同时过滤掉 AI/模拟/主播/演示账号），
+    // 不再用归档时的全量 meta 数字，避免列表和头部口径对不上。
+    meta.innerHTML='<strong>'+esc(sessionShortLabel(s))+'</strong>'+
       ' · '+fmtTime(s.startTime)+' ~ '+fmtTime(s.endTime)+
-      ' · 共 <strong>'+fmtNum(s.total||0)+'</strong> 条'+
-      '（真实观众 '+fmtNum(s.real||0)+'，提问 '+fmtNum(s.question||0)+
-      '，正面 '+fmtNum(s.positive||0)+'，负面 '+fmtNum(s.negative||0)+'）'+
+      ' · 真实观众弹幕 <strong>'+fmtNum(c.total||0)+'</strong> 条'+
+      '（提问 '+fmtNum(c.question||0)+
+      '，正面 '+fmtNum(c.positive||0)+'，负面 '+fmtNum(c.negative||0)+'）'+
       ' · 当前筛选：<strong>'+esc(fname)+'</strong>'+kw+
       '<span style="margin-left:8px;color:#94a3b8">场次ID：'+esc(s.sessionId||'')+'</span>';
   }
@@ -3021,7 +3008,9 @@ function renderAnalysisHeroKpis(){
   var clicks = Number(lr.clickCount)||0;
   var clickUsers = Number(lr.clickViewerCount)||0;
   var conv = Number(lr.clickToOrderRate)||0;
-  var online = Number(ls.onlineCount)||0;
+  // 分析页只算真实用户：onlineCount 含「模拟热度基数」，这里改用后端单独下发的
+  // realOnlineCount；老服务端没有该字段时退回 onlineCount（但不虚构基数）。
+  var online = Number(ls.realOnlineCount!=null?ls.realOnlineCount:ls.onlineCount)||0;
   var duration = Number(ls.liveDuration)||0;
   var dm = Number(ls.totalDanmaku)||0;
   var inquiries = Number(st.inquiryCount!=null?st.inquiryCount:ls.totalPrivateMessages)||0;
@@ -3034,7 +3023,7 @@ function renderAnalysisHeroKpis(){
     anKpiHtml('本场 GMV','¥'+fmtNum(gmv),'本场成交',true)+
     anKpiHtml('成交订单',fmtNum(paid),'已支付',true)+
     anKpiHtml('点击→下单',conv+'%','点击人数 '+fmtNum(clickUsers),true)+
-    anKpiHtml('实时在线',fmtNum(online),'当前直播间',true);
+    anKpiHtml('实时在线',fmtNum(online),'真实观众',true);
   var s=document.getElementById('anKpiSecondary');
   if(s) s.innerHTML=
     anKpiHtml('直播时长',anDurationText(duration),'本场',false)+
@@ -3049,7 +3038,8 @@ function renderAnalysisHeroKpis(){
   var sub=document.getElementById('anHeroSub');
   if(sub){
     if(ls.startTime){
-      sub.textContent='场次 '+(ls.sessionId||'').slice(-10)+' · 开播 '+fmtTime(ls.startTime)+' · 已播 '+anDurationText(duration);
+      sub.textContent='场次 '+(ls.sessionId||'').slice(-10)+' · 开播 '+fmtTime(ls.startTime)+' · 已播 '+anDurationText(duration)+
+        (ls.status==='ended'?' · 本场已结束，数据保留至下次开播':'');
     }else{
       sub.textContent='未开播，暂无本场数据';
     }
@@ -3083,7 +3073,7 @@ function renderAnalysisTrendChart(){
     var sid=S.liveStatus.sessionId||'';
     if(!S.liveStatus.startTime && !(S.sessionOrders||[]).length){
       if(window.__anTrendChart){try{window.__anTrendChart.dispose()}catch(e){}window.__anTrendChart=null;}
-      el.innerHTML='<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#93c5fd;font-size:12px">未开播，暂无本场互动/成交趋势</div>';
+      el.innerHTML='<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:12px">未开播，暂无本场互动/成交趋势</div>';
       return;
     }
     var items=[];
@@ -3098,7 +3088,7 @@ function renderAnalysisTrendChart(){
     });
     if(!items.length){
       if(window.__anTrendChart){try{window.__anTrendChart.dispose()}catch(e){}window.__anTrendChart=null;}
-      el.innerHTML='<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#93c5fd;font-size:12px">暂无本场互动/成交数据</div>';
+      el.innerHTML='<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:12px">暂无本场互动/成交数据</div>';
       return;
     }
     var times=items.map(function(x){return x.t.getTime();});
@@ -3128,20 +3118,20 @@ function renderAnalysisTrendChart(){
     ch.setOption({
       backgroundColor:'transparent',
       tooltip:{trigger:'axis'},
-      legend:{bottom:0,textStyle:{color:'#bfdbfe',fontSize:10}},
+      legend:{bottom:0,textStyle:{color:'#64748b',fontSize:10}},
       grid:{left:38,right:44,top:18,bottom:38},
-      xAxis:{type:'category',data:labels,axisLabel:{color:'#bfdbfe',fontSize:9},
-        axisLine:{lineStyle:{color:'rgba(255,255,255,.25)'}}},
+      xAxis:{type:'category',data:labels,axisLabel:{color:'#64748b',fontSize:9},
+        axisLine:{lineStyle:{color:'#e2e8f0'}}},
       yAxis:[
-        {type:'value',name:'条/单',nameTextStyle:{color:'#93c5fd',fontSize:9},
-         axisLabel:{color:'#bfdbfe',fontSize:9},splitLine:{lineStyle:{color:'rgba(255,255,255,.08)'}}},
-        {type:'value',name:'GMV',nameTextStyle:{color:'#93c5fd',fontSize:9},
-         axisLabel:{color:'#bfdbfe',fontSize:9},splitLine:{show:false}}
+        {type:'value',name:'条/单',nameTextStyle:{color:'#94a3b8',fontSize:9},
+         axisLabel:{color:'#64748b',fontSize:9},splitLine:{lineStyle:{color:'#eef2f7'}}},
+        {type:'value',name:'GMV',nameTextStyle:{color:'#94a3b8',fontSize:9},
+         axisLabel:{color:'#64748b',fontSize:9},splitLine:{show:false}}
       ],
       series:[
-        {name:'真实弹幕',type:'bar',data:dm,itemStyle:{color:'rgba(96,165,250,.72)'},barMaxWidth:14},
-        {name:'下单',type:'line',smooth:true,data:ord,itemStyle:{color:'#fbbf24'},lineStyle:{color:'#fbbf24',width:2},symbolSize:4},
-        {name:'GMV',type:'line',yAxisIndex:1,smooth:true,data:gmv,itemStyle:{color:'#34d399'},lineStyle:{color:'#34d399',width:2},areaStyle:{color:'rgba(52,211,153,.12)'},symbolSize:4}
+        {name:'真实弹幕',type:'bar',data:dm,itemStyle:{color:'rgba(37,99,235,.72)'},barMaxWidth:14},
+        {name:'下单',type:'line',smooth:true,data:ord,itemStyle:{color:'#f59e0b'},lineStyle:{color:'#f59e0b',width:2},symbolSize:4},
+        {name:'GMV',type:'line',yAxisIndex:1,smooth:true,data:gmv,itemStyle:{color:'#10b981'},lineStyle:{color:'#10b981',width:2},areaStyle:{color:'rgba(16,185,129,.12)'},symbolSize:4}
       ]
     });
   }catch(e){}
@@ -3341,13 +3331,16 @@ function renderAdminStats(){
   var now=new Date();
   var today=now.getFullYear()+'-'+('0'+(now.getMonth()+1)).slice(-2)+'-'+('0'+now.getDate()).slice(-2);
   var todayCount=list.filter(function(o){return (o.createTime||'').slice(0,10)===today}).length;
+  // GMV 也按同一份真人订单算，否则会出现「真实订单 27 笔、GMV 却含演示单」的对不上。
+  var gmv=list.filter(function(o){return o.status==='paid'||o.status==='shipped'||o.status==='completed';})
+    .reduce(function(a,o){return a+(Number(o.totalAmount)||0);},0);
   el.innerHTML=
     statCard('真实订单', list.length, '#2563eb')+
     statCard('今日订单', todayCount, '#7c3aed')+
     statCard('待付款', pendingPay, '#d97706')+
     statCard('待发货', pendingShip, '#0ea5e9')+
     statCard('退款待审核', pendingRefund, '#dc2626')+
-    statCard('累计 GMV', '¥'+fmtNum((S.orderStats||{}).totalSales||0), '#059669');
+    statCard('累计 GMV', '¥'+fmtNum(gmv), '#059669');
   el.style.gridTemplateColumns='repeat(auto-fit,minmax(120px,1fr))';
 }
 function renderRefundReview(){
@@ -3601,6 +3594,9 @@ function renderLiveRoomProductTable(){
     el.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:16px 0;text-align:center">本场暂无商品点击/成交数据，开播后自动统计</div>';
     return;
   }
+  var lr=S.liveRoomStats||{};
+  var totalClicks=Number(lr.clickCount)||0, totalOrders=Number(lr.orderCount)||0;
+  var overallRate=totalClicks?Math.round(totalOrders/totalClicks*1000)/10:0;
   el.innerHTML='<table class="lc-tbl2"><tr><th>商品</th><th>点击</th><th>下单</th><th>支付</th><th>点击→下单</th><th>件数</th><th>GMV</th></tr>'+
     list.slice(0,20).map(function(r){
       var rate=r.clicks?Math.round((Number(r.orderCount)||0)/r.clicks*1000)/10:0;
@@ -3615,7 +3611,14 @@ function renderLiveRoomProductTable(){
           '<span style="font-size:10px;color:#475569;white-space:nowrap">'+rate+'%</span></div></td>'+
         '<td>'+fmtNum(r.qty||0)+'</td>'+
         '<td style="color:#dc2626;font-weight:600">¥'+fmtNum(r.gmv||0)+'</td></tr>';
-    }).join('')+'</table>';
+    }).join('')+'</table>'+
+    // 说明口径：购买流程本身必须先打开商品详情（一次点击），所以「买过的商品」
+    // 点击数和下单数天然接近 1:1，明细里显示 100% 属于正常；整体率才看全量点击。
+    '<div style="font-size:11px;color:#94a3b8;line-height:1.7;padding:8px 4px 0">'+
+      '本场整体：<b style="color:#475569">'+fmtNum(totalOrders)+' 单 / '+fmtNum(totalClicks)+' 次点击 = '+overallRate+'%</b>'+
+      (Number(lr.clickViewerCount)||0 ? ' · 点击观众 '+fmtNum(lr.clickViewerCount)+' 人' : '')+
+      '<br>购买前打开商品详情会计一次点击，因此「已购商品」的点击→下单通常接近 100%；只浏览未下单的商品显示 0%。'+
+    '</div>';
 }
 function renderLiveRoomStats(){
   renderLiveRoomStatBar();
@@ -3644,7 +3647,12 @@ function danmakuKind(d){
   if(/^u\d+$/.test(uid)) return 'mock';            // 模拟观众
   return 'unknown';
 }
-function dmIsRealViewer(d){ return danmakuKind(d)==='viewer'; }
+function dmIsRealViewer(d){
+  if(danmakuKind(d)!=='viewer') return false;
+  // seed 脚本的演示账号也是 v_ 前缀，但行为是批量造的，不算真人。
+  var uid=(d&&d.userId)||'';
+  return !(S.demoViewerIdSet && S.demoViewerIdSet[uid]);
+}
 // AI 虚拟 + 模拟观众：运营口径上的「非真实」
 function dmIsSimulated(d){ var k=danmakuKind(d); return k==='virtual'||k==='mock'; }
 function orderActBtns(o){
@@ -3732,20 +3740,20 @@ function renderAudienceChart() {
     real.forEach(function(s){counts[s.userLevel]=(counts[s.userLevel]||0)+1});
     chart.setOption({
       backgroundColor:'transparent',
-      textStyle:{color:'#dbeafe'},
+      textStyle:{color:'#334155'},
       tooltip:{trigger:'item',formatter:'{b}: {c} ({d}%)'},
-      legend:{bottom:0,textStyle:{color:'#bfdbfe',fontSize:10}},
+      legend:{bottom:0,textStyle:{color:'#64748b',fontSize:10}},
       series:[{type:'pie',radius:['38%','64%'],center:['50%','46%'],
         data:AUD_LEVELS.filter(function(l){return counts[l[0]]}).map(function(l){
           return {name:l[1],value:counts[l[0]],itemStyle:{color:l[2]}};
         }),
-        label:{fontSize:10,color:'#dbeafe',formatter:'{b}\n{d}%'},
-        labelLine:{lineStyle:{color:'rgba(255,255,255,.35)'}},
-        emphasis:{itemStyle:{shadowBlur:10,shadowColor:'rgba(0,0,0,.25)'}}
+        label:{fontSize:10,color:'#475569',formatter:'{b}\n{d}%'},
+        labelLine:{lineStyle:{color:'#cbd5e1'}},
+        emphasis:{itemStyle:{shadowBlur:10,shadowColor:'rgba(15,23,42,.18)'}}
       }],
       graphic:[
-        {type:'text',left:'center',top:'36%',style:{text:String(real.length),fill:'#fff',fontSize:24,fontWeight:700,textAlign:'center'}},
-        {type:'text',left:'center',top:'47%',style:{text:'真实观众',fill:'#bfdbfe',fontSize:10,textAlign:'center'}}
+        {type:'text',left:'center',top:'36%',style:{text:String(real.length),fill:'#0f172a',fontSize:24,fontWeight:700,textAlign:'center'}},
+        {type:'text',left:'center',top:'47%',style:{text:'真实观众',fill:'#94a3b8',fontSize:10,textAlign:'center'}}
       ]
     });
   }catch(e){}
@@ -3935,7 +3943,7 @@ function renderReport(data) {
     '</div>'+
     '<div class="lc-grid lc-grid-2">'+
       '<div class="lc-card"><div class="lc-card-title">📝 复盘结论</div>'+
-        '<div style="font-size:12px;line-height:1.8;color:#475569">'+esc(sm.conclusion||'')+'</div>'+
+        '<div style="font-size:12px;line-height:1.9;color:#475569;white-space:pre-line">'+esc(sm.conclusion||'')+'</div>'+
         '<div style="margin-top:10px;font-size:12px;line-height:1.9">'+(highlights||'<span style="color:#94a3b8">暂无总结</span>')+'</div>'+
       '</div>'+
       '<div class="lc-card"><div class="lc-card-title">💡 AI 运营建议</div>'+suggestionHtml+
@@ -4157,7 +4165,7 @@ function renderViewerDetail(d) {
   var html = '<div style="display:flex;gap:10px;align-items:center;margin-bottom:12px">'+
       avatarHtml(v.avatar, v.userName, 44)+
       '<div style="flex:1"><div style="font-weight:600;font-size:15px">'+esc(v.userName||'(未命名)')+'</div>'+
-      '<div style="font-size:11px;color:#94a3b8">'+esc(v.userId)+' · 模拟地域 '+esc(v.region||'未知')+'</div>'+
+      '<div style="font-size:11px;color:#94a3b8">'+esc(v.userId)+' · 模拟地域 '+esc(v.region||'其他')+'</div>'+
       '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:4px">'+(tags||'<span class="lc-tag">新客</span>')+'</div></div></div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;margin-bottom:12px">'+
       statBox('余额','¥'+(v.balance||0).toFixed(2))+
@@ -4512,6 +4520,11 @@ on('init_state',function(d){
   if(d.stats) S.stats=d.stats;
   if(d.settings) S.settings=d.settings;
   if(d.allDanmaku) S.dmList=d.allDanmaku;
+  // 演示账号集合要先于任何 dmIsRealViewer 调用写入
+  S.demoViewerIdSet={};
+  (d.demoViewerIds||[]).forEach(function(uid){ S.demoViewerIdSet[uid]=1; });
+  // 真人弹幕历史单独下发（最近 100 条可能被 AI 虚拟弹幕占满）
+  S.realDmList=Array.isArray(d.realDanmaku)?d.realDanmaku:null;
   S.pinnedDm=d.pinnedDanmaku||null;
   if(d.sessions) S.sessions=d.sessions;
   if(d.highFreqQuestions) S.hfq=d.highFreqQuestions;
@@ -4556,14 +4569,34 @@ on('live_started',function(d){
 on('live_paused',function(d){S.liveStatus.status='paused';renderConsoleStatus();toast('直播已暂停','warn');});
 on('live_resumed',function(d){S.liveStatus.status='live';renderConsoleStatus();toast('直播已恢复','success');});
 on('live_ended',function(d){
-  S.liveStatus.status='ended';renderConsoleStatus();loadLiveRoomStats();
+  S.liveStatus.status='ended';
+  if(d&&d.duration!=null)S.liveStatus.liveDuration=Number(d.duration)||0;
+  renderConsoleStatus();
+  // 结束后保留刚结束场次的最终数据（下次开播才清零）：这里主动补拉一次，
+  // 确保 GMV / 订单 / 商品 Top 停在最后成交后的数字，而不是下播前的旧值。
+  loadLiveRoomStats();loadSessionOrders();wsSend('get_order_stats');
   if(d.report){S.lastReport=d.report;if(S.curPage==='report')renderReport(d.report);}
   // 本场弹幕已固化：刷新复盘页的场次下拉，并默认切到刚结束的这一场
   if(d.danmakuSession&&d.danmakuSession.sessionId)S.dmSessionId=d.danmakuSession.sessionId;
   if(S.curPage==='report'){loadDmSessions();loadReportHistory();loadHfq(S.hfqSessionId||'');}
   toast('直播已结束，本场弹幕与复盘报告已归档','success');
 });
-on('start_live_result',function(d){if(!d.success) toast(d.message||'开始失败','err');});
+on('start_live_result',function(d){
+  _autoStartingLive=false;
+  if(!d.success){
+    _pendingConsoleRefresh=false;
+    toast(d.message||'开始失败','err');
+    return;
+  }
+  if(_pendingConsoleRefresh){
+    _pendingConsoleRefresh=false;
+    toast('直播已自动开启','success');
+    // live_started 已经重置并刷新控制台；这里只兜一下观众列表，确保刷新按钮
+    // 确实有可见结果（开播时还没有观众也是 0 人，属正常）。
+    refreshViewers();
+    loadSessionOrders();
+  }
+});
 on('end_live_result',function(d){
   if(d.report){S.lastReport=d.report;if(S.curPage==='report')renderReport(d.report);}
   if(d.danmakuSession&&d.danmakuSession.sessionId)S.dmSessionId=d.danmakuSession.sessionId;
@@ -4573,6 +4606,12 @@ on('end_live_result',function(d){
 on('new_danmaku',function(d){
   var exists=S.dmList.some(function(x){return x.danmakuId===d.danmakuId});
   if(!exists) S.dmList.push(d);
+  // 真人弹幕同步进入独立的历史列表（AI 虚拟/模拟/演示账号不进）。
+  if(!exists && dmIsRealViewer(d)){
+    if(!Array.isArray(S.realDmList)) S.realDmList=(S.dmList||[]).filter(dmIsRealViewer);
+    S.realDmList.push(d);
+    if(S.realDmList.length>500) S.realDmList.splice(0, S.realDmList.length-500);
+  }
   if(S.curPage==='console'){renderDmList();updateConsoleStats();}
   // 弹幕页也要跟着刷：否则停在「弹幕历史记录」页时，新弹幕要切页才看得到
   // （danmaku_reply 一直是这么做的，这里原先漏了）
@@ -4684,8 +4723,10 @@ on('set_product_result',function(d){
 });
 on('status_update',function(d){
   if(d.onlineCount!==undefined) S.liveStatus.onlineCount=d.onlineCount;
+  if(d.realOnlineCount!==undefined) S.liveStatus.realOnlineCount=d.realOnlineCount;
   if(d.liveDuration!==undefined) S.liveStatus.liveDuration=d.liveDuration;
   if(S.curPage==='console') document.getElementById('statOnline').textContent=fmtNum(S.liveStatus.onlineCount);
+  if(S.curPage==='analysis') renderAnalysisHeroKpis();
 });
 on('stats_update',function(d){
   if(d.stats)S.stats=d.stats;
@@ -4693,7 +4734,19 @@ on('stats_update',function(d){
   if(S.curPage==='console')updateConsoleStats();
   if(S.curPage==='analysis')renderAnalysisHeroKpis();
 });
-on('new_review',function(d){if(d.reviewId&&!S.reviews.find(function(r){return r.reviewId===d.reviewId})){S.reviews.push(d);if(S.curPage==='reviews')renderReviewsPage();if(S.curPage==='orders')renderAdminOrders();if(S.curPage==='analysis'){renderAnalysisHeroKpis();renderOrderFeedback();}}});
+on('new_review',function(d){
+  // 运营台的评价页/订单页/分析页都只认真实注册观众（v_）。
+  // 模拟评价只服务观众端商品卡评分，绝不能被实时事件塞回运营台。
+  if(!d||!d.reviewId||typeof d.userId!=='string'||d.userId.indexOf('v_')!==0) return;
+  // 演示账号的评价只服务观众端评分氛围，不进运营台的实时列表。
+  if(d.isDemoViewer) return;
+  if(!S.reviews.find(function(r){return r.reviewId===d.reviewId})){
+    S.reviews.push(d);
+    if(S.curPage==='reviews')renderReviewsPage();
+    if(S.curPage==='orders')renderAdminOrders();
+    if(S.curPage==='analysis'){renderAnalysisHeroKpis();renderOrderFeedback();}
+  }
+});
 // 注意：后端从不广播 high_freq_update，这里原本挂了一个永远不触发的死监听。
 // 高频问题统一走 get_high_freq 请求-响应（见 loadHighFreq / get_high_freq_result）。
 on('get_high_freq_result',function(d){
@@ -5616,7 +5669,7 @@ function renderStageAnalysis(d){
   var stage=(sel&&sel.value)||'all';
   var rows=stage==='all'?all:all.filter(function(s){return s.stage===stage;});
   var hasData=rows.some(function(s){
-    return (Number(s.danmaku)||0)+(Number(s.questions)||0)+(Number(s.orderCount)||0)+(Number(s.paidCount)||0)+(Number(s.gmv)||0)>0;
+    return (Number(s.realDanmaku)||0)+(Number(s.realQuestions)||0)+(Number(s.orderCount)||0)+(Number(s.paidCount)||0)+(Number(s.gmv)||0)>0;
   });
   var t=document.getElementById('stageAnalysisTable');
   if(!hasData){
@@ -5630,10 +5683,10 @@ function renderStageAnalysis(d){
     return;
   }
   if(t){
-    t.innerHTML=rows.length?'<table class="lc-tbl2"><tr><th>阶段</th><th>弹幕</th><th>提问</th><th>互动观众</th><th>下单</th><th>支付</th><th>GMV</th></tr>'+
+    t.innerHTML=rows.length?'<table class="lc-tbl2"><tr><th>阶段</th><th>真实弹幕</th><th>真实提问</th><th>互动观众</th><th>下单</th><th>支付</th><th>GMV</th></tr>'+
       rows.map(function(s){
-        return '<tr><td>'+esc(s.icon||'')+' '+esc(s.label)+'</td><td>'+fmtNum(s.danmaku)+'</td>'+
-          '<td>'+fmtNum(s.questions)+'</td><td>'+fmtNum(s.uniqueViewers)+'</td>'+
+        return '<tr><td>'+esc(s.icon||'')+' '+esc(s.label)+'</td><td>'+fmtNum(s.realDanmaku)+'</td>'+
+          '<td>'+fmtNum(s.realQuestions)+'</td><td>'+fmtNum(s.uniqueViewers)+'</td>'+
           '<td>'+fmtNum(s.orderCount)+'</td><td>'+fmtNum(s.paidCount)+'</td>'+
           '<td style="color:#dc2626;font-weight:600">¥'+fmtNum(s.gmv)+'</td></tr>';
       }).join('')+'</table>':'<div style="color:#94a3b8">暂无阶段数据</div>';
@@ -5647,7 +5700,7 @@ function renderStageAnalysis(d){
         grid:{left:40,right:20,top:20,bottom:58},
         xAxis:{type:'category',data:rows.map(function(s){return s.label;}),axisLabel:{fontSize:9,interval:0,rotate:15}},
         yAxis:{type:'value'},
-        series:[{name:'弹幕',type:'bar',data:rows.map(function(s){return s.danmaku}),itemStyle:{color:'#2563eb'}},
+        series:[{name:'真实弹幕',type:'bar',data:rows.map(function(s){return s.realDanmaku}),itemStyle:{color:'#2563eb'}},
                 {name:'支付单',type:'bar',data:rows.map(function(s){return s.paidCount}),itemStyle:{color:'#10b981'}}]});
     }
     var c2=document.getElementById('stageGmvChart');
@@ -5660,6 +5713,30 @@ function renderStageAnalysis(d){
         series:[{name:'GMV',type:'line',smooth:true,areaStyle:{opacity:.15},data:rows.map(function(s){return s.gmv}),itemStyle:{color:'#f59e0b'}}]});
     }
   }catch(e){}
+}
+// 分析页的刷新入口：未开播时先自动开播，再拉数据。
+// 需求：直播中断/服务重启后，主播在分析页点「刷新」即可继续看数，不必先回
+// 控制台点「开始直播」。开播是主播侧动作，只由这三个刷新按钮触发，页面加载
+// 本身不擅自开播。防重入：连点刷新只发一次 start_live，否则第二次会归档
+// 刚开的场次、把数据清掉。
+var _autoStartingLive = false, _pendingConsoleRefresh = false;
+
+// 直播控制台「当前观看直播观众」卡片的刷新：未开播时先自动开播，再刷新观众列表。
+// 需求背景：服务重启/下播后，主播在控制台点刷新即可继续播，不必再去找「开始直播」。
+// 防重入：连点刷新只发一次 start_live，否则第二次会归档刚开的场次、把本场清空。
+function consoleRefresh(){
+  var st=S.liveStatus.status;
+  if(st!=='live' && st!=='paused'){
+    if(_autoStartingLive) return;
+    _autoStartingLive=true;
+    _pendingConsoleRefresh=true;
+    toast('当前未开播，正在自动开启直播…');
+    wsSend('start_live');
+    // 兜底：服务端没有回包（断线/异常）时解锁，避免按钮永久失效
+    setTimeout(function(){_autoStartingLive=false;}, 10000);
+    return;
+  }
+  refreshViewers();
 }
 function loadConversionFunnel(productId){
   wsSend('get_conversion_funnel',{productId:productId||''});
@@ -5823,9 +5900,35 @@ function sessionDisplayTitle(s){
   if(!when && !sid) return String(s.title||s.sessionId||'');
   return (when||'未知时间')+(sid?' · 场次 '+sid:'');
 }
-function sessionOptionLabel(s){
+// 场次编号：同一天内按开播时间从早到晚编号为 场次1、场次2…
+// 跨天自动重置。下拉选择用它，避免一长串「2026-11-15 19:21:56 · 场次 6232」。
+var __sessionNoKey='', __sessionNoMap={};
+function sessionNumberMap(){
+  var list=S.dmSessions||[];
+  var key=list.map(function(s){return (s.sessionId||'')+'@'+(s.startTime||'');}).join('|');
+  if(key===__sessionNoKey) return __sessionNoMap;
+  var byDay={};
+  list.forEach(function(s){
+    var day=(s.startTime||'').slice(0,10)||'未知日期';
+    (byDay[day]=byDay[day]||[]).push(s);
+  });
+  var map={};
+  Object.keys(byDay).forEach(function(day){
+    byDay[day].sort(function(a,b){
+      return String(a.startTime||'').localeCompare(String(b.startTime||''));
+    });
+    byDay[day].forEach(function(s,i){ map[s.sessionId]={day:day,no:i+1}; });
+  });
+  __sessionNoKey=key; __sessionNoMap=map; return map;
+}
+function sessionShortLabel(s){
+  s=s||{};
+  var m=sessionNumberMap()[s.sessionId]||{};
+  var day=(m.day&&m.day!=='未知日期')?(m.day.slice(5)+' '):'';
+  var no=m.no?('场次'+m.no)
+             :(s.sessionId?('场次 '+String(s.sessionId).slice(-6)):'场次');
   var dur=s.duration?Math.round(s.duration/60)+'分钟':'';
-  return sessionDisplayTitle(s)+(dur?'（'+dur+'）':'');
+  return day+no+(dur?'（'+dur+'）':'');
 }
 function populateCompareSelects(){
   // 场次对比必须用「已归档直播场次」，不能再用私信会话列表（S.sessions）。
@@ -5834,7 +5937,7 @@ function populateCompareSelects(){
   if(!aSel||!bSel) return;
   var prevA=aSel.value, prevB=bSel.value;
   var opts='<option value="">选择场次…</option>'+list.map(function(s){
-    return '<option value="'+esc(s.sessionId)+'">'+esc(sessionOptionLabel(s))+'</option>';
+    return '<option value="'+esc(s.sessionId)+'">'+esc(sessionShortLabel(s))+'</option>';
   }).join('');
   aSel.innerHTML=opts; bSel.innerHTML=opts;
   var has=function(id){ return !!(id && list.some(function(s){return s.sessionId===id;})); };
