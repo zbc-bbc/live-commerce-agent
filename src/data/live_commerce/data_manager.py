@@ -147,40 +147,282 @@ BUILTIN_SENSITIVE_WORDS = [
 
 
 # ============================================================
-# 虚拟弹幕生成模板（按直播阶段和问题类型）
+# 虚拟弹幕生成（必须与「当前讲解商品」对得上）
 # ============================================================
-VIRTUAL_DANMAKU_TEMPLATES = {
-    "price": [
-        "这个多少钱呀？", "现在买有优惠吗？", "能便宜点吗主播？",
-        "什么价格？", "有折扣吗？", "怎么买最划算？",
-        "直播间有专属价吗？", "现在下单多少钱？",
+# 旧版是一组与商品无关的通用问句（如「一斤大概有几个？」），
+# 无论直播间推的是精华液还是吹风机都能发出去，观众一眼就能看出是假的。
+# 现在按商品品类 + 真实价格/规格/库存拼问句：弹幕里要么点名当前商品，
+# 要么引用它真实的规格参数，切换讲解商品后下一条弹幕自然跟着切换。
+# 注：食品的问法在 _food_usage_questions 里按「茶饮 / 即食零食 / 其他」细分，
+# 不放在这张静态表里。
+_CATEGORY_USAGE_QUESTIONS = {
+    "beauty": [
+        "这个{name}怎么用呀？",
+        "{name}敏感肌能用吗？",
+        "{name}每天都能用吗？",
+        "{name}适合什么肤质？",
     ],
-    "spec": [
-        "这个什么规格的？", "一斤大概有几个？", "新鲜吗？",
-        "产地是哪里？", "保质期多久？", "怎么保存？",
-        "适合什么人用？", "多大尺寸？", "什么材质做的？",
+    "tech": [
+        "这个{name}怎么用？",
+        "{name}操作复杂吗？",
+        "{name}新手好上手吗？",
+        "这个{name}质量怎么样？",
     ],
-    "usage": [
-        "怎么做好吃？", "怎么用效果最好？", "使用方法复杂吗？",
-        "需要搭配什么一起用吗？", "多久能看到效果？",
-        "可以天天用吗？", "第一次用需要注意什么？",
+    "home": [
+        "这个{name}怎么清洗？",
+        "{name}尺寸多大？",
+        "这个{name}材质安全吗？",
+        "{name}用起来怎么样？",
     ],
-    "stock": [
-        "还有货吗？", "库存还多吗？", "会不会抢不到？",
-        "什么时候发货？", "发什么快递？", "多久能到货？",
-        "偏远地区包邮吗？",
-    ],
-    "compare": [
-        "和超市买的有什么区别？", "比上次直播的好吗？",
-        "和其他品牌比怎么样？", "这个是新款吗？",
-        "升级了哪些地方？",
-    ],
-    "purchase_intent": [
-        "想买了", "来一单！", "怎么下单？",
-        "在哪拍？", "现在下单什么时候到？", "已经下单了",
-        "下单后能改地址吗？", "可以买多份吗？",
+    "general": [
+        "这个{name}怎么用？",
+        "{name}适合什么人？",
+        "这个{name}质量怎么样？",
     ],
 }
+
+# 品类关键词按顺序匹配：先 food / tech，再 beauty / home。
+# 「个护电器」必须落到 tech，而不是被「个护」误判成美妆。
+_PRODUCT_CATEGORY_KEYWORDS = (
+    ("food", ("食品", "茶饮", "零食", "生鲜", "饮品", "滋补", "粮油")),
+    ("tech", ("数码", "3C", "电器", "家电", "电子", "智能设备")),
+    ("beauty", ("美妆", "护肤", "彩妆", "化妆品", "个护")),
+    ("home", ("家居", "日用", "箱包", "配饰", "家具", "家纺")),
+)
+
+# 规格键的特殊问法：把「适合肤质: 所有肤质」这类参数值拼进自然问句，
+# 避免出现「的适合肤质是所有肤质吗」这种机械句式。
+_SPEC_QUESTION_PATTERNS = {
+    "适合肤质": "{name}适合{value}吗？",
+    "材质": "{name}是{value}材质的吗？",
+    "外套": "{name}的外套是{value}的吗？",
+    "产地": "{name}的产地是{value}吗？",
+    "储藏方式": "{name}要{value}保存吗？",
+    "储存方式": "{name}要{value}保存吗？",
+    "承重": "{name}的承重怎么样？",
+}
+
+
+def classify_product_family(category: str) -> str:
+    """把商品品类归入虚拟弹幕话术家族（food / tech / beauty / home / general）。"""
+    text = category or ""
+    for family, keywords in _PRODUCT_CATEGORY_KEYWORDS:
+        if any(keyword in text for keyword in keywords):
+            return family
+    return "general"
+
+
+def _short_product_name(product: ProductItem) -> str:
+    """弹幕里称呼商品用短名：去掉名称末尾的容量/规格后缀，避免一句话太长。"""
+    name = (product.name or "").strip()
+    # 名称为空或只有数字（测试数据里出现过产品名 "1"）时用中性称呼，
+    # 否则会生成「这个1多少钱」这种观众看不懂的弹幕。
+    if not name or name.isdigit():
+        return "商品"
+    return name.split()[0]
+
+
+def _product_highlight(product: ProductItem) -> str:
+    """取一句商品亮点：优先独立卖点，其次描述首句，最后才用标签。
+
+    商品标签在数据里常被截断成 15 字（如「93%天然乳胶含量，」），直接拼进
+    回复会出现半句话。描述首句是完整句子，适合放进客服话术。
+    """
+    if product.sellingPoints:
+        point = (product.sellingPoints[0] or "").strip()
+        if point:
+            return point
+    description = (product.description or "").strip()
+    if description:
+        first_sentence = re.split(r"[。！？!?]", description, maxsplit=1)[0].strip()
+        if first_sentence:
+            return first_sentence
+    if product.tags:
+        return (product.tags[0] or "").strip().rstrip("，,、；;：:。 ")
+    return ""
+
+
+def _food_usage_questions(name: str, product: ProductItem) -> list[str]:
+    """食品类按「茶饮 / 即食零食 / 其他」细分问法。
+
+    茶的问法不能是「吃起来方便吗」，肉肠也不能问「怎么冲泡」；
+    按商品名挑一组真正说得通的用法问题。
+    """
+    full_name = product.name or ""
+    if any(keyword in full_name for keyword in ("茶", "饮", "冲")):
+        return [
+            f"这个{name}怎么冲泡？",
+            f"{name}能泡几次？",
+            f"{name}味道怎么样？",
+            f"{name}保质期多久？",
+        ]
+    if any(keyword in full_name for keyword in ("肠", "肉", "零食", "即食", "羹")):
+        return [
+            f"这个{name}开袋即食吗？",
+            f"{name}需要加热吗？",
+            f"{name}味道怎么样？",
+            f"{name}保质期多久？",
+        ]
+    return [
+        f"这个{name}味道怎么样？",
+        f"{name}保质期多久？",
+        f"这个{name}怎么保存比较好？",
+    ]
+
+
+def _product_spec_pairs(product: ProductItem) -> list[tuple[str, str]]:
+    """把商品 specs（形如 ``键: 值``）解析成 (键, 值) 列表。"""
+    pairs: list[tuple[str, str]] = []
+    for raw in product.specs:
+        text = (raw or "").strip()
+        if not text:
+            continue
+        for sep in (":", "："):
+            if sep in text:
+                key, _, value = text.partition(sep)
+                key, value = key.strip(), value.strip()
+                if key and value:
+                    pairs.append((key, value))
+                break
+    return pairs
+
+
+def _format_spec_question(name: str, key: str, value: str) -> str:
+    """用商品真实规格拼一个自然问句。"""
+    pattern = _SPEC_QUESTION_PATTERNS.get(key)
+    if pattern:
+        return pattern.format(name=name, value=value)
+    return f"{name}的{key}是{value}，对吗？"
+
+
+# 观众问法 → 商品规格键的同义词。弹幕说「怎么保存」「敏感肌能用吗」时，
+# 要能命中 specs 里的「储藏方式」「适合肤质」，而不是掉到通用套话分支。
+_SPEC_QUERY_ALIASES = {
+    "储藏方式": ("储藏", "储存", "保存"),
+    "储存方式": ("储藏", "储存", "保存"),
+    "保质期": ("保质期", "放多久", "能放多久"),
+    "适合肤质": ("适合肤质", "肤质", "敏感肌"),
+    "材质": ("材质", "材料", "面料", "什么做的"),
+    "尺寸": ("尺寸", "多大", "大小"),
+    "重量": ("重量", "多重"),
+    "容量": ("容量", "装多少"),
+    "功率": ("功率", "瓦数", "多少瓦"),
+    "产地": ("产地", "哪里产", "哪里生产", "哪里的"),
+}
+
+
+def _spec_key_in_content(key: str, content_lower: str) -> bool:
+    """弹幕是否在问这个规格键（含同义问法）。"""
+    if key.lower() in content_lower:
+        return True
+    return any(alias in content_lower for alias in _SPEC_QUERY_ALIASES.get(key, ()))
+
+
+def match_product_spec_reply(content: str, product: ProductItem) -> Optional[str]:
+    """弹幕问到商品真实规格时直接给出该商品的参数值。
+
+    返回 None 表示这条弹幕不是在问规格，交给价格/库存/用法等分支。
+    """
+    # 先把商品名从问句里剔除：像「北欧风台灯-三色温调光」这种名称本身
+    # 含着规格词「色温」，不剔除的话任何一句带商品名的弹幕都会被误判成在问色温。
+    probe = content
+    for name in (product.name, _short_product_name(product)):
+        # 单字名称（如 "1"）不参与剔除：全局替换会把规格值里的数字一起删掉
+        if name and len(name) >= 2:
+            probe = probe.replace(name, "")
+    # 长键优先：「适合肤质」不应被更短的别名抢先命中。
+    pairs = sorted(_product_spec_pairs(product), key=lambda kv: len(kv[0]), reverse=True)
+
+    def _reply_for(key: str, value: str) -> str:
+        name = product.name
+        if key == "适合肤质":
+            return f"这款{name}适合{value}，您可以放心使用~"
+        if key in ("储藏方式", "储存方式"):
+            return f"这款{name}需要{value}保存，亲可以放心囤~"
+        return f"这款{name}的{key}是{value}，亲可以参考一下~"
+
+    # 第一轮只认规格键原文：问「外套」就答外套，不能因为参数值里出现
+    # 「面料」而被同义词抢去答成材质。
+    for key, value in pairs:
+        if key and key.lower() in probe:
+            return _reply_for(key, value)
+    # 第二轮再用同义问法（怎么保存 → 储藏方式、敏感肌 → 适合肤质…）
+    for key, value in pairs:
+        if key and _spec_key_in_content(key, probe):
+            return _reply_for(key, value)
+    return None
+
+
+def build_virtual_danmaku_content(
+    product: ProductItem,
+    question_type: str,
+    rng: random.Random | None = None,
+) -> str:
+    """按**当前讲解商品**生成一条虚拟弹幕。
+
+    素材全部来自该商品真实字段：价格取 price，规格取 specs，库存取 stock，
+    问法按品类区分。这样直播间自动弹幕与正在推送的商品始终是同一件，
+    商品切换后也不会再出现「卖吹风机却问怎么做好吃」的错位。
+    """
+    pick = rng.choice if rng is not None else random.choice
+    name = _short_product_name(product)
+    family = classify_product_family(product.category)
+
+    if question_type == "price":
+        candidates = [
+            f"这个{name}现在多少钱？",
+            f"{name}在直播间的价格是多少？",
+            f"现在买{name}有优惠吗？",
+            f"{name}比平时便宜吗？",
+            f"这个{name}的到手价是多少？",
+        ]
+    elif question_type == "spec":
+        pairs = _product_spec_pairs(product)
+        if pairs:
+            key, value = pick(pairs)
+            candidates = [
+                _format_spec_question(name, key, value),
+                f"这个{name}的{key}能再介绍一下吗？",
+            ]
+        else:
+            candidates = [
+                f"这款{name}是什么规格的？",
+                f"{name}有什么规格可以选？",
+                f"{name}尺寸多大？",
+            ]
+    elif question_type == "stock":
+        candidates = [
+            f"这个{name}还有货吗？",
+            f"{name}库存还多吗？",
+            f"现在下单{name}什么时候发货？",
+            f"{name}发什么快递？",
+        ]
+    elif question_type == "compare":
+        candidates = [
+            f"这个{name}和别家的比怎么样？",
+            f"{name}有什么优势？",
+            f"这个{name}有什么特别的地方？",
+        ]
+    elif question_type == "purchase_intent":
+        candidates = [
+            f"想买这个{name}，怎么下单？",
+            f"这个{name}可以买多份吗？",
+            f"在哪拍{name}？",
+            f"这个{name}我已经下单了！",
+        ]
+    elif family == "food":
+        # 食品再按茶饮 / 即食零食细分，避免「茶礼盒吃起来方便吗」这种问法
+        candidates = _food_usage_questions(name, product)
+    else:
+        # usage / 未知类型：按品类给与商品匹配的问法
+        candidates = [
+            text.format(name=name)
+            for text in _CATEGORY_USAGE_QUESTIONS.get(
+                family, _CATEGORY_USAGE_QUESTIONS["general"]
+            )
+        ]
+    return pick(candidates)
+
 
 # 各阶段虚拟弹幕类型权重
 STAGE_DANMAKU_WEIGHTS = {
@@ -5157,9 +5399,8 @@ class LiveCommerceDataManager:
             weights=list(weights.values()),
             k=1
         )[0]
-        # 根据商品信息个性化弹幕内容
-        templates = VIRTUAL_DANMAKU_TEMPLATES.get(question_type, VIRTUAL_DANMAKU_TEMPLATES["spec"])
-        content = random.choice(templates)
+        # 弹幕内容必须来自当前讲解商品：点名商品，或引用它真实的规格/价格/库存
+        content = build_virtual_danmaku_content(current_product, question_type)
         # 昵称池
         nicknames = self.settings.virtualDanmaku.nicknames or BUILTIN_NICKNAMES
         avatar_urls = self.settings.virtualDanmaku.avatarUrls or []
@@ -5192,9 +5433,13 @@ class LiveCommerceDataManager:
             # 前者是「真实弹幕数」口径，后者由 _recompute_real_stats_locked
             # 从列表直接数出来，两处都改由单一来源产出，避免重复计数。
             self._broadcast("new_danmaku", danmaku.model_dump())
-        # 释放锁后自动AI回复（避免死锁）
+        # 释放锁后自动AI回复（避免死锁）。传入生成弹幕时的商品快照：
+        # 若主播恰好在这一刻切换讲解商品，回复也必须针对观众刚看到的那件，
+        # 不能拿新商品去回答旧弹幕。
         if danmaku_id:
-            self.auto_reply_danmaku(danmaku_id, content, is_real=False)
+            self.auto_reply_danmaku(
+                danmaku_id, content, is_real=False, product=current_product
+            )
 
     def _session_real_danmaku(self) -> list[DanmakuItem]:
         """本场真人观众弹幕（锁内调用，演示账号不计）。"""
@@ -5600,13 +5845,23 @@ class LiveCommerceDataManager:
     # ============================================================
     # AI自动回复逻辑
     # ============================================================
-    def auto_reply_danmaku(self, danmaku_id: str, content: str, is_real: bool = False) -> str:
+    def auto_reply_danmaku(
+        self,
+        danmaku_id: str,
+        content: str,
+        is_real: bool = False,
+        product: Optional[ProductItem] = None,
+    ) -> str:
         """
         根据弹幕内容自动生成回复
         优先匹配预设话术，没有预设时根据商品信息生成
 
         is_real 决定这条问题计入「真实高频问题」还是「虚拟问题」两个平行统计，
         见 record_question 的说明。
+
+        product 是调用方持有的商品快照。虚拟弹幕生成与回复之间，主播可能刚好
+        切换了讲解商品；传入同一件商品才能保证「问的是哪件就答哪件」。不传时
+        才回退到当前讲解商品。
         """
         # 检查是否违规
         is_violation, reason = self.check_sensitive(content)
@@ -5629,8 +5884,10 @@ class LiveCommerceDataManager:
             self.reply_danmaku(danmaku_id, preset.answer)
             return preset.answer
 
-        # 没有预设话术，使用商品信息生成回复
-        product = self.get_current_product()
+        # 没有预设话术，使用商品信息生成回复。
+        # 调用方给了快照就用快照（虚拟弹幕路径），否则取当前讲解商品。
+        if product is None:
+            product = self.get_current_product()
         if not product:
             return ""
 
@@ -5641,54 +5898,90 @@ class LiveCommerceDataManager:
         return reply or ""
 
     def _generate_smart_reply(self, content: str, product: ProductItem) -> str:
-        """智能生成回复（基于规则匹配）"""
+        """智能生成回复（基于规则匹配）。
+
+        回复必须与当前讲解商品对得上：先尝试直接命中商品真实规格
+        （尺寸 / 材质 / 保质期 / 功率……），再按价格、优惠、库存、用法等
+        分支回答。每个分支都点名商品或引用它的真实参数，避免答非所问。
+        """
         content_lower = content.lower()
+        name = product.name
+
+        # 规格直答：弹幕里提到某个真实规格键时，直接回答该商品的参数值，
+        # 不再用「品质很好」这类放之四海皆准的套话。
+        spec_answer = match_product_spec_reply(content_lower, product)
+        if spec_answer:
+            return spec_answer
 
         # 价格相关
-        if any(kw in content_lower for kw in ["多少钱", "价格", "价钱", "售价", "价位", "怎么卖", "什么价"]):
-            return f"这款{product.name}现在直播间专享价仅需{product.price:.0f}元！"
-        # 优惠相关
+        if any(kw in content_lower for kw in [
+            "多少钱", "价格", "价钱", "售价", "价位", "怎么卖", "什么价",
+            "到手价", "多少元",
+        ]):
+            return f"这款{name}现在直播间专享价仅需{product.price:.0f}元！"
+        # 优惠相关：原价与直播间价一致时不能说「原价 X 到手 X」，
+        # 否则弹幕问「比平时便宜吗」会得到一句自相矛盾的答复。
         if any(kw in content_lower for kw in ["优惠", "打折", "折扣", "便宜", "划算", "降价"]):
-            return f"现在下单超级划算！{product.name}原价{product.originalPrice:.0f}元，直播间到手仅{product.price:.0f}元，抓紧机会哟~"
-        # 规格相关
+            if product.originalPrice > product.price + 0.005:
+                return f"现在下单超级划算！{name}原价{product.originalPrice:.0f}元，直播间到手仅{product.price:.0f}元，抓紧机会哟~"
+            return f"{name}直播间价格就是{product.price:.0f}元，和日常价一致，胜在现货速发，喜欢可以直接拍~"
+        # 规格相关（没命中具体规格键时的兜底）
         if any(kw in content_lower for kw in ["规格", "尺寸", "大小", "多重", "容量", "多少克"]):
             specs_str = "、".join(product.specs) if product.specs else "详情请看商品介绍"
-            return f"这款{product.name}的规格是：{specs_str}，亲有什么想了解的可以继续问我哦~"
+            return f"这款{name}的规格是：{specs_str}，亲有什么想了解的可以继续问我哦~"
         # 库存/发货
         if any(kw in content_lower for kw in ["还有货", "库存", "发货", "快递", "物流", "什么时候到"]):
             if product.stock > 100:
-                return f"库存充足！目前还有{product.stock}件，下单后48小时内发货，预计3-5天送达~"
+                return f"库存充足！{name}目前还有{product.stock}件，下单后48小时内发货，预计3-5天送达~"
             else:
-                return f"库存仅剩{product.stock}件，手慢无哦！下单后48小时发货~"
-        # 适用人群
-        if any(kw in content_lower for kw in ["适合", "能用", "可以用", "适合什么人", "谁用"]):
-            return f"{product.name}适合大多数人群使用，具体可以看看商品详情页的介绍，有什么特殊情况可以私信我详细了解~"
+                return f"{name}库存仅剩{product.stock}件，手慢无哦！下单后48小时发货~"
+        # 适用人群 / 肤质
+        if any(kw in content_lower for kw in ["适合", "能用", "可以用", "适合什么人", "谁用", "肤质"]):
+            for key, value in _product_spec_pairs(product):
+                if key in ("适合肤质", "适用人群", "适用"):
+                    return f"这款{name}适合{value}，您可以放心使用~"
+            return f"{name}适合大多数人群使用，具体可以看看商品详情页的介绍，有什么特殊情况可以私信我详细了解~"
         # 产地
         if any(kw in content_lower for kw in ["产地", "哪里出产", "哪里生产", "哪里产", "哪里的"]):
-            for spec in product.specs:
-                if "产地" in spec:
-                    return f"这款{product.name}的{spec}，品质有保障哦~"
-            return f"我们这款{product.name}精选优质原料，品质口碑非常好~"
-        # 品质/质量
-        if any(kw in content_lower for kw in ["质量", "品质", "好不好", "怎么样", "口碑", "评价"]):
-            return f"亲放心，这款{product.name}的品质非常好，很多老客户都在回购，好评率很高！"
-        # 使用/用法
-        if any(kw in content_lower for kw in ["怎么用", "如何使用", "用法", "怎么吃", "怎么操作"]):
+            for key, value in _product_spec_pairs(product):
+                if key == "产地":
+                    return f"这款{name}的产地是{value}，品质有保障哦~"
+            return f"我们这款{name}精选优质原料，品质口碑非常好~"
+        # 品质/质量/与其他商品对比
+        if any(kw in content_lower for kw in [
+            "质量", "品质", "好不好", "怎么样", "口碑", "评价", "区别", "新品",
+            "优势", "特别",
+        ]):
+            point = _product_highlight(product)
+            if point:
+                return f"亲放心，这款{name}的品质非常好：{point}，很多老客户都在回购！"
+            return f"亲放心，这款{name}的品质非常好，很多老客户都在回购，好评率很高！"
+        # 使用/用法/操作
+        if any(kw in content_lower for kw in [
+            "怎么用", "如何使用", "用法", "怎么吃", "怎么操作", "怎么清洗",
+            "怎么洗", "操作", "上手", "吃起来", "冲泡", "怎么泡", "泡几次",
+            "加热", "开袋",
+        ]):
             if product.description:
-                return f"使用很简单哦~{product.description[:60]}如果还有不清楚的可以私信问我！"
-            return f"这款{product.name}使用很简单，按照说明书操作即可，有任何问题随时私信我~"
+                return f"这款{name}：{product.description[:60]}还有不清楚的可以私信问我！"
+            return f"这款{name}使用很简单，按照说明书操作即可，有任何问题随时私信我~"
         # 售后
         if any(kw in content_lower for kw in ["退货", "退款", "保修", "维修", "售后", "坏了"]):
             preset = self.find_matching_preset("售后")
             if preset:
                 return preset.answer
-            return f"亲，关于售后问题您可以私信我，我会给您详细介绍售后政策，请放心购买~"
+            return f"亲，这款{name}的售后问题您可以私信我，我会给您详细介绍售后政策，请放心购买~"
+        # 已下单：不能再让观众「点击小黄车下单」，应转向发货与物流
+        if any(kw in content_lower for kw in ["已经下单", "已下单", "已经拍了", "已拍"]):
+            return f"感谢支持！{name}会尽快为您安排发货，物流进度可以在订单里查看~"
         # 一般意向
-        if any(kw in content_lower for kw in ["买", "下单", "拍下", "来一单", "想要", "心动了"]):
-            return f"点击下方小黄车即可下单！现在购买还能享受直播间专属优惠，不要错过哦~"
+        if any(kw in content_lower for kw in [
+            "买", "下单", "拍下", "来一单", "想要", "心动了", "拍了", "在哪拍",
+        ]):
+            return f"喜欢{name}的话，点击下方小黄车就能下单！现在还有直播间专属优惠，不要错过哦~"
 
         # 通用兜底回复
-        return f"亲，这款{product.name}现在直播间专享价{product.price:.0f}元，品质非常好，有什么想了解的可以继续问我哦~"
+        return f"亲，这款{name}现在直播间专享价{product.price:.0f}元，品质非常好，有什么想了解的可以继续问我哦~"
 
     def auto_reply_private(self, user_id: str, content: str) -> str:
         """私信自动回复"""
